@@ -27,8 +27,9 @@ class mongodbclient:
 
     def add(self, collection_name, dictionary: dict):
         try:
-            self.database[collection_name].insert_one(dictionary)
-            return f"customer was added to the database {dictionary}"
+            result = self.database[collection_name].insert_one(dictionary)
+            logging.info(f"document inserted withh id:{result.inserted_id}")
+            return result.inserted_id
         except Exception as e:
             logging.error("cannot add customer details in database")
             raise Exception(e)
