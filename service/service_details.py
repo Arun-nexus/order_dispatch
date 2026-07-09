@@ -46,15 +46,12 @@ class service_detail(mongodbclient):
             logging.error("service was not able to delete!")
             raise Exception(e)
         
-    def update_service_status(self,service_status,reason:str,collection_name,query,image):
+    def update_service_status(self,service_status,reason:str,collection_name,query,image,spare_parts_used:bool,manager_approval):
         try:
-            
-            if service_status == "rejected":
-                if not reason:
-                    return "reason was not provided"
-            if service_status == "completed":
-                if not image:
-                    return "image was not provided of using spare parts"
+            if service_status == "rejected" and not reason:
+                return "reason was not provided"
+            if not manager_approval and service_status == "completed" and spare_parts_used and not image:    
+                return "image was not provided of using spare parts please get the approval by the inventory manager of returning the product!"
             service = super().update_data(collection_name=collection_name,update_values=reason,query=query)
             logging.info("service status were updated!")
             return service
@@ -71,10 +68,4 @@ class service_detail(mongodbclient):
             logging.error("fetching service records failed!")
             raise Exception(e)
 
-    def spare_parts_return(self):
-        try:
-            
-        except Exception as e:
-            logging.error("spare parts return confirmation was not available!")
-            raise Exception(e)
         
