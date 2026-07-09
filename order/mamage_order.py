@@ -40,8 +40,6 @@ class order_manager(mongodbclient):
             logging.error("data fetching was failed!")
             raise Exception(e) 
     
-
-    
     def delete(self,collection_name, query, many):
         try:
             deleted_order = super().delete_data(collection_name=collection_name,query=query,many=many)
@@ -66,6 +64,7 @@ class order_manager(mongodbclient):
         except Exception as e:
             logging.error("delivery confirmation failed!")
             raise Exception(e)
+        
     def order_tracking(self,collection_name:str):
         try:
             dataset = self.get_data(collection_name=collection_name,query={"oreder_id:self.order_id"})
