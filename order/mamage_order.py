@@ -67,10 +67,10 @@ class order_manager(mongodbclient):
         
     def order_tracking(self,collection_name:str):
         try:
-            dataset = self.get_data(collection_name=collection_name,query={"oreder_id:self.order_id"})
+            dataset = self.get_data(collection_name=collection_name,query={"order_id:self.order_id"})
             if not dataset:
                 raise Exception(f"no order found with id{self.order_id}")
-            return dataset[0]
+            return dataset["status"]
         except Exception as e:
             logging.error("order tracking failed!")
             raise Exception(e)            

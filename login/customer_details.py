@@ -3,6 +3,7 @@ from mongo.mongodb_connection import mongodbclient
 import uuid
 import enum
 
+class 
 
 class login_role(str, enum.Enum):
     admin = "admin"

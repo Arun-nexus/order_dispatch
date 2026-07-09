@@ -68,7 +68,7 @@ async def login_page(request: LoginRequest):
         logging.error("login was not successful")
         raise HTTPException(status_code=500, detail="login failed")
 
-
+#fastapi middleware only accessible for admin
 @app.post("/create_account/")
 async def create_account(request: CreateAccountRequest):
     

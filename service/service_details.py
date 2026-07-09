@@ -12,15 +12,17 @@ class service_detail(mongodbclient):
         self.serial_no = serial_no
         self.spare_parts = ""
 
-    def add_service(self,purchase_date:str,issue:str,image:np.array,video:np.array,collection_name:str,spare_parts=str,status="active"):
-        self.spare_parts = spare_parts
+    def add_service(self,technician_id,purchase_date:str,issue:str,image:np.array,video:np.array,collection_name:str,spare_parts=str,status="active"):
+        
         try:
+            self.spare_parts = spare_parts
             self.status = status
             new_service = {
+                "technician alloted":technician_id,
                 "service_id":uuid.uuid4(),
                 "product_id":self.product_id,
                 "serial_no":self.serial_no,
-                "purchase_date":purchase_date,
+                "purchase_date": purchase_date,
                 "issue":issue,
                 "image":image,
                 "video":video,
@@ -67,5 +69,6 @@ class service_detail(mongodbclient):
         except Exception as e:
             logging.error("fetching service records failed!")
             raise Exception(e)
-
-        
+    
+    def technician_location(self,user_id,):
+        pass
