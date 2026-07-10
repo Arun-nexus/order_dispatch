@@ -5,19 +5,19 @@ from logger import logging
 from configuration import load_params
 from order.mamage_order import order_manager
 from mongo.mongodb_connection import mongodbclient
-
+from service.service_details import service_detail
 app = FastAPI()
 params = load_params()
 
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
+SERVICE_COLLECTION = params["service_collection_name"]
 
 class LoginRequest(BaseModel):
     username: str
     password: str
     role: str
-
 
 class CreateAccountRequest(BaseModel):
     username: str
@@ -30,6 +30,16 @@ class CreateAccountRequest(BaseModel):
     mobile_no: str
     role: str
 
+class ServiceRequest(BaseModel):
+    product_id: str
+    serial_no : str
+    technician_id : str
+    purchase_date : str
+    issue : str
+    image : str
+    video : str
+    spare_parts :str
+
 class CreateOrderRequest(BaseModel):
     product_name : str
     product_id :str
@@ -39,6 +49,8 @@ class CreateOrderRequest(BaseModel):
     
 class OrderStatusRequest(BaseModel):
     order_id : str
+class ServiceStatusRequest(BaseModel):
+    service_id : str
 
 @app.post("/login/")
 async def login_page(request: LoginRequest):
@@ -154,4 +166,43 @@ async def confirm_delivery(request : OrderStatusRequest):
     except Exception as e:
         logging.error("delivery confimation failed")
         raise HTTPException(status_code=500,detail="delivery confirmation failed")
+
+@app.post("/order/delete")
+async def delete_order(request:OrderStatusRequest):
+    try:
+        db = mongodbclient()
+        db.delete_data(collection_name = ORDERS_COLLECTION,query={"order_id":request.order_id})
+        return {"message":"order_deleted","order_id":request.order_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("order deletion failed") 
+        raise HTTPException(status_code=500,detail="order deletion failed!")
     
+@app.post("/services/create")
+async def create_sevice(request:ServiceRequest):
+    
+    try:
+        service = service_detail(product_id = request.product_id,serail_no = request.serial_no)
+        service_detail.add_service(collection_name=SERVICE_COLLECTION,purchase_date=request.purchase_date,issue=request.issue,image=request.image,video=request.video,technician_id=request.technician_id,)
+        logging.info(f"service creation was successfull with service_id{service.service_id}!")
+        return {"message":"service creation was successful!","service_id":{service.service_id}}
+    
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logging.error("service creation failed!")
+        raise HTTPException(status_code=500,detail= "service cannot be created!")
+    
+@app.post("/service/delete")
+async def delete_service(request:ServiceStatusRequest):
+    try:
+        db = mongodbclient()
+        db.delete_data(collection_name=SERVICE_COLLECTION,query=request.service_id)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("service deletion was failed!")
+        raise HTTPException(status_code=500,detail="service cannot be deleted")
