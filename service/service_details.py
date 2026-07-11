@@ -4,10 +4,10 @@ import uuid
 
 
 class service_detail(mongodbclient):
+    super().__init__()
 
     def __init__(self, product_id: str, serial_no: str, status="active"):
-        super().__init__()
-
+        
         self.product_id = product_id
         self.serial_no = serial_no
         self.status = status

@@ -12,7 +12,7 @@ class login_role(str, enum.Enum):
 
 
 class login(mongodbclient):
-
+    super().__init__()
     def __init__(self, username: str, name:str, phone: int, email: str, company_name: str,gst_number: str, role: str, password: str):
 
         if role not in [r.value for r in login_role]:

@@ -6,6 +6,7 @@ from configuration import load_params
 from order.mamage_order import order_manager
 from mongo.mongodb_connection import mongodbclient
 from service.service_details import service_detail
+
 app = FastAPI()
 params = load_params()
 
@@ -56,7 +57,7 @@ class ServiceStatusRequest(BaseModel):
 async def login_page(request: LoginRequest):
     
     try:
-        db = mongodbclient()
+        db = login()
         dataset = db.get_data(ACCOUNTS_COLLECTION,query={"username":request.username})
 
 
@@ -91,7 +92,7 @@ async def create_account(request: CreateAccountRequest):
         if len(request.mobile_no) != 10 or not request.mobile_no.isdigit():
             raise HTTPException(status_code=400, detail="make sure mobile no is valid")
 
-        db = mongodbclient()
+        db = order_manager()
         existing_user = db.get_data(ACCOUNTS_COLLECTION,query= {"username":request.username})
 
         if existing_user:
@@ -137,8 +138,8 @@ async def create_order(request:CreateOrderRequest):
 async def track_order(order_id : str):
     
     try:
-        db = mongodbclient()
-        dataset = db.get_data(ORDERS_COLLECTION,query={"order_id": order_id})
+        db = order_manager()
+        dataset = db.order_tracking(ORDERS_COLLECTION,query={"order_id": order_id})
 
         if not dataset:
             raise HTTPException(status_code=404,detail= "no order found with this order_id")
@@ -148,12 +149,12 @@ async def track_order(order_id : str):
         logging.error("order tracking failed!")
         raise HTTPException(status_code= 500 , detail="order tracking failed!")
     
-@app.post("/confirm delivery/")
+@app.post("/confirm delivery/{order_id}")
 async def confirm_delivery(request : OrderStatusRequest):
     
     try:
-        db = mongodbclient()
-        result = db.update_data(ORDERS_COLLECTION,query={"order_id":request.order_id},update_values = {"status": "delivered"})
+        db = order_manager()
+        result = db.delivery_confirmation(ORDERS_COLLECTION,query={"order_id":request.order_id},update_values = {"status": "delivered"})
 
         if result.matched_count == 0:
             raise HTTPException(status_code=404,detail="no order found with this id")
@@ -167,7 +168,7 @@ async def confirm_delivery(request : OrderStatusRequest):
         logging.error("delivery confimation failed")
         raise HTTPException(status_code=500,detail="delivery confirmation failed")
 
-@app.post("/order/delete")
+@app.post("/order/delete/{order_id}")
 async def delete_order(request:OrderStatusRequest):
     try:
         db = mongodbclient()
@@ -195,14 +196,17 @@ async def create_sevice(request:ServiceRequest):
         logging.error("service creation failed!")
         raise HTTPException(status_code=500,detail= "service cannot be created!")
     
-@app.post("/service/delete")
+@app.post("/service/delete/{service_id}")
 async def delete_service(request:ServiceStatusRequest):
     try:
-        db = mongodbclient()
-        db.delete_data(collection_name=SERVICE_COLLECTION,query=request.service_id)
-        
+        db = service_detail()
+        deleted_file = db.delete_data(collection_name=SERVICE_COLLECTION,query=request.service_id)
+        logging.info(f"service was deleted successfully service id {request.service_id}")
+        return deleted_file
     except HTTPException:
         raise
     except Exception as e:
         logging.error("service deletion was failed!")
         raise HTTPException(status_code=500,detail="service cannot be deleted")
+
+@app.post("/service/update/{service_id}")

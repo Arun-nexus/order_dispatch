@@ -3,8 +3,8 @@ from logger import logging
 import uuid
 
 class order_manager(mongodbclient):
-
-    def __init__(self,product_name,product_id,company_name,gst_number,payment_mode):
+    super().__init__()
+    def __init__(self,product_name,product_id,company_name,gst_number,payment_mode,price,tax_rate,discount):
         
         self.product_name = product_name
         self.order_id = uuid.uuid4()
@@ -13,6 +13,9 @@ class order_manager(mongodbclient):
         self.gst_number = gst_number
         self.payment_mode = payment_mode
         self.status = "placed"
+        self.price = price
+        self.tax_rate = tax_rate
+        self.discount = discount
 
     def add(self,collection_name):
         try:
@@ -23,7 +26,11 @@ class order_manager(mongodbclient):
             "company_name": self.company_name,
             "gst_number": self.gst_number,
             "payment mode": self.payment_mode,
-            "status": self.status
+            "status": self.status,
+            "price": self.price,
+            "tax_rate": self.tax_rate,
+            "discount":self.discount,
+            "total_mrp": self.price + (self.tax_rate * self.price/100) - self.discount
         }
             result = super().add(collection_name=collection_name,dictionary=order_dict)
             return result
@@ -56,18 +63,18 @@ class order_manager(mongodbclient):
             logging.error("data updation was failed!")
             raise Exception(e)
     
-    def delivery_confirmation(self,collection_name):
+    def delivery_confirmation(self,collection_name,order_id):
         try:
-            result = self.update(collection_name= collection_name , query = {"order_id" :self.order_id}, update_values= {"status":"delivered"})
+            result = self.update(collection_name= collection_name , query = {"order_id" :order_id}, update_values= {"status":"delivered"})
             logging.info(f"order{self.order_id} marked as delivered")
             return result
         except Exception as e:
             logging.error("delivery confirmation failed!")
             raise Exception(e)
         
-    def order_tracking(self,collection_name:str):
+    def order_tracking(self,collection_name:str,order_id):
         try:
-            dataset = self.get_data(collection_name=collection_name,query={"order_id:self.order_id"})
+            dataset = self.get_data(collection_name=collection_name,query={"order_id":order_id})
             if not dataset:
                 raise Exception(f"no order found with id{self.order_id}")
             return dataset["status"]
