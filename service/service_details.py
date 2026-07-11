@@ -79,13 +79,10 @@ class service_detail(mongodbclient):
             logging.error("service completion was failed!")
             raise Exception(e)
 
-    def manager_confirm_return(self, collection_name, query):
-
+    def get_data(self, collection_name, query=None, projection=None):
         try:
-            update_values = {"manager_confirmed_return": True}
-            result = super().update_data(collection_name=collection_name,update_values=update_values, query=query)
-            logging.info("inventory manager confirmed part return")
-            return result
+            dataset = super().get_data(collection_name, query, projection)
+            return dataset
         except Exception as e:
-            logging.error("manager confirmation failed!")
-            raise Exception(e)
+            logging.error("data fetching was failed!")
+            raise Exception(e) 

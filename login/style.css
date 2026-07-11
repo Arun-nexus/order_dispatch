@@ -23,7 +23,8 @@ body{
     width :150vh;
     border-radius: 20px;
     overflow:hidden;
-    background:white;
+    background: url("left_background.jpg");
+    background-size: contain;
     box-shadow: 0 15px 40px rgba(0,0,0,.18);
 }
 .left-panel{
@@ -39,13 +40,13 @@ body{
     
 }
 .left-panel h1{
-    font-size: 50px;
+    font-size: 42px;
 }
 .overlay{
     position:absolute;
     inset:0;
     background:linear-gradient(
-        135deg,rgba(57, 127, 231, 0.65),rgba(37, 89, 145, 0.4)
+        135deg,rgba(239, 239, 240, 0.65),rgba(238, 242, 245, 0.4)
     );
 
 
@@ -59,10 +60,12 @@ body{
     font-size:42px;
     font-weight: 700;
     letter-spacing: 2px;
+    color: #4280bd;
 }
 .logo{
-    width:85px;
+    width:150px;
     margin-bottom: 20px;
+    margin-left: -10px;
 }
 
 .company p{
@@ -82,7 +85,7 @@ body{
     align-items: center;
     gap:18px;
     margin-bottom: 30px;
-    color: white;
+    color:#23588d;
 }
 
 .feature i{
@@ -111,7 +114,7 @@ body{
     display : flex;
     justify-content: center;
     align-items: center;
-    background: #f8fcfc;
+    background: #265c9f;
 }
 .login-card{
     width:470px;

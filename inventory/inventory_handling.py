@@ -32,6 +32,7 @@ class inventory_manager(mongodbclient):
         except Exception as e:
             logging.error("adding product to inventory was failed!")
             raise Exception(e)
+        
     def update(self,collection_name,query,updated_value):
         try:
             data = super().update_data(collection_name = collection_name,query=query,update_values=updated_value)
