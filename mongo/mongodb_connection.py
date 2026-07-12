@@ -6,16 +6,19 @@ from logger import logging
 
 ca = certifi.where()
 
+
 class mongodbclient:
     _client = None
+
     def __init__(self):
         try:
             if mongodbclient._client is None:
                 mongodb_url = os.getenv("connection_url")
                 if mongodb_url is None:
-                    raise Exception("in environment variables mongo_db_url is not set")
+                    raise Exception("in environment variables connection_url is not set")
 
                 mongodbclient._client = pymongo.MongoClient(mongodb_url, tlsCAFile=ca)
+
             self.client = mongodbclient._client
             self.database = self.client[os.getenv("database_name")]
             self.database_name = os.getenv("database_name")
@@ -28,10 +31,10 @@ class mongodbclient:
     def add(self, collection_name, dictionary: dict):
         try:
             result = self.database[collection_name].insert_one(dictionary)
-            logging.info(f"document inserted withh id:{result.inserted_id}")
+            logging.info(f"document inserted with id: {result.inserted_id}")
             return result.inserted_id
         except Exception as e:
-            logging.error("cannot add customer details in database")
+            logging.error("cannot add document in database")
             raise Exception(e)
 
     def get_data(self, collection_name, query=None, projection=None):
@@ -69,6 +72,7 @@ class mongodbclient:
                 result = collection.delete_many(query)
             else:
                 result = collection.delete_one(query)
+
             logging.info(f"deleted count: {result.deleted_count}")
             return result
 

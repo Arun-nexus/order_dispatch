@@ -12,8 +12,11 @@ class login_role(str, enum.Enum):
 
 
 class login(mongodbclient):
-    super().__init__()
-    def __init__(self, username: str, name:str, phone: int, email: str, company_name: str,gst_number: str, role: str, password: str):
+
+    def __init__(self, username: str, name: str, phone: str, email: str,
+                 company_name: str, gst_number: str, role: str, password: str):
+
+        super().__init__()  # yahan hona chahiye -- __init__ ke andar, class body mein nahi
 
         if role not in [r.value for r in login_role]:
             raise Exception(f"invalid role {role}")
@@ -38,7 +41,7 @@ class login(mongodbclient):
     def add(self, collection_name):
         try:
             user_docs = {
-                "username" : self.username,
+                "username": self.username,
                 "full_name": self.full_name,
                 "mobile_no": self.mobile_no,
                 "email_id": self.email_id,
@@ -64,7 +67,8 @@ class login(mongodbclient):
 
     def update(self, collection_name, query, update_values, many=False):
         try:
-            updated_data = super().update_data(collection_name=collection_name, query=query,update_values=update_values, many=many)
+            updated_data = super().update_data(collection_name=collection_name, query=query,
+                                                 update_values=update_values, many=many)
             return updated_data
         except Exception as e:
             logging.error("data updation was failed!")
