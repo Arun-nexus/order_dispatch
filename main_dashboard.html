@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>ABM Dashboard</title>
+
+        <link rel="stylesheet" href="css/style.css">
+        <link rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    </head>
+
+    <body>
+
+    <div class="container">
+
+        <aside class="sidebar">
+
+            <div class="logo">
+                <img src="login\comapny_logo-Photoroom.png" alt="">
+                <h3>ACER BIOMEDICALS</h3>
+                <span>Caring For Life</span>
+            </div>
+            <ul>
+
+                <li class="active">
+                    <i class="fa-solid fa-house"></i>
+                    Dashboard
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-cart-shopping"></i>
+                    Orders
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-boxes-stacked"></i>
+                    Inventory
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-users"></i>
+                    Users
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-screwdriver-wrench"></i>
+                    Service
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-chart-column"></i>
+                    Reports
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-gear"></i>
+                    Settings
+                </li>
+
+                <li>
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    Logout
+                </li>
+            </ul>
+        </aside>
+        <main class="main">
+            <header class="topbar">
+                <div class="left">
+                    <i class="fa-solid fa-bars"></i>
+                    <h2>Dashboard</h2>
+                </div>
+                <div class="right">
+                    <div class="search">
+                        <input type="text" placeholder="Search anything...">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                    </div>
+                    <div class="icons">
+                        <i class="fa-regular fa-bell"></i>
+                        <i class="fa-regular fa-envelope"></i>
+                    </div>
+                    <div class="profile">
+                        <img src="images/admin.png">
+                        <div>
+                            <h4>Admin User</h4>
+                            <span>Administrator</span>
+                        </div>
+                    </div>
+                </div>
+            </header>
+            <section class="welcome">
+                <div>
+                    <h1>Welcome Back, Admin</h1>
+                    <p>Here's what's happening with your business today.</p>
+                </div>
+            </section>
+            <section class="cards">
+                <div class="card">
+                    <div class="icon blue">
+                        <i class="fa-solid fa-cart-shopping"></i>
+                    </div>
+                    <div>
+                        <span>Total Orders</span>
+                        <h2>1,250</h2>
+                        <small>+12.5% this month</small>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="icon green">
+                        <i class="fa-solid fa-boxes-stacked"></i>
+                    </div>
+                    <div>
+                        <span>Total Inventory</span>
+                        <h2>4,865</h2>
+                        <small>+8.3% this month</small>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="icon purple">
+                        <i class="fa-solid fa-users"></i>
+                    </div>
+                    <div>
+                        <span>Total Employees</span>
+                        <h2>182</h2>
+                        <small>+5.4% this month</small>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="icon orange">
+                        <i class="fa-solid fa-screwdriver-wrench"></i>
+                    </div>
+                    <div>
+                        <span>Active Services</span>
+                        <h2>128</h2>
+                        <small>+10.2% this month</small>
+                    </div>
+                </div>
+            </section>       
+            <section class="dashboard-content">
+                <div class="box">
+                    <div class="box-header">
+                        <h3>Recent Orders</h3>
+                        <a href="#">View All</a>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Order ID</th>
+                                <th>Customer</th>
+                                <th>Status</th>
+                                <th>Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>ORD1025</td>
+                                <td>Hospital A</td>
+                                <td><span class="pending">Pending</span></td>
+                                <td>₹24,500</td>
+                            </tr>
+                            <tr>
+                                <td>ORD1024</td>
+                                <td>Clinic B</td>
+                                <td><span class="delivered">Delivered</span></td>
+                                <td>₹18,750</td>
+                            </tr>
+                            <tr>
+                                <td>ORD1023</td>
+                                <td>Lab C</td>
+                                <td><span class="processing">Processing</span></td>
+                                <td>₹32,100</td>
+                            </tr>
+                            <tr>
+                                <td>ORD1022</td>
+                                <td>Medical D</td>
+                                <td><span class="shipped">Shipped</span></td>
+                                <td>₹15,200</td>
+                            </tr>
+                            <tr>
+                                <td>ORD1021</td>
+                                <td>Distributor E</td>
+                                <td><span class="cancelled">Cancelled</span></td>
+                                <td>₹8,450</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="box">
+                    <div class="box-header">
+                        <h3>Inventory Status</h3>
+                        <a href="#">View All</a>
+                    </div>
+                    <div class="inventory-item">
+                        <div class="info">
+                            <span>Stock Available</span>
+                            <strong>3256</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="bar green" style="width:70%;"></div>
+                        </div>
+                    </div>
+                    <div class="inventory-item">
+                        <div class="info">
+                            <span>Low Stock</span>
+                            <strong>1125</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="bar orange" style="width:35%;"></div>
+                        </div>
+                    </div>
+                    <div class="inventory-item">
+                        <div class="info">
+                            <span>Out of Stock</span>
+                            <strong>484</strong>
+                        </div>
+                        <div class="progress">
+                            <div class="bar red" style="width:15%;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="box">
+                    <div class="box-header">
+                        <h3>Service Requests</h3>
+                        <a href="#">View All</a>
+                    </div>
+                    <div class="service">
+                        <h4>Ticket #251</h4>
+                        <span class="pending">Open</span>
+
+                    </div>
+                    <div class="service">
+                        <h4>Ticket #250</h4>
+                        <span class="delivered">Closed</span>
+
+                    </div>
+                    <div class="service">
+
+                        <h4>Ticket #249</h4>
+                        <span class="processing">Pending</span>
+                    </div>
+                    <div class="service">
+                        <h4>Ticket #248</h4>
+                        <span class="cancelled">On Hold</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    </body>
+    </html>
