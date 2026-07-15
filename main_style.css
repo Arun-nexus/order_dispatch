@@ -27,7 +27,7 @@ button{border:none;cursor:pointer}
     position:relative;
 }
 .logo{display:flex;align-items:center;gap:15px;margin-bottom:40px}
-.logo img{width:75px}
+.logo img{width: 100px;}
 .logo h2{font-size:24px;color:#133f97}
 .logo p{color:#2d66f5}
 .menu{list-style:none}

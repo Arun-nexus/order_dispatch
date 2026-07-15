@@ -22,9 +22,7 @@ class service_detail(mongodbclient):
         self.spare_parts = ""
         self.service_id = str(uuid.uuid4())
 
-    def add_service(self, technician_id, purchase_date: str, issue: str,
-                     image: str, video: str, collection_name: str,
-                     spare_parts: str = "", status="active"):
+    def add_service(self, technician_id, purchase_date: str, issue: str,image: str, video: str, collection_name: str,spare_parts: str = "", status="active"):
         try:
             self.spare_parts = spare_parts
             self.status = status
@@ -60,8 +58,7 @@ class service_detail(mongodbclient):
             logging.error("service was not able to delete!")
             raise Exception(e)
 
-    def update_service_status(self, service_status, reason: str, collection_name, query,
-                               image=None, spare_parts_used: bool = False):
+    def update_service_status(self, service_status, reason: str, collection_name, query,image=None, spare_parts_used: bool = False):
         try:
             if service_status not in [s.value for s in ServiceStatus]:
                 raise Exception(f"invalid status: {service_status}")
@@ -72,16 +69,11 @@ class service_detail(mongodbclient):
             if service_status == "completed":
                 if spare_parts_used:
                     if not image:
-                        raise Exception(
-                            "image proof is required to close the service since spare parts were used"
-                        )
+                        raise Exception("image proof is required to close the service since spare parts were used")
                 else:
                     existing = self.get_service_data(collection_name=collection_name, query=query)
                     if not existing or not existing[0].get("manager_confirmed_return"):
-                        raise Exception(
-                            "service cannot be closed until the inventory manager confirms "
-                            "the returned spare part"
-                        )
+                        raise Exception("service cannot be closed until the inventory manager confirms the returned spare part")
 
             update_values = {
                 "status": service_status,
@@ -91,8 +83,7 @@ class service_detail(mongodbclient):
             if image:
                 update_values["image"] = image
 
-            service = super().update_data(collection_name=collection_name,
-                                            update_values=update_values, query=query)
+            service = super().update_data(collection_name=collection_name,update_values=update_values, query=query)
             logging.info("service status was updated!")
             return service
         except Exception as e:
@@ -102,8 +93,7 @@ class service_detail(mongodbclient):
     def manager_confirm_return(self, collection_name, query):
         try:
             update_values = {"manager_confirmed_return": True}
-            result = super().update_data(collection_name=collection_name,
-                                           update_values=update_values, query=query)
+            result = super().update_data(collection_name=collection_name,update_values=update_values, query=query)
             logging.info("inventory manager confirmed part return")
             return result
         except Exception as e:
