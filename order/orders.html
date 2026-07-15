@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orders - Acer Biomedicals</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+</head>
+<body>
+<div class="sidebar">
+<h2>ABM</h2>
+<ul>
+<li>Dashboard</li>
+<li class="active">Orders</li>
+<li>Inventory</li>
+<li>Employees</li>
+<li>Service</li>
+<li>Reports</li>
+<li>Settings</li>
+<li>Logout</li>
+</ul>
+</div>
+
+<div class="main">
+<header>
+<h1>Orders</h1>
+<input placeholder="Search order...">
+<div>
+<button>Track Order</button>
+<button>Export</button>
+<button class="primary">New Order</button>
+</div>
+</header>
+
+<section class="cards">
+<div class="card"><h3>Total Orders</h3><p>1250</p></div>
+<div class="card"><h3>Pending</h3><p>186</p></div>
+<div class="card"><h3>Delivered</h3><p>892</p></div>
+<div class="card"><h3>Cancelled</h3><p>128</p></div>
+</section>
+
+<section class="filters">
+<select><option>Status</option></select>
+<select><option>Source</option></select>
+<select><option>Payment Mode</option></select>
+<input type="date">
+</section>
+
+<table>
+<thead>
+<tr>
+<th>Order ID</th>
+<th>Product</th>
+<th>Ordered By</th>
+<th>Source</th>
+<th>Payment</th>
+<th>Status</th>
+<th>Total</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ORD1025</td>
+<td>Surgical Gloves</td>
+<td>Amit Sharma</td>
+<td>Employee</td>
+<td>UPI</td>
+<td><span class="pending">Pending</span></td>
+<td>₹24,500</td>
+<td>
+<button>👁</button>
+<button>Track</button>
+<button>Reason</button>
+</td>
+</tr>
+<tr>
+<td>ORD1021</td>
+<td>BP Monitor</td>
+<td>Rahul Verma</td>
+<td>Distributor</td>
+<td>Card</td>
+<td><span class="cancel">Cancelled</span></td>
+<td>₹8,450</td>
+<td>
+<button>👁</button>
+<button>Track</button>
+<button>Reason</button>
+</td>
+</tr>
+</tbody>
+</table>
+
+</div>
+</body>
+</html>
