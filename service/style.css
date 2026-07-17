@@ -1,0 +1,129 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Poppins',sans-serif;
+}
+
+body{
+    background: #eef4ff;
+    overflow-x:hidden;
+}
+.container{
+    display:flex;
+    width:100%;
+    min-height: 100vh;
+}
+.sidebar{
+    width:270px;
+    background: #ffffff;
+    position: fixed;
+    left:0;
+    top:0;
+    bottom:0;
+    padding:25px;
+    box-shadow:0 15px 40px rgba(0,0,0,.08);
+    display:flex;
+    flex-direction: column;
+}
+.logo{
+    display:flex;
+    align-items: center;
+    gap:15px;
+    margin-bottom: 40px;
+}
+
+.logo img{
+    width:60px;
+    height: 60px;
+    object-fit: contain;
+}
+
+.logo h2{
+    font-size: 20px;
+    color : #165DFF;
+    font-weight: 700;
+}
+
+.sidebar ul{
+    list-style: none;
+}
+
+.sidebar ul li{
+    display:flex;
+    align-items:center;
+    gap:18px;
+    padding : 16px 20px;
+    margin-bottom: 12px;
+    border-radius : 14px;
+    cursor : pointer;
+    transition: .35s;
+    font-size: 15px;
+    font-weight: 500;
+    color: #555;
+}
+.sidebar ul li i{
+    font-size: 18px;
+    width: 22px;
+}
+
+.sidebar ul li:hover{
+    background: #e8f1ff;
+    color: #165Dff;
+}
+.sidebar .active{
+    background: linear-gradient(135deg,#1665ff,#4f8fff);
+    color: white;
+    box-shadow: 0 12px 25px rgba(22,101,255,.35);
+}
+
+main{
+    margin-left: 270px;
+    width:calc(100%-270px);
+    padding: 35px;
+}
+
+header{
+    display:flex;
+    justify-content: space-between;
+    align-items:center;
+    margin-bottom: 35px;
+}
+
+header h1{
+    font-size:34px;
+    color:#222;
+    margin-bottom: 6px;
+}
+
+header p{
+    color: #8c8c8c;
+}
+.right-header{
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+.search{
+    width:360px;
+    height:52px;
+    background: white;
+    display:flex;
+    align-items: center;
+    gap: 12px;
+    padding : 0 18px;
+    border-radius: 14px;
+    box-shadow: 0 10px 25px rgba(0,0,0,.06);
+}
+.search i{
+    color:#7c7c7c;
+}
+.search input{
+    width: 100%;
+    border:none;
+    outline:none;
+    font-size:15px;
+    background :none;
+}

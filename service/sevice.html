@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Service Page</title>
+    <link rel="stylesheet" href = "style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <aside class="sidebar">
+        <div class="logo">
+          <img src="login/comapny_logo-Photoroom.png" alt="Logo">
+          <div>
+            <h2>ACER BIOMEDICALS</h2>
+            <p>Caring For Life</p>
+          </div>
+        </div>
+
+        <ul class="menu">
+          <li class="active">
+            <i class="fa-solid fa-house"></i><span>Dashboard</span>
+          </li>
+          <li>
+            <i class="fa-regular fa-calendar-check"></i><span>Orders</span>
+          </li>
+          <li><i class="fa-solid fa-cube"></i><span>Inventory</span></li>
+          <li><i class="fa-solid fa-users"></i><span>Employees</span></li>
+          <li>
+            <i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span>
+          </li>
+          <li><i class="fa-solid fa-chart-simple"></i><span>Reports</span></li>
+          <li><i class="fa-solid fa-gear"></i><span>Settings</span></li>
+          <li>
+            <i class="fa-solid fa-arrow-right-from-bracket"></i
+            ><span>Logout</span>
+          </li>
+        </ul>
+        <div class="sidebar-bg">
+          <img src="images/sidebar-bg.png" alt="" />
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <h1>Service Dashboard</h1>
+            <p>Manage all product services from one place.</p>
+          </div>
+          <div class="right-header">
+            <div class="search">
+              <i class="fa-solid fa-search"></i>
+              <input type="text" placeholder="search service id" />
+            </div>
+            <button>
+              <i class="fa-solid fa-bell"></i>
+            </button>
+            <button>
+              <i class="fa-solid fa-envelope"></i>
+            </button>
+            <div class="profile">
+              <img src="image.jpg" />
+              <span>Admin</span>
+            </div>
+          </div>
+        </header>
+        <section class="cards">
+          <div class="card">
+            <div>
+              <span> Total Services</span>
+              <h2>100</h2>
+            </div>
+            <i class="fa-solid fa-layer-group"></i>
+          </div>
+          <div class="card">
+            <div>
+              <span>Active</span>
+              <h2>10</h2>
+            </div>
+            <i class="fa-solid fa-circle-check"></i>
+          </div>
+          <div class="card">
+            <div>
+              <span>In progress</span>
+              <h2>10</h2>
+            </div>
+            <i class="fa-solid fa-spinner"></i>
+          </div>
+          <div class="card">
+            <div>
+              <span>Completed</span>
+              <h2>10</h2>
+            </div>
+            <i class="fa-solid fa-check-double"></i>
+          </div>
+          <div class="card">
+            <div>
+              <span>rejected</span>
+              <h2>3</h2>
+            </div>
+            <i class="fa-solid fa-circle-xmark"></i>
+          </div>
+        </section>
+        <section class="top-actions">
+          <button class="export">
+            <i class="fa-solid fa-download"></i>
+            Export
+          </button>
+          <button class="new service">
+            <i class="fa-solid fa-plus"></i>
+            Add Service
+          </button>
+        </section>
+        <section class="filter-section">
+          <div class="filter-box">
+            <i class="fa-solid fa-filter"></i>
+            <select>
+              <option>Status</option>
+              <option>Active</option>
+              <option>In-Progress</option>
+              <option>Completed</option>
+              <option>Rejected</option>
+            </select>
+          </div>
+          <div class="filter-box">
+            <i class="fa-solid fa-user-gear"></i>
+            <select>
+              <option>Technician</option>
+              <option>Dheeraj</option>
+              <option>Adarsh</option>
+              <option>Renu mam</option>
+              <option>Bhawna Mam</option>
+            </select>
+          </div>
+          <div class="filter-box">
+            <i class="fa-solid fa-calendar"></i>
+            <input type="date" />
+          </div>
+          <button class="filter-btn">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            Apply Filters
+          </button>
+        </section>
+        <section class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Service id</th>
+                <th>Product id</th>
+                <th>Serial no</th>
+                <th>Technician</th>
+                <th>Issue</th>
+                <th>Status</th>
+                <th>Manager Return</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>#srv-1024</td>
+                <td>PRD-4521</td>
+                <td>#SN</td>
+                <td>
+                  <div class="tech"><img src="user.jpg" />Dheeraj</div>
+                </td>
+                <td>Device Not Responding</td>
+                <td>
+                  <span class="progress"> In Progress </span>
+                </td>
+                <td>
+                  <span class="pending">Pending</span>
+                </td>
+                <td>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-eyes"></i>
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-location-dot"></i>
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-image"></i>
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-ellipsis"></i>
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td>#srv-1024</td>
+                <td>PRD-4521</td>
+                <td>#SN</td>
+                <td>
+                  <div class="tech"><img src="user.jpg" />Dheeraj</div>
+                </td>
+                <td>Device Not Responding</td>
+                <td>
+                  <span class="completed"> Completed </span>
+                </td>
+                <td>
+                  <span class="confirmed">
+                    Confirmed
+                  </span>
+                </td>
+                <td>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-eyes"></i>
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-location-dot"></i>
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-image"></i>
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-ellipsis"></i>
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td>#srv-1024</td>
+                <td>PRD-4521</td>
+                <td>#SN</td>
+                <td>
+                  <div class="tech"><img src="user.jpg" />Dheeraj</div>
+                </td>
+                <td>Device Not Responding</td>
+                <td>
+                  <span class="rejected"> Rejected </span>
+                </td>
+                <td>
+                    -
+                </td>
+                <td>
+                  <button class="reason-btn">
+                    View Reason
+                  </button>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-ellipsis"></i>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <div class = "pagination">
+            <button class = "page-btn">
+                <i class = "fa-solid fa-angle-left"></i>
+            </button>
+            <button class = "page-active-page">1</button>
+            <button class = "page">2</button>
+            <button class = "page">3</button>
+            <button class = "page">4</button>
+            <button class = "page-btn">
+                <i class = "fa-solid fa-angle-right"></i>
+            </button>
+        </div>
+        <div class = "model" id=" viewModal">
+            <div class = "model-content">
+                <div class = "model-header">
+                    <h2>Service Details</h2>
+                    <button class = "close">
+                        <i class = "fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class = "details-grid">
+                    <div class = "detail">
+                        <label>Service ID</label>
+                        <p>#SRV-1024</p>
+                    </div>
+                    <div class = "detail">
+                        <label>Product ID</label>
+                        <p>PRD-1024</p>
+                    </div>
+                    <div class = "detail">
+                        <label>Serial Number</label>
+                        <p>SN-985214</p>
+                    </div>
+                    <div class = "detail">
+                        <label>Technician</label>
+                        <p>Reenu mam</p>
+                    </div>
+                    <div class = "detail">
+                        <label>Purchase Date</label>
+                        <p> 10 jan 2026</p>
+                    </div>
+                    <div class = "details full">
+                        <label>Issues</label>
+                        <p>device off</p>
+                    </div>
+                    <div class = "details full">
+                        <label>Spare parts used</label>
+                        <p>Display unit</p>
+                    </div>
+                </div>
+                <div class = "model-footer">
+                    <button class = "save-btn">
+                        Update Status
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class = "modal" id = "reasonModel">
+            <div class = "modal-content small">
+                <div class = "modal-header">
+                    <h2>Reject reason</h2>
+                    <button class = "close">
+                        <i class = "fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <p class = "reason-text">
+                    Product was physically damaged and denied paid repair.
+                </p>
+            </div>
+        </div>
+        <div class = "modal" id = "imageModal">
+            <div class = "modal-content image-preview">
+                <div class = "modal-header">
+                    <h2>Service Image</h2>
+                    <button class = "close">
+                        <i class = "fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <img src="service/images.jpg">
+            </div>
+        </div>
+        <div class = "modal"  id = " videoModal">
+            <div class = "modal-content">
+                <div class = "modal-header">
+                    <h2>Service Video</h2>
+                    <button class = "close">
+                        <i class = "fa-solif fa-xmark"></i>
+                    </button>
+                </div>
+                <video controls>
+                    <source src = "service/videos.mp4">
+                </video>
+            </div>
+        </div>
+        <div class = "modal" id = "statusModal">
+            <div class = "modal-content">
+                <div class = "modal-header">
+                    <h2>Update Service</h2>
+                    <button class = "close">
+                        <i class = "fa-solid fa-xmark"></i> 
+                    </button>
+                </div>
+                <form>
+                    <label>Status</label>
+                    <select>
+                        <option>Active</option>
+                        <option>In Progress</option>
+                        <option>Completed</option>
+                        <option>Rejected</option>
+                    </select>
+                    <label>Reason</label>
+                    <textarea placeholder="Enter reason...."></textarea>
+                    <label>
+                        Spare parts used
+                    </label>
+                    <select>
+                        <button class = "save-btn">
+                            Save Changes
+                        </button>
+                    </select>
+                </form>
+            </div>
+        </div>
+      </main>
+    </div>
+    <script src = "script.js"></script>
+  </body>
+</html>

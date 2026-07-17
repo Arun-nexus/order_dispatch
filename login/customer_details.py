@@ -16,7 +16,7 @@ class login(mongodbclient):
     def __init__(self, username: str, name: str, phone: str, email: str,
                  company_name: str, gst_number: str, role: str, password: str):
 
-        super().__init__()  # yahan hona chahiye -- __init__ ke andar, class body mein nahi
+        super().__init__() 
 
         if role not in [r.value for r in login_role]:
             raise Exception(f"invalid role {role}")

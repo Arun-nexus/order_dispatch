@@ -18,8 +18,6 @@ SERVICE_COLLECTION = params["service_collection_name"]
 INVENTORY_COLLECTION = params["inventory_collection_name"]
 
 
-# ---------- Request models ----------
-
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -99,7 +97,7 @@ class InventoryUpdateRequest(BaseModel):
 @app.post("/login/")
 async def login_page(request: LoginRequest):
     try:
-        db = mongodbclient()  # generic connection, no need to build a full login object just to query
+        db = login() 
         dataset = db.get_data(ACCOUNTS_COLLECTION, query={"username": request.username})
 
         if not dataset:
@@ -144,7 +142,7 @@ async def create_account(request: CreateAccountRequest):
         if len(request.mobile_no) != 10 or not request.mobile_no.isdigit():
             raise HTTPException(status_code=400, detail="make sure mobile no is valid")
 
-        db = mongodbclient()
+        db = login()
         existing_user = db.get_data(ACCOUNTS_COLLECTION, query={"username": request.username})
 
         if existing_user:
@@ -175,8 +173,8 @@ async def create_account(request: CreateAccountRequest):
 @app.post("/login/delete_account/{username}")
 async def delete_account(username: str):
     try:
-        db = mongodbclient()
-        db.delete_data(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
+        db = login()
+        db.delete(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
         logging.info("account deleted successfully")
         return {"message": "account was deleted successfully", "username": username}
 
@@ -188,8 +186,8 @@ async def delete_account(username: str):
 @app.post("/login/update_account/{username}")
 async def update_account(username: str, updated_values: UpdateAccountRequest):
     try:
-        db = mongodbclient()
-        db.update_data(collection_name=ACCOUNTS_COLLECTION, query={"username": username},
+        db = login()
+        db.update(collection_name=ACCOUNTS_COLLECTION, query={"username": username},
                         update_values=updated_values.updated_values)
         logging.info("account values are updated")
         return {"message": "account details was updated", "username": username,
@@ -198,8 +196,6 @@ async def update_account(username: str, updated_values: UpdateAccountRequest):
         logging.error("account details updation was failed")
         raise HTTPException(status_code=500, detail="account details updation was unsuccessful")
 
-
-# ---------- Orders ----------
 
 @app.post("/order/create_order/")
 async def create_order(request: CreateOrderRequest):
@@ -227,7 +223,7 @@ async def create_order(request: CreateOrderRequest):
 @app.get("/track_order/{order_id}")
 async def track_order(order_id: str):
     try:
-        db = mongodbclient()
+        db = order_manager()
         dataset = db.get_data(ORDERS_COLLECTION, query={"order_id": order_id})
 
         if not dataset:
@@ -244,8 +240,8 @@ async def track_order(order_id: str):
 @app.post("/order/confirm_delivery/{order_id}")
 async def confirm_delivery(order_id: str):
     try:
-        db = mongodbclient()
-        result = db.update_data(
+        db = order_manager()
+        result = db.update(
             ORDERS_COLLECTION,
             query={"order_id": order_id},
             update_values={"status": "delivered"}
@@ -266,8 +262,8 @@ async def confirm_delivery(order_id: str):
 @app.post("/order/delete/{order_id}")
 async def delete_order(order_id: str):
     try:
-        db = mongodbclient()
-        db.delete_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
+        db = order_manager()
+        db.delete(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
         return {"message": "order deleted", "order_id": order_id}
     except Exception as e:
         logging.error("order deletion failed")
@@ -277,9 +273,8 @@ async def delete_order(order_id: str):
 @app.post("/order/update/{order_id}")
 async def update_order(order_id: str, updated_value: OrderUpdatedValue):
     try:
-        db = mongodbclient()
-        db.update_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},
-                        update_values=updated_value.updated_order_value)
+        db = order_manager()
+        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},update_values=updated_value.updated_order_value)
         logging.info("order value was updated successfully.")
         return {"message": "order value was updated", "order_id": order_id,
                 "updated_value": updated_value.updated_order_value}
@@ -291,7 +286,7 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue):
 @app.get("/order/")
 async def order():
     try:
-        db = mongodbclient()
+        db = order_manager()
         dataset = db.get_data(collection_name=ORDERS_COLLECTION, query={})
         logging.info("order dataset was fetched successfully")
         return {"message": "order dataset", "dataset": dataset}
@@ -305,8 +300,8 @@ async def order():
 @app.get("/service/")
 async def services():
     try:
-        db = mongodbclient()
-        dataset = db.get_data(collection_name=SERVICE_COLLECTION, query={})
+        db = service_detail()
+        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={})
         logging.info("service dataset was fetched successfully")
         return {"message": "service dataset", "dataset": dataset}
     except Exception as e:
@@ -384,7 +379,7 @@ async def manager_confirm(service_id: str):
 @app.get("/inventory/")
 async def inventory():
     try:
-        db = mongodbclient()
+        db = inventory_manager()
         dataset = db.get_data(collection_name=INVENTORY_COLLECTION, query={})
         logging.info("inventory dataset was fetched successfully")
         return {"message": "inventory dataset", "dataset": dataset}
