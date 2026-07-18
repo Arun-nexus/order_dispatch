@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Users Management</title>
+
+    <link rel="stylesheet" href="users.css" />
+
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+    />
+  </head>
+
+  <body>
+    <div class="container">
+
+      <aside class="sidebar">
+        <div class="logo">
+          <img src="images/logo.png" />
+
+          <div>
+            <h2>ServicePro</h2>
+
+            <p>Admin Panel</p>
+          </div>
+        </div>
+
+        <ul>
+          <li>
+            <i class="fa-solid fa-house"></i>
+
+            <span>Dashboard</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-cart-shopping"></i>
+
+            <span>Orders</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-boxes-stacked"></i>
+
+            <span>Inventory</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-screwdriver-wrench"></i>
+
+            <span>Service</span>
+          </li>
+
+          <li class="active">
+            <i class="fa-solid fa-users"></i>
+
+            <span>Users</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-chart-column"></i>
+
+            <span>Reports</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-gear"></i>
+
+            <span>Settings</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-bell"></i>
+
+            <span>Notifications</span>
+          </li>
+
+          <li>
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+
+            <span>Logout</span>
+          </li>
+        </ul>
+
+        <div class="sidebar-profile">
+          <img src="images/admin.jpg" />
+
+          <div>
+            <h4>Admin</h4>
+
+            <p>Super Admin</p>
+
+            <span class="online"></span>
+          </div>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <h1>Users Management</h1>
+
+            <p>Manage all registered users</p>
+          </div>
+
+          <div class="right-header">
+            <div class="search">
+              <i class="fa-solid fa-magnifying-glass"></i>
+
+              <input type="text" placeholder="Search users, email, phone..." />
+            </div>
+
+            <button>
+              <i class="fa-regular fa-bell"></i>
+            </button>
+
+            <button>
+              <i class="fa-regular fa-envelope"></i>
+            </button>
+
+            <div class="profile">
+              <img src="images/admin.jpg" />
+
+              <div>
+                <h4>Admin</h4>
+
+                <p>Super Admin</p>
+              </div>
+            </div>
+          </div>
+        </header>
+        <section class="cards">
+          <div class="card">
+            <div>
+              <span>Total Users</span>
+
+              <h2>256</h2>
+
+              <p>Registered Users</p>
+            </div>
+
+            <i class="fa-solid fa-users"></i>
+          </div>
+
+          <div class="card">
+            <div>
+              <span>Admins</span>
+
+              <h2>5</h2>
+
+              <p>System Admins</p>
+            </div>
+
+            <i class="fa-solid fa-user-shield"></i>
+          </div>
+
+          <div class="card">
+            <div>
+              <span>Employees</span>
+
+              <h2>72</h2>
+
+              <p>Company Employees</p>
+            </div>
+
+            <i class="fa-solid fa-user-tie"></i>
+          </div>
+
+          <div class="card">
+            <div>
+              <span>Technicians</span>
+
+              <h2>48</h2>
+
+              <p>Field Technicians</p>
+            </div>
+
+            <i class="fa-solid fa-screwdriver-wrench"></i>
+          </div>
+
+          <div class="card">
+            <div>
+              <span>Distributors</span>
+
+              <h2>131</h2>
+
+              <p>Authorized Partners</p>
+            </div>
+
+            <i class="fa-solid fa-truck"></i>
+          </div>
+        </section>
+
+        <div class="top-actions">
+          <button class="export">
+            <i class="fa-solid fa-file-export"></i>
+
+            Export
+          </button>
+
+          <button class="add-user">
+            <i class="fa-solid fa-user-plus"></i>
+
+            Add User
+          </button>
+        </div>
+        <section class = "filter-section">
+          <div class = "filter-box">
+            <i class = "fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder = "search by username">
+
+          </div>
+
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
