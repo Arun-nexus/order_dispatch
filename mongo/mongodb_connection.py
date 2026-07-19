@@ -43,7 +43,18 @@ class mongodbclient:
             collection = self.database[collection_name]
             query = query or {}
             results = collection.find(query, projection)
-            return list(results)
+
+            # BUG FIX: raw pymongo docs contain ObjectId (in "_id") which is
+            # not JSON serializable. Every route that returns get_data()
+            # output straight to FastAPI (/account/, /order/, /inventory/,
+            # /service/) would 500 on the response encoding step. Stringify
+            # _id before returning; nothing else about the flow changes.
+            docs = []
+            for doc in results:
+                if "_id" in doc:
+                    doc["_id"] = str(doc["_id"])
+                docs.append(doc)
+            return docs
         except Exception as e:
             logging.error("unable to fetch data from database")
             raise Exception(e)

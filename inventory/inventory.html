@@ -2,11 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>Users Management</title>
+    <title>Inventory Management</title>
 
-    <link rel="stylesheet" href="users.css" />
+    <link rel="stylesheet" href="inventory.css" />
 
     <link
       rel="stylesheet"
@@ -16,6 +17,10 @@
 
   <body>
     <div class="container">
+      <!-- ==========================
+        SIDEBAR
+=========================== -->
+
       <aside class="sidebar">
         <div class="logo">
           <img src="images/logo.png" />
@@ -40,7 +45,7 @@
             <span>Orders</span>
           </li>
 
-          <li>
+          <li class="active">
             <i class="fa-solid fa-boxes-stacked"></i>
 
             <span>Inventory</span>
@@ -52,7 +57,7 @@
             <span>Service</span>
           </li>
 
-          <li class="active">
+          <li>
             <i class="fa-solid fa-users"></i>
 
             <span>Users</span>
@@ -71,12 +76,6 @@
           </li>
 
           <li>
-            <i class="fa-solid fa-bell"></i>
-
-            <span>Notifications</span>
-          </li>
-
-          <li>
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
 
             <span>Logout</span>
@@ -90,25 +89,27 @@
             <h4>Admin</h4>
 
             <p>Super Admin</p>
-
-            <span class="online"></span>
           </div>
         </div>
       </aside>
 
+      <!-- ==========================
+        MAIN
+=========================== -->
+
       <main>
         <header>
           <div>
-            <h1>Users Management</h1>
+            <h1>Inventory Management</h1>
 
-            <p>Manage all registered users</p>
+            <p>Manage products and stock availability</p>
           </div>
 
           <div class="right-header">
             <div class="search">
               <i class="fa-solid fa-magnifying-glass"></i>
 
-              <input type="text" placeholder="Search users, email, phone..." />
+              <input type="text" placeholder="Search Product..." />
             </div>
 
             <button>
@@ -131,65 +132,69 @@
           </div>
         </header>
 
+        <!-- ==========================
+        CARDS
+=========================== -->
+
         <section class="cards">
           <div class="card">
             <div>
-              <span>Total Users</span>
+              <span>Total Products</span>
 
-              <h2>256</h2>
+              <h2>1,250</h2>
 
-              <p>Registered Users</p>
+              <p>Available Products</p>
             </div>
 
-            <i class="fa-solid fa-users"></i>
+            <i class="fa-solid fa-box"></i>
           </div>
 
           <div class="card">
             <div>
-              <span>Admins</span>
+              <span>Total Stock</span>
 
-              <h2>5</h2>
+              <h2>8,940</h2>
 
-              <p>System Admins</p>
+              <p>Units Available</p>
             </div>
 
-            <i class="fa-solid fa-user-shield"></i>
+            <i class="fa-solid fa-layer-group"></i>
           </div>
 
           <div class="card">
             <div>
-              <span>Employees</span>
+              <span>Low Stock</span>
 
-              <h2>72</h2>
+              <h2>21</h2>
 
-              <p>Company Employees</p>
+              <p>Needs Refill</p>
             </div>
 
-            <i class="fa-solid fa-user-tie"></i>
+            <i class="fa-solid fa-triangle-exclamation"></i>
           </div>
 
           <div class="card">
             <div>
-              <span>Technicians</span>
+              <span>Suppliers</span>
 
-              <h2>48</h2>
+              <h2>58</h2>
 
-              <p>Field Technicians</p>
+              <p>Registered Vendors</p>
             </div>
 
-            <i class="fa-solid fa-screwdriver-wrench"></i>
+            <i class="fa-solid fa-truck-field"></i>
           </div>
 
           <div class="card">
             <div>
-              <span>Distributors</span>
+              <span>Inventory Value</span>
 
-              <h2>131</h2>
+              <h2>₹18.2L</h2>
 
-              <p>Authorized Partners</p>
+              <p>Total Worth</p>
             </div>
 
-            <i class="fa-solid fa-truck"></i>
+            <i class="fa-solid fa-indian-rupee-sign"></i>
           </div>
         </section>
 
@@ -200,39 +205,39 @@
             Export
           </button>
 
-          <button class="add-user">
-            <i class="fa-solid fa-user-plus"></i>
+          <button class="add-product">
+            <i class="fa-solid fa-plus"></i>
 
-            Add User
+            Add Product
           </button>
         </div>
+        <!-- ==========================
+        FILTER SECTION
+=========================== -->
 
         <section class="filter-section">
           <div class="filter-box">
             <i class="fa-solid fa-magnifying-glass"></i>
 
-            <input
-              type="text"
-              placeholder="Search by username, email, mobile..."
-            />
+            <input type="text" placeholder="Search Product Name..." />
           </div>
 
           <div class="filter-box">
-            <i class="fa-solid fa-user-tag"></i>
+            <i class="fa-solid fa-barcode"></i>
 
-            <select>
-              <option>All Roles</option>
-              <option>Admin</option>
-              <option>Employee</option>
-              <option>Technician</option>
-              <option>Distributor</option>
-            </select>
+            <input type="text" placeholder="Product ID" />
           </div>
 
           <div class="filter-box">
-            <i class="fa-solid fa-building"></i>
+            <i class="fa-solid fa-truck"></i>
 
-            <input type="text" placeholder="Company Name" />
+            <input type="text" placeholder="Supplier" />
+          </div>
+
+          <div class="filter-box">
+            <i class="fa-solid fa-calendar-days"></i>
+
+            <input type="date" />
           </div>
 
           <button class="filter-btn">
@@ -242,27 +247,31 @@
           </button>
         </section>
 
+        <!-- ==========================
+        INVENTORY TABLE
+=========================== -->
+
         <div class="table-container">
           <table>
             <thead>
               <tr>
                 <th></th>
 
-                <th>User ID</th>
+                <th>Product Name</th>
 
-                <th>Username</th>
+                <th>Product ID</th>
 
-                <th>Full Name</th>
+                <th>Lot No.</th>
 
-                <th>Email</th>
+                <th>Supplier</th>
 
-                <th>Phone</th>
+                <th>Purchase Date</th>
 
-                <th>Company</th>
+                <th>Quantity</th>
 
-                <th>GST Number</th>
+                <th>Price</th>
 
-                <th>Role</th>
+                <th>Tax</th>
 
                 <th>Actions</th>
               </tr>
@@ -274,61 +283,23 @@
                   <input type="checkbox" />
                 </td>
 
-                <td>USR-1001</td>
+                <td>Dell Inspiron 15</td>
 
-                <td>rahul123</td>
+                <td>PRD-1001</td>
 
-                <td>Rahul Sharma</td>
+                <td>LOT-2026-001</td>
 
-                <td>rahul@gmail.com</td>
+                <td>Dell India Pvt Ltd</td>
 
-                <td>9876543210</td>
-
-                <td>Sharma Electronics</td>
-
-                <td>09ABCDE1234F1Z5</td>
+                <td>12-07-2026</td>
 
                 <td>
-                  <span class="admin-role"> Admin </span>
+                  <span class="stock high"> 250 </span>
                 </td>
 
-                <td>
-                  <button class="icon-btn">
-                    <i class="fa-solid fa-eye"></i>
-                  </button>
+                <td>₹52,000</td>
 
-                  <button class="icon-btn">
-                    <i class="fa-solid fa-pen"></i>
-                  </button>
-
-                  <button class="icon-btn delete">
-                    <i class="fa-solid fa-trash"></i>
-                  </button>
-                </td>
-              </tr>
-
-              <tr>
-                <td>
-                  <input type="checkbox" />
-                </td>
-
-                <td>USR-1002</td>
-
-                <td>amit.tech</td>
-
-                <td>Amit Kumar</td>
-
-                <td>amit@gmail.com</td>
-
-                <td>9123456789</td>
-
-                <td>Tech Solutions</td>
-
-                <td>07FGHJK5678M2P9</td>
-
-                <td>
-                  <span class="tech-role"> Technician </span>
-                </td>
+                <td>18%</td>
 
                 <td>
                   <button class="icon-btn">
@@ -350,23 +321,23 @@
                   <input type="checkbox" />
                 </td>
 
-                <td>USR-1003</td>
+                <td>HP Laser Printer</td>
 
-                <td>neha.emp</td>
+                <td>PRD-1002</td>
 
-                <td>Neha Verma</td>
+                <td>LOT-2026-004</td>
 
-                <td>neha@gmail.com</td>
+                <td>HP Enterprise</td>
 
-                <td>9988776655</td>
-
-                <td>Verma Industries</td>
-
-                <td>08LMNOP4567A8Q2</td>
+                <td>16-07-2026</td>
 
                 <td>
-                  <span class="employee-role"> Employee </span>
+                  <span class="stock medium"> 48 </span>
                 </td>
+
+                <td>₹17,500</td>
+
+                <td>12%</td>
 
                 <td>
                   <button class="icon-btn">
@@ -388,23 +359,99 @@
                   <input type="checkbox" />
                 </td>
 
-                <td>USR-1004</td>
+                <td>Samsung SSD 1TB</td>
 
-                <td>raj.dist</td>
+                <td>PRD-1003</td>
 
-                <td>Raj Malhotra</td>
+                <td>LOT-2026-006</td>
 
-                <td>raj@gmail.com</td>
+                <td>Samsung Electronics</td>
 
-                <td>9011223344</td>
-
-                <td>Malhotra Distributors</td>
-
-                <td>06ZXCVB1234N4W6</td>
+                <td>20-07-2026</td>
 
                 <td>
-                  <span class="distributor-role"> Distributor </span>
+                  <span class="stock low"> 8 </span>
                 </td>
+
+                <td>₹6,800</td>
+
+                <td>18%</td>
+
+                <td>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-eye"></i>
+                  </button>
+
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+
+                  <button class="icon-btn delete">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <input type="checkbox" />
+                </td>
+
+                <td>Logitech Wireless Mouse</td>
+
+                <td>PRD-1004</td>
+
+                <td>LOT-2026-009</td>
+
+                <td>Logitech India</td>
+
+                <td>22-07-2026</td>
+
+                <td>
+                  <span class="stock high"> 180 </span>
+                </td>
+
+                <td>₹1,150</td>
+
+                <td>18%</td>
+
+                <td>
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-eye"></i>
+                  </button>
+
+                  <button class="icon-btn">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+
+                  <button class="icon-btn delete">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </td>
+              </tr>
+
+              <tr>
+                <td>
+                  <input type="checkbox" />
+                </td>
+
+                <td>Canon Ink Cartridge</td>
+
+                <td>PRD-1005</td>
+
+                <td>LOT-2026-012</td>
+
+                <td>Canon India</td>
+
+                <td>25-07-2026</td>
+
+                <td>
+                  <span class="stock low"> 4 </span>
+                </td>
+
+                <td>₹2,450</td>
+
+                <td>12%</td>
 
                 <td>
                   <button class="icon-btn">
@@ -423,6 +470,9 @@
             </tbody>
           </table>
         </div>
+        <!-- ==========================
+        PAGINATION
+=========================== -->
 
         <div class="pagination">
           <button class="page-btn">
@@ -442,10 +492,14 @@
           </button>
         </div>
 
+        <!-- ==========================
+        VIEW PRODUCT MODAL
+=========================== -->
+
         <div class="modal" id="viewModal">
           <div class="modal-content">
             <div class="modal-header">
-              <h2>User Details</h2>
+              <h2>Product Details</h2>
 
               <button class="close">
                 <i class="fa-solid fa-xmark"></i>
@@ -454,52 +508,64 @@
 
             <div class="details-grid">
               <div class="detail">
-                <label>User ID</label>
-                <p>USR-1001</p>
+                <label>Product Name</label>
+
+                <p>Dell Inspiron 15</p>
               </div>
 
               <div class="detail">
-                <label>Username</label>
-                <p>rahul123</p>
+                <label>Product ID</label>
+
+                <p>PRD-1001</p>
               </div>
 
               <div class="detail">
-                <label>Full Name</label>
-                <p>Rahul Sharma</p>
+                <label>Lot Number</label>
+
+                <p>LOT-2026-001</p>
               </div>
 
               <div class="detail">
-                <label>Phone</label>
-                <p>9876543210</p>
+                <label>Supplier</label>
+
+                <p>Dell India Pvt Ltd</p>
               </div>
 
               <div class="detail">
-                <label>Email</label>
-                <p>rahul@gmail.com</p>
+                <label>Purchase Date</label>
+
+                <p>12-07-2026</p>
               </div>
 
               <div class="detail">
-                <label>Company</label>
-                <p>Sharma Electronics</p>
+                <label>Quantity</label>
+
+                <p>250</p>
               </div>
 
               <div class="detail">
-                <label>GST Number</label>
-                <p>09ABCDE1234F1Z5</p>
+                <label>Price</label>
+
+                <p>₹52,000</p>
               </div>
 
               <div class="detail">
-                <label>Role</label>
-                <p>Admin</p>
+                <label>Tax Rate</label>
+
+                <p>18%</p>
               </div>
             </div>
           </div>
         </div>
 
+        <!-- ==========================
+        ADD PRODUCT MODAL
+=========================== -->
+
         <div class="modal" id="addModal">
           <div class="modal-content">
             <div class="modal-header">
-              <h2>Add User</h2>
+              <h2>Add Product</h2>
 
               <button class="close">
                 <i class="fa-solid fa-xmark"></i>
@@ -507,45 +573,35 @@
             </div>
 
             <form>
-              <input type="text" placeholder="Username" />
+              <input type="text" placeholder="Product Name" />
 
-              <input type="text" placeholder="Full Name" />
+              <input type="text" placeholder="Product ID" />
 
-              <input type="text" placeholder="Mobile Number" />
+              <input type="text" placeholder="Lot Number" />
 
-              <input type="email" placeholder="Email Address" />
+              <input type="text" placeholder="Supplier" />
 
-              <input type="text" placeholder="Company Name" />
+              <input type="date" />
 
-              <input type="text" placeholder="GST Number" />
+              <input type="number" placeholder="Quantity" />
 
-              <select>
-                <option>Select Role</option>
+              <input type="number" placeholder="Price" />
 
-                <option>Admin</option>
+              <input type="number" placeholder="Tax Rate (%)" />
 
-                <option>Employee</option>
-
-                <option>Technician</option>
-
-                <option>Distributor</option>
-              </select>
-
-              <input type="password" placeholder="Password" />
-
-              <button class="save-btn">Create User</button>
+              <button class="save-btn">Save Product</button>
             </form>
           </div>
         </div>
 
         <!-- ==========================
-        EDIT USER MODAL
+        EDIT PRODUCT MODAL
 =========================== -->
 
         <div class="modal" id="editModal">
           <div class="modal-content">
             <div class="modal-header">
-              <h2>Edit User</h2>
+              <h2>Edit Product</h2>
 
               <button class="close">
                 <i class="fa-solid fa-xmark"></i>
@@ -553,41 +609,35 @@
             </div>
 
             <form>
-              <input type="text" value="rahul123" />
+              <input type="text" value="Dell Inspiron 15" />
 
-              <input type="text" value="Rahul Sharma" />
+              <input type="text" value="PRD-1001" />
 
-              <input type="text" value="9876543210" />
+              <input type="text" value="LOT-2026-001" />
 
-              <input type="email" value="rahul@gmail.com" />
+              <input type="text" value="Dell India Pvt Ltd" />
 
-              <input type="text" value="Sharma Electronics" />
+              <input type="date" value="2026-07-12" />
 
-              <input type="text" value="09ABCDE1234F1Z5" />
+              <input type="number" value="250" />
 
-              <select>
-                <option selected>Admin</option>
+              <input type="number" value="52000" />
 
-                <option>Employee</option>
+              <input type="number" value="18" />
 
-                <option>Technician</option>
-
-                <option>Distributor</option>
-              </select>
-
-              <button class="save-btn">Update User</button>
+              <button class="save-btn">Update Product</button>
             </form>
           </div>
         </div>
 
         <!-- ==========================
-      DELETE MODAL
+        DELETE MODAL
 =========================== -->
 
         <div class="modal" id="deleteModal">
           <div class="modal-content small">
             <div class="modal-header">
-              <h2>Delete User</h2>
+              <h2>Delete Product</h2>
 
               <button class="close">
                 <i class="fa-solid fa-xmark"></i>
@@ -595,7 +645,8 @@
             </div>
 
             <p class="reason-text">
-              Are you sure you want to permanently delete this user?
+              Are you sure you want to permanently delete this product from the
+              inventory?
             </p>
 
             <div class="modal-footer">
@@ -608,6 +659,6 @@
       </main>
     </div>
 
-    <script src="users.js"></script>
+    <script src="inventory.js"></script>
   </body>
 </html>
