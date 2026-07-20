@@ -1,71 +1,44 @@
-@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: "Poppins", sans-serif;
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Poppins',sans-serif;
 }
 
-body {
-  background: #eef4ff;
-  overflow-x: hidden;
+body{
+    background: #eef4ff;
+    overflow-x:hidden;
+}
+.container{
+    display:flex;
+    width:100%;
+    min-height: 100vh;
+}
+.sidebar{
+    width:270px;
+    background: #ffffff;
+    position: fixed;
+    left:0;
+    top:0;
+    bottom:0;
+    padding:25px;
+    box-shadow:0 15px 40px rgba(0,0,0,.08);
+    display:flex;
+    flex-direction: column;
+}
+.logo{
+    display:flex;
+    align-items: center;
+    margin-bottom: 10px;
+    margin-left: 40px;
 }
 
-.container {
-  display: flex;
-  min-height: 100vh;
-}
-
-.sidebar {
-  position: fixed;
-
-  left: 0;
-  top: 0;
-
-  width: 270px;
-  height: 100vh;
-
-  background: #fff;
-
-  padding: 25px;
-
-  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.08);
-
-  display: flex;
-
-  flex-direction: column;
-
-  justify-content: space-between;
-}
-
-.logo {
-  display: flex;
-
-  align-items: center;
-
-  gap: 15px;
-
-  margin-bottom: 40px;
-}
-
-.logo img {
-  width: 55px;
-  height: 55px;
-}
-
-.logo h2 {
-  color: #1665ff;
-
-  font-size: 22px;
-
-  font-weight: 700;
-}
-
-.logo p {
-  color: #888;
-
-  font-size: 13px;
+.logo img{
+    width:130px;
+    height: 130px;
+    object-fit: contain;
 }
 
 .sidebar ul {
@@ -522,8 +495,9 @@ thead th {
 }
 
 tbody td {
-  padding: 18px;
-
+  padding: 10px;
+  padding-top: 15px;
+  padding-bottom: 15px;
   border-bottom: 1px solid #efefef;
 
   font-size: 14px;
@@ -604,9 +578,9 @@ tbody input[type="checkbox"] {
 }
 
 .icon-btn {
-  width: 42px;
+  width: 25px;
 
-  height: 42px;
+  height: 25px;
 
   border: none;
 
@@ -618,7 +592,7 @@ tbody input[type="checkbox"] {
 
   cursor: pointer;
 
-  margin-right: 8px;
+  margin-right: 2px;
 
   transition: 0.3s;
 }

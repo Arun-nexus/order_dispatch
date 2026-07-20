@@ -13,12 +13,20 @@ class login_role(str, enum.Enum):
 
 class login(mongodbclient):
 
-    def __init__(self, username: str, name: str, phone: str, email: str,
-                 company_name: str, gst_number: str, role: str, password: str):
+    # NOTE: all fields now default to None. Several routes in main.py do
+    # `db = login()` just to reuse get_data/delete/update (inherited from
+    # mongodbclient) without wanting to construct a full user object.
+    # Previously every field was a required positional arg, so those calls
+    # raised TypeError before ever reaching the try/except in the route.
+    def __init__(self, username: str = None, name: str = None, phone: str = None,
+                 email: str = None, company_name: str = None, gst_number: str = None,
+                 role: str = None, password: str = None):
 
-        super().__init__() 
+        super().__init__()
 
-        if role not in [r.value for r in login_role]:
+        # Only validate role if one was actually supplied (i.e. we're really
+        # creating/registering a user, not just borrowing db methods).
+        if role is not None and role not in [r.value for r in login_role]:
             raise Exception(f"invalid role {role}")
 
         self.username = username
