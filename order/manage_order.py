@@ -6,12 +6,7 @@ import uuid
 
 class order_manager(mongodbclient):
 
-    # Same issue as login(): track_order/confirm_delivery/delete_order/update_order
-    # all do `db = order_manager()` to reuse inherited get_data/update/delete,
-    # but every field here used to be a required positional arg, so those
-    # calls raised TypeError before the route logic ever ran.
-    def __init__(self, product_name=None, product_id=None, company_name=None,
-                 gst_number=None, payment_mode=None, price=None, tax_rate=None, discount=0):
+    def __init__(self, product_name=None, product_id=None, company_name=None,gst_number=None, payment_mode=None, price=None, tax_rate=None, discount=0):
 
         super().__init__()
 
@@ -42,9 +37,6 @@ class order_manager(mongodbclient):
                 "tax_rate": self.tax_rate,
                 "discount": self.discount,
                 "total_mrp": total_mrp,
-                # Added so Reports/Orders pages can group by date. This is
-                # purely additive - existing readers of the order doc are
-                # unaffected, nothing else in the flow changes.
                 "order_date": datetime.now(timezone.utc).isoformat()
             }
             result = super().add(collection_name=collection_name, dictionary=order_dict)
