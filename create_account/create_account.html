@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Account</title>
+    <link rel="stylesheet" href="main_style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+</head>
+<body>
+    <div class = "container">
+        <div class = "left-panel">
+            <div class = "overlay">
+                <img src = "../login/comapny_logo-Photoroom.png" class = "logo">
+                <h1> Acer Biomedicals</h1>
+                <p>Smart Inventory . Service . Reports . Analytics</p>
+                <div class = "feature-box">
+                    <div class = "feature">
+                        <i class = "fa-solid fa-box"></i>
+                        <span>Inventory Management</span>
+                    </div>
+                    <div class = "feature">\
+                        <i class = "fa-solid fa-screwdriver-wrench"></i>
+                        <span> Service Tracking</span>
+                    </div>
+                    <div class = "feature">
+                        <i class = "fa-solid fa-chart-line"></i>
+                        <span>Business Reports</span>
+                    </div>
+                    <div class = "feature">
+                        <i class = "fa-solid fa-users"></i>
+                        <span>Users Management</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class = "right-panel">
+            <div class = "register-card">
+                <h2>Create Account</h2>
+                <p>Create your account to access the dashboard</p>
+                <form>
+                    <div class = "image-upload">
+                        <img src=" images/default-users.png" id = "preview">
+                        <label>
+                            <i class = "fa-solid fa-camera"></i>
+                            <input type = "file" accept = "image/*" hidden>
+                        </label>
+                    </div>
+                    <div class = "form-grid">
+                        <input type = "text" placeholder = "Full Name" required>
+                        <input type = "text" placeholder = "Username" required>
+                        <input type = "text" placeholder = "Email Address" required>
+                        <input type = "tel" placeholder = "Mobile no." required>
+                        <select required>
+                            <option value = "">Select Role</option>
+                            <option>Admin</option>
+                            <option>Employee</option>
+                            <option>Technician</option>
+                            <option>Distributor</option>
+                        </select>
+                        <div class = "password-box">
+                            <input type = "password" placeholder="password" id = "password" required>
+                            <i class = "fa-solid fa-eye togglepassword"></i>
+                        </div>
+                        <div class = "password-box">
+                            <input type = "password" placeholder = "confirm password" required>
+                            <i class = "fa-solid fa-eye togglepassword"></i>
+                        </div>
+                        </div>
+                        <button type = "submit" class = "register-btn">
+                            <i class = "fa-solid fa-user-plus"></i>
+                            Create Account
+                        </button>
+                        <div class = "divider">
+                            ]<Span>OR</Span>
+                        </div>
+                        <div class = "login-link">
+                            Already have an account?
+                            <a href = "../login/login_page.html">Login Now</a>
+                        </div>
+                </form>
+            </div>
+        </div>
+
+    </div> 
+    <script src = "create_account.js"></script>
+</body>
+</html>
