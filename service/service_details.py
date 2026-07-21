@@ -5,11 +5,11 @@ import enum
 
 
 class ServiceStatus(str, enum.Enum):
+    
     active = "active"
     in_progress = "in_progress"
     completed = "completed"
     rejected = "rejected"
-
 
 class service_detail(mongodbclient):
 

@@ -4,7 +4,7 @@ from logger import logging
 from configuration import load_params
 
 from mongo.mongodb_connection import mongodbclient
-from login.customer_details import login
+from user.customer_details import login
 from order.manage_order import order_manager
 from service.service_details import service_detail
 from inventory.inventory_handling import inventory_manager

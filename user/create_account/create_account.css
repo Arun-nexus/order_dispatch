@@ -97,7 +97,7 @@ body{
     align-items:center;
     font-size: 22px;
     background: rgba(255,255,255,.20);
-    backdrop-filter:blur(10);
+    backdrop-filter:blur(10px);
 }
 
 .feature h4{
@@ -153,7 +153,7 @@ body{
     background:#f4f8f8;
     border: 2px solid transparent;
     border-radius: 12px;
-    transition: 3s;
+    transition: .3s;
     padding:0 18px;
 }
 .input-field:hover{
@@ -239,7 +239,134 @@ body{
 .company{animation: slideLeft 1s ease;}
 .features{animation: slideUP 1.2s ease;}
 
-@media(max_width:1200px) {
-    
-    
+@media(max-width:1400px) {
+    .container{
+        width:95%;
+        height:90%
+    }
+    .login-card{
+        width:420px
+    }
+    .left-panel{
+        padding: 45px;
+    }
+    .company h1{
+        font-size:38px;
+    }
+}
+
+@media(max-width:992px){
+    body{
+        padding:20px;
+        overflow:auto;
+    }
+    .container{
+        width:100%;
+        height:auto;
+        flex-direction:column;
+    }
+    .login-card{
+        width: 90%;
+        max-width: 500px;
+        margin :40px 0;
+    }
+    .left-panel,.right-panel{
+        width:100%
+    }
+    .company h1{
+        font-size: 34px;
+    }
+    .company p{
+        font-size:16px;
+    }
+    .feature{
+        margin-bottom:18px;
+    }
+
+}
+@media(max-width:768px){
+    body{
+        padding:15px;
+        overflow:auto;
+    }
+    .container{
+        flex-direction: column;
+        width:100%;
+        height:auto;
+        border-radius:18px;
+    }
+    .left-panel{
+        padding:30px;
+        min-height:300px;
+    }
+    .logo{
+        width:110px;
+    }
+    .company h1{
+        font-size:30px;
+    }
+    .company p{
+        font-size:15px;
+    }
+    .feature{
+        gap:15px;
+        margin-bottom:15px;
+    }
+    .feature i{
+        width:48px;
+        height:48px;
+        font-size:18px;
+    }
+    .feature h4{
+        font-size:16px;
+    }
+    .feature-span{
+        font-size:13px;
+    }
+    .right-panel{
+        padding:25px 15px;
+    }
+    .login-card{
+        width:100%;
+        padding:30px;
+    }
+    .login-card h2{
+        font-size:28px;
+    }
+}
+
+@media(max-width:480px){
+    body{
+        padding:10px;
+    }
+    .left-panel{
+        display:none;
+    }
+    .right-panel{
+        width:100%;
+        padding:15px;
+    }
+    .login-card{
+        width:100%;
+        border-radius:15px;
+        padding:22px;
+    }
+    .login-card h2{
+        font-size:24px;
+    }
+    .subtitle{
+        font-size:14px;
+        margin-bottom:25px;
+    }
+    .input-field input,
+    .input-field select{
+        font-size:14px;
+    }
+    .login-button{
+        height:50px;
+        font-size:15px;
+    }
+    .footer{
+        font-size:13px;
+    }
 }

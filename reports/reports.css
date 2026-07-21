@@ -1,6 +1,4 @@
-/*=========================================
-            GOOGLE FONT
-==========================================*/
+
 
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
@@ -21,10 +19,6 @@ body{
     min-height:100vh;
 }
 
-/*=========================================
-                SIDEBAR
-==========================================*/
-
 .sidebar{
     position:fixed;
     left:0;
@@ -43,12 +37,12 @@ body{
     display:flex;
     align-items:center;
     gap:15px;
-    margin-bottom:40px;
+    margin:0px 0px 40px 40px;
 }
 
 .logo img{
-    width:55px;
-    height:55px;
+    width:130px;
+    height:130px;
     object-fit:contain;
 }
 

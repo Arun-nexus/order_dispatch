@@ -4,7 +4,7 @@ document.getElementById('loginform').addEventListener('submit', async (e) => {
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
   const roleSelect = document.getElementById('usertype');
-  const role = roleSelect.value.trim().toLowerCase(); // backend enum is lowercase
+  const role = roleSelect.value.trim().toLowerCase();
 
   if (!username || !password || !role) {
     alert('Please fill username, password and user type.');
