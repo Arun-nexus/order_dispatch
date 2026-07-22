@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Users | Acer Biomedical</title>
+
+    <link rel="stylesheet" href="../css/global.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+</head>
+
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div class="logo">
+                <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical" />
+            </div>
+
+            <ul>
+                <li>
+                    <a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a>
+                </li>
+                <li>
+                    <a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a>
+                </li>
+                <li>
+                    <a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
+                </li>
+                <li>
+                    <a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a>
+                </li>
+                <li class="active">
+                    <a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a>
+                </li>
+                <li>
+                    <a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a>
+                </li>
+  <li>
+    <a href="#" onclick="openLogoutModal(event)">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        <span>Logout</span>
+    </a>
+</li>
+
+            <div class="sidebar-profile">
+                <img src="../images/admin.jpg" alt="Admin" />
+                <div>
+                    <h4>Admin</h4>
+                    <p>Super Admin</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ===== MAIN ===== -->
+        <main>
+            <!-- HEADER -->
+            <header>
+                <div>
+                    <h1>Users Management</h1>
+                    <p>Manage all registered users</p>
+                </div>
+                <div class="right-header">
+                    <div class="search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" placeholder="Search users, email, phone..." />
+                    </div>
+                    <button><i class="fa-regular fa-bell"></i></button>
+                    <button><i class="fa-regular fa-envelope"></i></button>
+                    <div class="profile">
+                        <img src="../images/admin.jpg" alt="Admin" />
+                        <div>
+                            <h4>Admin</h4>
+                            <p>Super Admin</p>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- CARDS -->
+            <section class="cards">
+                <div class="card">
+                    <div>
+                        <span>Total Users</span>
+                        <h2>256</h2>
+                        <p>Registered Users</p>
+                    </div>
+                    <i class="fa-solid fa-users"></i>
+                </div>
+                <div class="card">
+                    <div>
+                        <span>Admins</span>
+                        <h2>5</h2>
+                        <p>System Admins</p>
+                    </div>
+                    <i class="fa-solid fa-user-shield"></i>
+                </div>
+                <div class="card">
+                    <div>
+                        <span>Employees</span>
+                        <h2>72</h2>
+                        <p>Company Employees</p>
+                    </div>
+                    <i class="fa-solid fa-user-tie"></i>
+                </div>
+                <div class="card">
+                    <div>
+                        <span>Technicians</span>
+                        <h2>48</h2>
+                        <p>Field Technicians</p>
+                    </div>
+                    <i class="fa-solid fa-screwdriver-wrench"></i>
+                </div>
+                <div class="card">
+                    <div>
+                        <span>Distributors</span>
+                        <h2>131</h2>
+                        <p>Authorized Partners</p>
+                    </div>
+                    <i class="fa-solid fa-truck"></i>
+                </div>
+            </section>
+
+            <!-- TOP ACTIONS -->
+            <div class="top-actions">
+                <button class="export">
+                    <i class="fa-solid fa-file-export"></i> Export
+                </button>
+                <button class="add-user">
+                    <i class="fa-solid fa-user-plus"></i> Add User
+                </button>
+            </div>
+
+            <!-- FILTER SECTION -->
+            <section class="filter-section">
+                <div class="filter-box">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" placeholder="Search by username, email, mobile..." />
+                </div>
+                <div class="filter-box">
+                    <i class="fa-solid fa-user-tag"></i>
+                    <select>
+                        <option>All Roles</option>
+                        <option>Admin</option>
+                        <option>Employee</option>
+                        <option>Technician</option>
+                        <option>Distributor</option>
+                    </select>
+                </div>
+                <div class="filter-box">
+                    <i class="fa-solid fa-building"></i>
+                    <input type="text" placeholder="Company Name" />
+                </div>
+                <button class="filter-btn">
+                    <i class="fa-solid fa-filter"></i> Apply Filter
+                </button>
+            </section>
+
+            <!-- TABLE -->
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" /></th>
+                            <th>User ID</th>
+                            <th>Username</th>
+                            <th>Full Name</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Company</th>
+                            <th>GST Number</th>
+                            <th>Role</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><input type="checkbox" /></td>
+                            <td>USR-1001</td>
+                            <td>rahul123</td>
+                            <td>Rahul Sharma</td>
+                            <td>rahul@gmail.com</td>
+                            <td>9876543210</td>
+                            <td>Sharma Electronics</td>
+                            <td>09ABCDE1234F1Z5</td>
+                            <td><span class="role-badge admin">Admin</span></td>
+                            <td>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="icon-btn delete">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" /></td>
+                            <td>USR-1002</td>
+                            <td>amit.tech</td>
+                            <td>Amit Kumar</td>
+                            <td>amit@gmail.com</td>
+                            <td>9123456789</td>
+                            <td>Tech Solutions</td>
+                            <td>07FGHJK5678M2P9</td>
+                            <td><span class="role-badge technician">Technician</span></td>
+                            <td>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="icon-btn delete">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" /></td>
+                            <td>USR-1003</td>
+                            <td>neha.emp</td>
+                            <td>Neha Verma</td>
+                            <td>neha@gmail.com</td>
+                            <td>9988776655</td>
+                            <td>Verma Industries</td>
+                            <td>08LMNOP4567A8Q2</td>
+                            <td><span class="role-badge employee">Employee</span></td>
+                            <td>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="icon-btn delete">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><input type="checkbox" /></td>
+                            <td>USR-1004</td>
+                            <td>raj.dist</td>
+                            <td>Raj Malhotra</td>
+                            <td>raj@gmail.com</td>
+                            <td>9011223344</td>
+                            <td>Malhotra Distributors</td>
+                            <td>06ZXCVB1234N4W6</td>
+                            <td><span class="role-badge distributor">Distributor</span></td>
+                            <td>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                                <button class="icon-btn">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="icon-btn delete">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- PAGINATION -->
+            <div class="pagination">
+                <button class="page-btn">
+                    <i class="fa-solid fa-angle-left"></i>
+                </button>
+                <button class="page active-page">1</button>
+                <button class="page">2</button>
+                <button class="page">3</button>
+                <button class="page">4</button>
+                <button class="page-btn">
+                    <i class="fa-solid fa-angle-right"></i>
+                </button>
+            </div>
+        </main>
+    </div>
+    <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+
+        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+
+        <h2>Logout?</h2>
+
+        <p>
+            Are you sure you want to logout from your account?
+        </p>
+
+        <div class="logout-actions">
+
+            <button class="cancel-btn"
+                onclick="closeLogoutModal()">
+                Cancel
+            </button>
+
+            <button class="confirm-btn"
+                onclick="logoutNow()">
+                Logout
+            </button>
+
+        </div>
+
+    </div>
+</div>
+<script>
+
+function openLogoutModal(e){
+
+    e.preventDefault();
+
+    document
+        .getElementById("logoutModal")
+        .classList.add("active");
+
+}
+
+function closeLogoutModal(){
+
+    document
+        .getElementById("logoutModal")
+        .classList.remove("active");
+
+}
+
+function logoutNow(){
+
+    window.location.href="../index.html";
+
+}
+
+</script>
+</body>
+
+</html>

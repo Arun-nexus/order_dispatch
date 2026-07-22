@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orders | Acer Biomedical</title>
+  
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+  <div class="container">
+    
+<aside class="sidebar">
+  <div class="logo">
+    <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+  </div>
+  
+  <ul>
+    <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+    <li class="active"><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+    <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+    <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+    <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+    <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+<li>
+    <a href="#" onclick="openLogoutModal(event)">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        <span>Logout</span>
+    </a>
+</li>  </ul>
+  
+  <div class="sidebar-profile">
+    <img src="../images/admin.jpg" alt="Admin">
+    <div>
+      <h4>Admin</h4>
+      <p>Super Admin</p>
+    </div>
+  </div>
+</aside>
+
+    <!-- ===== MAIN ===== -->
+    <main>
+      <!-- HEADER -->
+      <header>
+        <div>
+          <h1>Orders</h1>
+          <p>Manage and track all customer orders</p>
+        </div>
+        <div class="right-header">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Search orders, customer or product">
+          </div>
+          <button><i class="fa-regular fa-bell"></i></button>
+          <button><i class="fa-regular fa-envelope"></i></button>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Admin">
+            <div>
+              <h4>Admin</h4>
+              <p>Super Admin</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- ===== CARDS ===== -->
+      <section class="cards">
+        <!-- Total Orders -->
+        <div class="card">
+          <div>
+            <span>Total Orders</span>
+            <h2>1,250</h2>
+            <p><i class="fa-solid fa-arrow-up" style="color:#22c55e;"></i> 12.5% from last month</p>
+          </div>
+          <i class="fa-solid fa-box"></i>
+        </div>
+
+        <!-- Today's Orders - FIXED -->
+        <div class="card">
+          <div>
+            <span>Today's Orders</span>
+            <h2>42</h2>
+            <p><i class="fa-solid fa-arrow-up" style="color:#22c55e;"></i> 8 new orders today</p>
+          </div>
+          <i class="fa-solid fa-calendar-day" style="background:#fff4e5;color:#f59e0b;"></i>
+        </div>
+
+        <!-- Pending Orders -->
+        <div class="card">
+          <div>
+            <span>Pending Orders</span>
+            <h2>186</h2>
+            <p><i class="fa-solid fa-arrow-up" style="color:#22c55e;"></i> 8.2% from last month</p>
+          </div>
+          <i class="fa-regular fa-clock"></i>
+        </div>
+
+        <!-- Delivered Orders -->
+        <div class="card">
+          <div>
+            <span>Delivered Orders</span>
+            <h2>892</h2>
+            <p><i class="fa-solid fa-arrow-up" style="color:#22c55e;"></i> 10.3% from last month</p>
+          </div>
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+
+        <!-- Cancelled Orders -->
+        <div class="card">
+          <div>
+            <span>Cancelled Orders</span>
+            <h2>172</h2>
+            <p><i class="fa-solid fa-arrow-down" style="color:#d62828;"></i> 4.1% from last month</p>
+          </div>
+          <i class="fa-solid fa-circle-xmark"></i>
+        </div>
+      </section>
+
+      <!-- TOP ACTIONS -->
+      <div class="top-actions">
+        <button class="export"><i class="fa-solid fa-download"></i> Export</button>
+        <button class="add-product"><i class="fa-solid fa-plus"></i> New Order</button>
+      </div>
+
+      <!-- FILTER SECTION -->
+      <section class="filter-section">
+        <div class="filter-box">
+          <i class="fa-solid fa-filter"></i>
+          <select>
+            <option>All Status</option>
+            <option>Pending</option>
+            <option>Processing</option>
+            <option>Delivered</option>
+            <option>Cancelled</option>
+          </select>
+        </div>
+        <div class="filter-box">
+          <i class="fa-solid fa-credit-card"></i>
+          <select>
+            <option>All Payment Modes</option>
+            <option>UPI</option>
+            <option>Credit Card</option>
+            <option>Net Banking</option>
+            <option>COD</option>
+          </select>
+        </div>
+        <div class="filter-box">
+          <i class="fa-solid fa-calendar-days"></i>
+          <input type="date">
+        </div>
+        <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
+      </section>
+
+      <!-- TABLE -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th><input type="checkbox"></th>
+              <th>Order ID</th>
+              <th>Product</th>
+              <th>Ordered By</th>
+              <th>Payment Mode</th>
+              <th>Order Date</th>
+              <th>Status</th>
+              <th>Total Amount</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1001</td>
+              <td>Wireless Mouse</td>
+              <td>Rahul Sharma</td>
+              <td><span class="payment upi">UPI</span></td>
+              <td>12 Jul 2026</td>
+              <td><span class="status delivered">Delivered</span></td>
+              <td>₹1,299</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1002</td>
+              <td>Gaming Keyboard</td>
+              <td>Amit Verma</td>
+              <td><span class="payment card">Card</span></td>
+              <td>13 Jul 2026</td>
+              <td><span class="status pending">Pending</span></td>
+              <td>₹3,999</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1003</td>
+              <td>Bluetooth Speaker</td>
+              <td>Priya Singh</td>
+              <td><span class="payment cod">COD</span></td>
+              <td>13 Jul 2026</td>
+              <td><span class="status processing">Processing</span></td>
+              <td>₹2,850</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1004</td>
+              <td>LED Monitor</td>
+              <td>Sneha Kapoor</td>
+              <td><span class="payment netbanking">Net Banking</span></td>
+              <td>14 Jul 2026</td>
+              <td><span class="status cancelled">Cancelled</span></td>
+              <td>₹12,499</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1005</td>
+              <td>USB Hub</td>
+              <td>Arjun Mehta</td>
+              <td><span class="payment upi">UPI</span></td>
+              <td>15 Jul 2026</td>
+              <td><span class="status delivered">Delivered</span></td>
+              <td>₹799</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1006</td>
+              <td>SSD 1TB</td>
+              <td>Rohit Kumar</td>
+              <td><span class="payment card">Card</span></td>
+              <td>16 Jul 2026</td>
+              <td><span class="status processing">Processing</span></td>
+              <td>₹6,499</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1007</td>
+              <td>Laptop Stand</td>
+              <td>Karan Malhotra</td>
+              <td><span class="payment upi">UPI</span></td>
+              <td>16 Jul 2026</td>
+              <td><span class="status pending">Pending</span></td>
+              <td>₹1,599</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+            <tr>
+              <td><input type="checkbox"></td>
+              <td>#ORD1008</td>
+              <td>Mechanical Keyboard</td>
+              <td>Neha Gupta</td>
+              <td><span class="payment card">Credit Card</span></td>
+              <td>17 Jul 2026</td>
+              <td><span class="status delivered">Delivered</span></td>
+              <td>₹5,499</td>
+              <td>
+                <button class="icon-btn"><i class="fa-solid fa-eye"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-location-dot"></i></button>
+                <button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- ===== PAGINATION ===== -->
+      <div class="pagination">
+        <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button class="page active-page">1</button>
+        <button class="page">2</button>
+        <button class="page">3</button>
+        <button class="page">4</button>
+        <button class="page">5</button>
+        <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
+    </main>
+    
+  </div>
+  <!-- Logout Modal -->
+<div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+
+        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+
+        <h2>Logout?</h2>
+
+        <p>
+            Are you sure you want to logout from your account?
+        </p>
+
+        <div class="logout-actions">
+
+            <button class="cancel-btn"
+                onclick="closeLogoutModal()">
+                Cancel
+            </button>
+
+            <button class="confirm-btn"
+                onclick="logoutNow()">
+                Logout
+            </button>
+
+        </div>
+
+    </div>
+</div>
+  <script>
+
+function openLogoutModal(e){
+
+    e.preventDefault();
+
+    document
+        .getElementById("logoutModal")
+        .classList.add("active");
+
+}
+
+function closeLogoutModal(){
+
+    document
+        .getElementById("logoutModal")
+        .classList.remove("active");
+
+}
+
+function logoutNow(){
+
+    window.location.href="../index.html";
+
+}
+
+</script>
+</body>
+</html>

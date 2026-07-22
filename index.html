@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login | Acer Biomedical</title>
+  
+  <link rel="stylesheet" href="css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body class="login-body">
+  <div class="login-container">
+    
+    <!-- LEFT PANEL -->
+    <div class="login-left">
+      <div>
+        <div class="logo">
+          <img src="images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+        </div>
+        <h1>Acer Biomedicals</h1>
+        <p style="color: #005ca9; font-weight: 500;">Caring For Life</p>
+      </div>
+      
+      <div class="login-features">
+        <div class="feature">
+          <i class="fa-solid fa-shield-heart"></i>
+          <div>
+            <h4>Trusted Care</h4>
+            <span>Quality You Can Trust</span>
+          </div>
+        </div>
+        <div class="feature">
+          <i class="fa-solid fa-user-doctor"></i>
+          <div>
+            <h4>Expert Team</h4>
+            <span>Professional Healthcare</span>
+          </div>
+        </div>
+        <div class="feature">
+          <i class="fa-solid fa-heart-pulse"></i>
+          <div>
+            <h4>Better Health</h4>
+            <span>Your Well Being Matters</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL -->
+    <div class="login-right">
+      <div class="login-card">
+        <h2>Welcome!</h2>
+        <p class="subtitle">Sign in to your Acer Biomedical Account</p>
+        
+        <form action="main_dashboard.html" method="get">
+          <div class="input-box">
+            <label>Username</label>
+            <div class="input-field">
+              <i class="fa-regular fa-user"></i>
+              <input type="text" placeholder="Enter your username" required>
+            </div>
+          </div>
+          
+          <div class="input-box">
+            <label>Password</label>
+            <div class="input-field">
+              <i class="fa-regular fa-eye"></i>
+              <input type="password" placeholder="Enter your password" required>
+            </div>
+          </div>
+          
+          <div class="input-box">
+            <label>User Type</label>
+            <div class="input-field">
+              <select required>
+                <option value="">Select Your User Type</option>
+                <option value="admin">Admin</option>
+                <option value="employee">Employee</option>
+                <option value="technician">Technician</option>
+                <option value="distributor">Distributor</option>
+              </select>
+            </div>
+          </div>
+          
+          <button type="submit" class="login-btn">
+            <i class="fa-solid fa-arrow-right-to-bracket"></i> Login
+          </button>
+        </form>
+        
+        <div class="footer">
+          &copy; 2025 Acer Biomedical. All Rights Reserved.
+        </div>
+      </div>
+    </div>
+    
+  </div>
+</body>
+</html>
