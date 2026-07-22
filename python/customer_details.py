@@ -1,5 +1,5 @@
-from logger import logging
-from mongo.mongodb_connection import mongodbclient
+from python import logging
+from python.mongodb_connection import mongodbclient
 import uuid
 import enum
 

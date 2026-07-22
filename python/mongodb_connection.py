@@ -1,7 +1,7 @@
 import pymongo
 import certifi
 import os
-from logger import logging
+from python import logging
 
 
 ca = certifi.where()
