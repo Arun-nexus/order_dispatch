@@ -26,8 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# resolve everything relative to THIS file's own folder, not whatever
-# directory uvicorn happens to be launched from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
@@ -462,13 +460,7 @@ async def delete_product(product_id: str, user: dict = Depends(require_role("adm
         logging.error("product deletion was failed!")
         raise HTTPException(status_code=500, detail="product cannot be deleted")
 
-
-# ---------- Static frontend (mounted LAST so it never shadows the API
-# routes above; explicit routes/paths always win over a mount) ----------
-
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")
 app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
 app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
-
-# serves any other root-level file directly (common_auth.js, dashboard.js, etc.)
 app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")
