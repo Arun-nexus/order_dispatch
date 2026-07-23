@@ -1264,6 +1264,14 @@ form .save-btn {
     font-size: 28px;
   }
 }
+@media(max-width:1200px){
+  .login-left{
+    margin:auto;
+  }
+  .login-right{
+    margin:auto;
+  }
+}
 
 @media (max-width: 600px) {
   .login-left {

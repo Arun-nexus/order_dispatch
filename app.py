@@ -3,18 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from logger import logging
 from configuration import load_params
-
-from mongo.mongodb_connection import mongodbclient
+from dotenv import load_dotenv
+from mongodb.mongodb_connection import mongodbclient
 from user.customer_details import login
 from order.manage_order import order_manager
 from service.service_details import service_detail
 from inventory.inventory_handling import inventory_manager
 from auth import create_access_token, get_current_user, require_role
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
+load_dotenv()
 app = FastAPI()
 params = load_params()
 
-# allow the frontend (served from file:// or a different port) to call the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,6 +24,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/css",StaticFiles(directory="css"))
+app.mount("/images",StaticFiles(directory="images"))
+app.mount("/pages",StaticFiles(directory = "pages"))
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
@@ -102,8 +107,12 @@ class InventoryRequest(BaseModel):
 class InventoryUpdateRequest(BaseModel):
     updated_values: dict
 
-
-# ---------- Login / accounts ----------
+@app.get("/")
+async def home():
+    return FileResponse("index.html")
+@app.get("/main_dashboard.html")
+async def dashboard():
+    return FileResponse("main_dashboard.html")
 
 @app.post("/login/")
 async def login_page(request: LoginRequest):
@@ -312,8 +321,6 @@ async def order(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="order dataset cannot be fetched")
 
 
-# ---------- Services ----------
-
 @app.get("/service/")
 async def services(user: dict = Depends(get_current_user)):
     try:
@@ -390,8 +397,6 @@ async def manager_confirm(service_id: str, user: dict = Depends(require_role("ad
         logging.error("manager confirmation failed!")
         raise HTTPException(status_code=500, detail="manager confirmation failed")
 
-
-# ---------- Inventory ----------
 
 @app.get("/inventory/")
 async def inventory(user: dict = Depends(get_current_user)):

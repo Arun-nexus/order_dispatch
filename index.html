@@ -10,9 +10,7 @@
 </head>
 <body class="login-body">
   <div class="login-container">
-    
-    <!-- LEFT PANEL -->
-    <div class="login-left">
+        <div class="login-left">
       <div>
         <div class="logo">
           <img src="images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
@@ -45,8 +43,6 @@
         </div>
       </div>
     </div>
-
-    <!-- RIGHT PANEL -->
     <div class="login-right">
       <div class="login-card">
         <h2>Welcome!</h2>
@@ -89,8 +85,8 @@
           </button>
         </form>
 
-        <p class="login-link" style="margin-top:14px;">
-          New here? <a href="pages/signup.html">Create an account</a>
+        <p class="login-link" style="margin-top:14px; color:#64748b; font-size:13px;">
+          New accounts are created by an Admin from Users → Add User.
         </p>
         
         <div class="footer">
@@ -102,7 +98,6 @@
   </div>
 
   <script>
-    // if already logged in, skip straight to the right home page
     (function redirectIfLoggedIn() {
       const token = localStorage.getItem('acer_token');
       const role = localStorage.getItem('acer_role');

@@ -1,48 +1,58 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard | Acer Biomedical</title>
-  
-  <link rel="stylesheet" href="css/global.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+  <link rel="stylesheet" href="css/global.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
 </head>
+
 <body>
   <div class="container">
-    
-    <!-- ===== SIDEBAR ===== -->
     <aside class="sidebar">
       <div class="logo">
-        <img src="images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+        <img src="images/comapny_logo-Photoroom.png" alt="Acer Biomedical" />
       </div>
-      
+
       <ul>
-        <li class="active"><a href="main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
-        <li><a href="pages/orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
-        <li><a href="pages/inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-        <li><a href="pages/service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
-        <li><a href="pages/users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
-        <li><a href="pages/reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
-<li>
-    <a href="#" onclick="openLogoutModal(event)">
-        <i class="fa-solid fa-arrow-right-from-bracket"></i>
-        <span>Logout</span>
-    </a>
-</li>      </ul>
-      
+        <li class="active">
+          <a href="main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a>
+        </li>
+        <li>
+          <a href="pages/orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a>
+        </li>
+        <li>
+          <a href="pages/inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
+        </li>
+        <li>
+          <a href="pages/service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a>
+        </li>
+        <li>
+          <a href="pages/users.html"><i class="fa-solid fa-users"></i><span>Users</span></a>
+        </li>
+        <li>
+          <a href="pages/reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a>
+        </li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
       <div class="sidebar-profile">
-        <img src="images/admin.png" alt="Admin">
+        <img src="images/admin.png" alt="Admin" />
         <div>
-          <h4>Admin User</h4>
-          <p>Administrator</p>
+          <h4 id="sidebarUserName">Admin User</h4>
+          <p id="sidebarUserRole">Administrator</p>
         </div>
       </div>
     </aside>
-
-    <!-- ===== MAIN ===== -->
     <main>
-      <!-- HEADER -->
       <header class="topbar">
         <div class="left">
           <h1>Dashboard</h1>
@@ -50,24 +60,22 @@
         <div class="right">
           <div class="search">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search anything...">
+            <input type="text" placeholder="Search anything..." />
           </div>
           <button><i class="fa-regular fa-bell"></i></button>
           <button><i class="fa-regular fa-message"></i></button>
           <div class="profile">
-            <img src="images/admin.png" alt="Admin">
+            <img src="images/admin.png" alt="Admin" />
             <div>
-              <h4>Admin User</h4>
-              <p>Administrator</p>
+              <h4 id="headerUserName">Admin User</h4>
+              <p id="headerUserRole">Administrator</p>
             </div>
           </div>
         </div>
       </header>
-
-      <!-- WELCOME SECTION -->
       <section class="welcome-section">
         <div class="welcome-left">
-          <h2>Welcome Back, Admin</h2>
+          <h2 id="welcomeText">Welcome Back, Admin</h2>
           <p>Here's what's happening with your business today.</p>
         </div>
         <div class="date-box">
@@ -75,14 +83,15 @@
           <span>20 May 2025</span>
         </div>
       </section>
-
-      <!-- CARDS -->
       <section class="cards">
         <div class="card">
           <div>
             <span>Total Orders</span>
             <h2>1,250</h2>
-            <p><i class="fa-solid fa-arrow-up text-success"></i> 12.5% from last month</p>
+            <p>
+              <i class="fa-solid fa-arrow-up text-success"></i> 12.5% from
+              last month
+            </p>
           </div>
           <i class="fa-solid fa-bag-shopping card-icon-blue"></i>
         </div>
@@ -91,7 +100,10 @@
           <div>
             <span>Pending Orders</span>
             <h2>186</h2>
-            <p><i class="fa-solid fa-arrow-up text-warning"></i> 8.2% from last month</p>
+            <p>
+              <i class="fa-solid fa-arrow-up text-warning"></i> 8.2% from last
+              month
+            </p>
           </div>
           <i class="fa-regular fa-clock card-icon-orange"></i>
         </div>
@@ -100,7 +112,10 @@
           <div>
             <span>Inventory Items</span>
             <h2>4,865</h2>
-            <p><i class="fa-solid fa-arrow-up text-success"></i> 8.3% from last month</p>
+            <p>
+              <i class="fa-solid fa-arrow-up text-success"></i> 8.3% from last
+              month
+            </p>
           </div>
           <i class="fa-solid fa-cube card-icon-green"></i>
         </div>
@@ -109,7 +124,10 @@
           <div>
             <span>Total Employees</span>
             <h2>182</h2>
-            <p><i class="fa-solid fa-arrow-up text-success"></i> 5.4% from last month</p>
+            <p>
+              <i class="fa-solid fa-arrow-up text-success"></i> 5.4% from last
+              month
+            </p>
           </div>
           <i class="fa-solid fa-users card-icon-purple"></i>
         </div>
@@ -118,21 +136,21 @@
           <div>
             <span>Active Services</span>
             <h2>128</h2>
-            <p><i class="fa-solid fa-arrow-up text-success"></i> 10.2% from last month</p>
+            <p>
+              <i class="fa-solid fa-arrow-up text-success"></i> 10.2% from
+              last month
+            </p>
           </div>
           <i class="fa-solid fa-screwdriver-wrench card-icon-orange"></i>
         </div>
       </section>
-
-      <!-- DASHBOARD GRID -->
       <section class="dashboard-grid">
-        <!-- Recent Orders -->
         <div class="panel">
           <div class="panel-header">
             <h3>Recent Orders</h3>
             <a href="pages/orders.html"><button class="view-all-btn">View All</button></a>
           </div>
-          
+
           <div class="order-list">
             <div class="order-item">
               <div class="order-left">
@@ -191,59 +209,63 @@
             </div>
           </div>
         </div>
-
-        <!-- Right Panel -->
         <div class="dashboard-right">
-          <!-- Inventory Status -->
           <div class="panel">
             <div class="panel-header">
               <h3>Inventory Status</h3>
               <a href="pages/inventory.html"><button class="view-all-btn">View All</button></a>
             </div>
-            
+
             <div class="inventory-status">
               <div class="inventory-item">
                 <div class="inventory-head">
-                  <div><i class="fa-solid fa-circle-check text-success"></i> Stock Available</div>
+                  <div>
+                    <i class="fa-solid fa-circle-check text-success"></i>
+                    Stock Available
+                  </div>
                   <strong>3,256</strong>
                 </div>
                 <div class="progress-bar">
-                  <div class="progress-fill green" style="width:67%"></div>
+                  <div class="progress-fill green" style="width: 67%"></div>
                 </div>
                 <small>67%</small>
               </div>
 
               <div class="inventory-item">
                 <div class="inventory-head">
-                  <div><i class="fa-solid fa-triangle-exclamation text-warning"></i> Low Stock Items</div>
+                  <div>
+                    <i class="fa-solid fa-triangle-exclamation text-warning"></i>
+                    Low Stock Items
+                  </div>
                   <strong>1,125</strong>
                 </div>
                 <div class="progress-bar">
-                  <div class="progress-fill orange" style="width:23%"></div>
+                  <div class="progress-fill orange" style="width: 23%"></div>
                 </div>
                 <small>23%</small>
               </div>
 
               <div class="inventory-item">
                 <div class="inventory-head">
-                  <div><i class="fa-solid fa-circle-xmark text-danger"></i> Out Of Stock</div>
+                  <div>
+                    <i class="fa-solid fa-circle-xmark text-danger"></i> Out
+                    Of Stock
+                  </div>
                   <strong>484</strong>
                 </div>
                 <div class="progress-bar">
-                  <div class="progress-fill red" style="width:10%"></div>
+                  <div class="progress-fill red" style="width: 10%"></div>
                 </div>
                 <small>10%</small>
               </div>
             </div>
           </div>
-
-          <!-- Service Requests -->
           <div class="panel">
             <div class="panel-header">
               <h3>Service Requests</h3>
               <a href="pages/service.html"><button class="view-all-btn">View All</button></a>
             </div>
-            
+
             <div class="service-list">
               <div class="service-item">
                 <div>
@@ -281,62 +303,49 @@
         </div>
       </section>
     </main>
-    
   </div>
-  <!-- Logout Modal -->
-<div id="logoutModal" class="logout-modal">
+  <div id="logoutModal" class="logout-modal">
     <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
 
-        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
 
-        <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
 
-        <p>
-            Are you sure you want to logout from your account?
-        </p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">
+          Cancel
+        </button>
 
-        <div class="logout-actions">
-
-            <button class="cancel-btn"
-                onclick="closeLogoutModal()">
-                Cancel
-            </button>
-
-            <button class="confirm-btn"
-                onclick="logoutNow()">
-                Logout
-            </button>
-
-        </div>
-
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
     </div>
-</div>
-<script>
+  </div>
+  <script src="common_auth.js"></script>
+  <script>
+    function openLogoutModal(e) {
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
+    }
+    function closeLogoutModal() {
+      document.getElementById("logoutModal").classList.remove("active");
+    }
 
-function openLogoutModal(e){
-
-    e.preventDefault();
-
-    document
-        .getElementById("logoutModal")
-        .classList.add("active");
-
-}
-
-function closeLogoutModal(){
-
-    document
-        .getElementById("logoutModal")
-        .classList.remove("active");
-
-}
-
-function logoutNow(){
-
-    window.location.href="pages/users.html";
-
-}
-
-</script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const role = getRole() || "admin";
+      const uname = getUsername() || "Admin User";
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ["sidebarUserName", "headerUserName"].forEach(
+        (id) => (document.getElementById(id).textContent = uname),
+      );
+      ["sidebarUserRole", "headerUserRole"].forEach(
+        (id) => (document.getElementById(id).textContent = label),
+      );
+      document.getElementById("welcomeText").textContent =
+        `Welcome Back, ${uname}`;
+    });
+  </script>
+  <script src="dashboard.js"></script>
 </body>
+
 </html>
