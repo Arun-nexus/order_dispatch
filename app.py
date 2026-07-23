@@ -12,6 +12,7 @@ from inventory.inventory_handling import inventory_manager
 from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+import os
 
 load_dotenv()
 app = FastAPI()
@@ -24,9 +25,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.mount("/css",StaticFiles(directory="css"))
-app.mount("/images",StaticFiles(directory="images"))
-app.mount("/pages",StaticFiles(directory = "pages"))
+
+# resolve everything relative to THIS file's own folder, not whatever
+# directory uvicorn happens to be launched from
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
@@ -107,12 +109,16 @@ class InventoryRequest(BaseModel):
 class InventoryUpdateRequest(BaseModel):
     updated_values: dict
 
+
 @app.get("/")
 async def home():
-    return FileResponse("index.html")
+    return FileResponse(os.path.join(BASE_DIR, "index.html"))
+
+
 @app.get("/main_dashboard.html")
 async def dashboard():
-    return FileResponse("main_dashboard.html")
+    return FileResponse(os.path.join(BASE_DIR, "main_dashboard.html"))
+
 
 @app.post("/login/")
 async def login_page(request: LoginRequest):
@@ -455,3 +461,14 @@ async def delete_product(product_id: str, user: dict = Depends(require_role("adm
     except Exception as e:
         logging.error("product deletion was failed!")
         raise HTTPException(status_code=500, detail="product cannot be deleted")
+
+
+# ---------- Static frontend (mounted LAST so it never shadows the API
+# routes above; explicit routes/paths always win over a mount) ----------
+
+app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")
+app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
+app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
+
+# serves any other root-level file directly (common_auth.js, dashboard.js, etc.)
+app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")

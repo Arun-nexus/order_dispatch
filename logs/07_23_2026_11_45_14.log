@@ -1,3 +1,0 @@
-[ 2026-07-23 11:45:15,100 ] root - INFO - parameter file was found
-[ 2026-07-23 11:59:38,222 ] root - ERROR - cannot establish connection with database
-[ 2026-07-23 11:59:38,223 ] root - ERROR - login was not successful
