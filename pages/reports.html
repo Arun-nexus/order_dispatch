@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports | Acer Biomedical</title>
+  
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+  <div class="container">
+    
+    <!-- ===== SIDEBAR ===== -->
+<aside class="sidebar">
+  <div class="logo">
+    <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+  </div>
+  
+  <ul>
+    <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+    <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+    <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+    <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+    <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+    <li class="active"><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+<li>
+    <a href="#" onclick="openLogoutModal(event)">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        <span>Logout</span>
+    </a>
+</li>  </ul>
+  
+  <div class="sidebar-profile">
+    <img src="../images/admin.jpg" alt="Admin">
+    <div>
+      <h4>Admin</h4>
+      <p>Super Admin</p>
+    </div>
+  </div>
+</aside>
+
+    <!-- ===== MAIN ===== -->
+    <main>
+      <!-- HEADER -->
+      <header>
+        <div>
+          <h1>Reports Dashboard</h1>
+          <p>Business Analytics & Reports</p>
+        </div>
+        <div class="right-header">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Search reports...">
+          </div>
+          <button><i class="fa-regular fa-bell"></i></button>
+          <button><i class="fa-regular fa-envelope"></i></button>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Admin">
+            <div>
+              <h4>Admin</h4>
+              <p>Super Admin</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- CARDS -->
+      <section class="cards">
+        <div class="card">
+          <div>
+            <span>Total Revenue</span>
+            <h2>₹48.6L</h2>
+            <p>This Month</p>
+          </div>
+          <i class="fa-solid fa-indian-rupee-sign"></i>
+        </div>
+        <div class="card">
+          <div>
+            <span>Total Orders</span>
+            <h2>2,458</h2>
+            <p>Completed Orders</p>
+          </div>
+          <i class="fa-solid fa-cart-shopping"></i>
+        </div>
+        <div class="card">
+          <div>
+            <span>Total Services</span>
+            <h2>845</h2>
+            <p>Completed Services</p>
+          </div>
+          <i class="fa-solid fa-screwdriver-wrench"></i>
+        </div>
+        <div class="card">
+          <div>
+            <span>Inventory Value</span>
+            <h2>₹18.2L</h2>
+            <p>Current Stock</p>
+          </div>
+          <i class="fa-solid fa-boxes-stacked"></i>
+        </div>
+        <div class="card">
+          <div>
+            <span>Total Users</span>
+            <h2>256</h2>
+            <p>Registered Users</p>
+          </div>
+          <i class="fa-solid fa-users"></i>
+        </div>
+      </section>
+
+      <!-- TOP ACTIONS -->
+      <div class="top-actions">
+        <button class="export"><i class="fa-solid fa-file-pdf"></i> Export PDF</button>
+        <button class="export"><i class="fa-solid fa-file-excel"></i> Export Excel</button>
+        <button class="generate"><i class="fa-solid fa-chart-column"></i> Generate Report</button>
+      </div>
+
+      <!-- FILTER SECTION -->
+      <section class="filter-section">
+        <div class="filter-box">
+          <i class="fa-solid fa-calendar-days"></i>
+          <input type="date">
+        </div>
+        <div class="filter-box">
+          <i class="fa-solid fa-calendar-days"></i>
+          <input type="date">
+        </div>
+        <div class="filter-box">
+          <i class="fa-solid fa-filter"></i>
+          <select>
+            <option>All Reports</option>
+            <option>Sales Report</option>
+            <option>Inventory Report</option>
+            <option>Service Report</option>
+            <option>User Report</option>
+            <option>Revenue Report</option>
+          </select>
+        </div>
+        <button class="filter-btn"><i class="fa-solid fa-magnifying-glass"></i> Apply</button>
+      </section>
+
+      <!-- CHARTS -->
+      <section style="display:grid;grid-template-columns:2fr 1fr;gap:25px;margin-bottom:30px;">
+        <div style="background:#fff;border-radius:20px;padding:25px;box-shadow:var(--shadow-sm);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h3 style="color:var(--text-primary);">Monthly Revenue</h3>
+            <button style="background:var(--bg-hover);color:var(--primary);padding:10px 16px;border-radius:10px;font-weight:600;">View More</button>
+          </div>
+          <div style="height:320px;background:#f8fafc;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);">
+            <i class="fa-solid fa-chart-bar" style="font-size:40px;opacity:0.3;"></i>
+            <span style="margin-left:15px;">Chart.js will render here</span>
+          </div>
+        </div>
+        <div style="background:#fff;border-radius:20px;padding:25px;box-shadow:var(--shadow-sm);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+            <h3 style="color:var(--text-primary);">Service Status</h3>
+          </div>
+          <div style="height:320px;background:#f8fafc;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);">
+            <i class="fa-solid fa-chart-pie" style="font-size:40px;opacity:0.3;"></i>
+            <span style="margin-left:15px;">Chart.js will render here</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- TABLE -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Report ID</th>
+              <th>Report Type</th>
+              <th>Generated By</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th>Download</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>RPT-001</td>
+              <td>Sales Report</td>
+              <td>Admin</td>
+              <td>12 Jul 2026</td>
+              <td><span class="status completed">Completed</span></td>
+              <td><button class="icon-btn"><i class="fa-solid fa-download"></i></button></td>
+            </tr>
+            <tr>
+              <td>RPT-002</td>
+              <td>Inventory Report</td>
+              <td>Manager</td>
+              <td>13 Jul 2026</td>
+              <td><span class="status completed">Completed</span></td>
+              <td><button class="icon-btn"><i class="fa-solid fa-download"></i></button></td>
+            </tr>
+            <tr>
+              <td>RPT-003</td>
+              <td>Service Report</td>
+              <td>Admin</td>
+              <td>14 Jul 2026</td>
+              <td><span class="status processing">Processing</span></td>
+              <td><button class="icon-btn"><i class="fa-solid fa-spinner"></i></button></td>
+            </tr>
+            <tr>
+              <td>RPT-004</td>
+              <td>User Report</td>
+              <td>System</td>
+              <td>15 Jul 2026</td>
+              <td><span class="status completed">Completed</span></td>
+              <td><button class="icon-btn"><i class="fa-solid fa-download"></i></button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PAGINATION -->
+      <div class="pagination">
+        <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button class="page active-page">1</button>
+        <button class="page">2</button>
+        <button class="page">3</button>
+        <button class="page">4</button>
+        <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
+    </main>
+    
+  </div>
+  <!-- Logout Modal -->
+<div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+
+        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+
+        <h2>Logout?</h2>
+
+        <p>
+            Are you sure you want to logout from your account?
+        </p>
+
+        <div class="logout-actions">
+
+            <button class="cancel-btn"
+                onclick="closeLogoutModal()">
+                Cancel
+            </button>
+
+            <button class="confirm-btn"
+                onclick="logoutNow()">
+                Logout
+            </button>
+
+        </div>
+
+    </div>
+</div>
+<script>
+
+function openLogoutModal(e){
+
+    e.preventDefault();
+
+    document
+        .getElementById("logoutModal")
+        .classList.add("active");
+
+}
+
+function closeLogoutModal(){
+
+    document
+        .getElementById("logoutModal")
+        .classList.remove("active");
+
+}
+
+function logoutNow(){
+
+    window.location.href="../index.html";
+
+}
+
+</script>
+  
+</body>
+</html>

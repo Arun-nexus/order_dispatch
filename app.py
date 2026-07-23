@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from logger import logging
 from configuration import load_params
@@ -8,9 +9,19 @@ from user.customer_details import login
 from order.manage_order import order_manager
 from service.service_details import service_detail
 from inventory.inventory_handling import inventory_manager
+from auth import create_access_token, get_current_user, require_role
 
 app = FastAPI()
 params = load_params()
+
+# allow the frontend (served from file:// or a different port) to call the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
@@ -97,7 +108,7 @@ class InventoryUpdateRequest(BaseModel):
 @app.post("/login/")
 async def login_page(request: LoginRequest):
     try:
-        db = login() 
+        db = login()
         dataset = db.get_data(ACCOUNTS_COLLECTION, query={"username": request.username})
 
         if not dataset:
@@ -111,7 +122,14 @@ async def login_page(request: LoginRequest):
         if user["password"] != request.password or user["role"] != request.role:
             raise HTTPException(status_code=401, detail="details did not match")
 
-        return {"message": "access granted", "role": user["role"]}
+        token = create_access_token(username=user["username"], role=user["role"])
+
+        return {
+            "message": "access granted",
+            "role": user["role"],
+            "access_token": token,
+            "token_type": "bearer"
+        }
 
     except HTTPException:
         raise
@@ -121,7 +139,7 @@ async def login_page(request: LoginRequest):
 
 
 @app.get("/account/")
-async def account():
+async def account(user: dict = Depends(get_current_user)):
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
@@ -132,9 +150,8 @@ async def account():
         raise HTTPException(status_code=500, detail="account informations cannot be fetched")
 
 
-# TODO: restrict this route to admin role only (middleware / dependency)
 @app.post("/account/create_account/")
-async def create_account(request: CreateAccountRequest):
+async def create_account(request: CreateAccountRequest, user: dict = Depends(require_role("admin"))):
     try:
         if request.password != request.confirm_password:
             raise HTTPException(status_code=400, detail="confirm password is not same as password")
@@ -171,7 +188,7 @@ async def create_account(request: CreateAccountRequest):
 
 
 @app.post("/login/delete_account/{username}")
-async def delete_account(username: str):
+async def delete_account(username: str, user: dict = Depends(require_role("admin"))):
     try:
         db = login()
         db.delete(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
@@ -184,7 +201,7 @@ async def delete_account(username: str):
 
 
 @app.post("/login/update_account/{username}")
-async def update_account(username: str, updated_values: UpdateAccountRequest):
+async def update_account(username: str, updated_values: UpdateAccountRequest, user: dict = Depends(require_role("admin"))):
     try:
         db = login()
         db.update(collection_name=ACCOUNTS_COLLECTION, query={"username": username},
@@ -198,7 +215,7 @@ async def update_account(username: str, updated_values: UpdateAccountRequest):
 
 
 @app.post("/order/create_order/")
-async def create_order(request: CreateOrderRequest):
+async def create_order(request: CreateOrderRequest, user: dict = Depends(get_current_user)):
     try:
         order = order_manager(
             product_name=request.product_name,
@@ -221,7 +238,7 @@ async def create_order(request: CreateOrderRequest):
 
 
 @app.get("/track_order/{order_id}")
-async def track_order(order_id: str):
+async def track_order(order_id: str, user: dict = Depends(get_current_user)):
     try:
         db = order_manager()
         dataset = db.get_data(ORDERS_COLLECTION, query={"order_id": order_id})
@@ -238,7 +255,7 @@ async def track_order(order_id: str):
 
 
 @app.post("/order/confirm_delivery/{order_id}")
-async def confirm_delivery(order_id: str):
+async def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = order_manager()
         result = db.update(
@@ -260,7 +277,7 @@ async def confirm_delivery(order_id: str):
 
 
 @app.post("/order/delete/{order_id}")
-async def delete_order(order_id: str):
+async def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = order_manager()
         db.delete(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
@@ -271,7 +288,7 @@ async def delete_order(order_id: str):
 
 
 @app.post("/order/update/{order_id}")
-async def update_order(order_id: str, updated_value: OrderUpdatedValue):
+async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = order_manager()
         db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},update_values=updated_value.updated_order_value)
@@ -284,7 +301,7 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue):
 
 
 @app.get("/order/")
-async def order():
+async def order(user: dict = Depends(get_current_user)):
     try:
         db = order_manager()
         dataset = db.get_data(collection_name=ORDERS_COLLECTION, query={})
@@ -298,7 +315,7 @@ async def order():
 # ---------- Services ----------
 
 @app.get("/service/")
-async def services():
+async def services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
         dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={})
@@ -310,7 +327,7 @@ async def services():
 
 
 @app.post("/services/create")
-async def create_service(request: ServiceRequest):
+async def create_service(request: ServiceRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
     try:
         service = service_detail(product_id=request.product_id, serial_no=request.serial_no)
         service.add_service(
@@ -333,7 +350,7 @@ async def create_service(request: ServiceRequest):
 
 
 @app.post("/service/delete/{service_id}")
-async def delete_service(service_id: str):
+async def delete_service(service_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.delete_service(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -345,7 +362,7 @@ async def delete_service(service_id: str):
 
 
 @app.post("/service/update/{service_id}")
-async def update_service(service_id: str, request: ServiceUpdateRequest):
+async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.update_service_status(
@@ -364,7 +381,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest):
 
 
 @app.post("/service/manager_confirm/{service_id}")
-async def manager_confirm(service_id: str):
+async def manager_confirm(service_id: str, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.manager_confirm_return(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -377,7 +394,7 @@ async def manager_confirm(service_id: str):
 # ---------- Inventory ----------
 
 @app.get("/inventory/")
-async def inventory():
+async def inventory(user: dict = Depends(get_current_user)):
     try:
         db = inventory_manager()
         dataset = db.get_data(collection_name=INVENTORY_COLLECTION, query={})
@@ -389,7 +406,7 @@ async def inventory():
 
 
 @app.post("/inventory/create")
-async def create_inventory(request: InventoryRequest):
+async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
         inventory_item = inventory_manager(
             product_name=request.product_name,
@@ -411,7 +428,7 @@ async def create_inventory(request: InventoryRequest):
 
 
 @app.post("/inventory/update/{product_id}")
-async def update_inventory(product_id: str, request: InventoryUpdateRequest):
+async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = inventory_manager()
         db.update(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id},
@@ -424,7 +441,7 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest):
 
 
 @app.post("/inventory/delete/{product_id}")
-async def delete_product(product_id: str):
+async def delete_product(product_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = inventory_manager(product_id=product_id)
         db.delete(collection_name=INVENTORY_COLLECTION)

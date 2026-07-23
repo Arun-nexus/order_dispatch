@@ -1,5 +1,5 @@
-from mongo.mongodb_connection import mongodbclient
-from logger import logging
+from python.mongodb_connection import mongodbclient
+from python import logging
 
 
 class inventory_manager(mongodbclient):

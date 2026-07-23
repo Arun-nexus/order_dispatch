@@ -1,316 +1,342 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ABM Dashboard</title>
-    <link rel="stylesheet" href="main_style.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
-    />
-  </head>
-  <body>
-    <div class="container">
-      <aside class="sidebar">
-        <div class="logo">
-          <img src="images/comapny_logo-Photoroom.png" alt="Logo" />
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard | Acer Biomedical</title>
+  
+  <link rel="stylesheet" href="css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+  <div class="container">
+    
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+      
+      <ul>
+        <li class="active"><a href="main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="pages/orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="pages/inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="pages/service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="pages/users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="pages/reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+<li>
+    <a href="#" onclick="openLogoutModal(event)">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        <span>Logout</span>
+    </a>
+</li>      </ul>
+      
+      <div class="sidebar-profile">
+        <img src="images/admin.png" alt="Admin">
+        <div>
+          <h4>Admin User</h4>
+          <p>Administrator</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <main>
+      <!-- HEADER -->
+      <header class="topbar">
+        <div class="left">
+          <h1>Dashboard</h1>
+        </div>
+        <div class="right">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Search anything...">
+          </div>
+          <button><i class="fa-regular fa-bell"></i></button>
+          <button><i class="fa-regular fa-message"></i></button>
+          <div class="profile">
+            <img src="images/admin.png" alt="Admin">
+            <div>
+              <h4>Admin User</h4>
+              <p>Administrator</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- WELCOME SECTION -->
+      <section class="welcome-section">
+        <div class="welcome-left">
+          <h2>Welcome Back, Admin</h2>
+          <p>Here's what's happening with your business today.</p>
+        </div>
+        <div class="date-box">
+          <i class="fa-regular fa-calendar"></i>
+          <span>20 May 2025</span>
+        </div>
+      </section>
+
+      <!-- CARDS -->
+      <section class="cards">
+        <div class="card">
+          <div>
+            <span>Total Orders</span>
+            <h2>1,250</h2>
+            <p><i class="fa-solid fa-arrow-up text-success"></i> 12.5% from last month</p>
+          </div>
+          <i class="fa-solid fa-bag-shopping card-icon-blue"></i>
         </div>
 
-        <ul class="menu">
-          <li class="active">
-            <i class="fa-solid fa-house"></i><span>Dashboard</span>
-          </li>
-          <li>
-            <i class="fa-regular fa-calendar-check"></i><span>Orders</span>
-          </li>
-          <li><i class="fa-solid fa-cube"></i><span>Inventory</span></li>
-          <li><i class="fa-solid fa-users"></i><span>Employees</span></li>
-          <li>
-            <i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span>
-          </li>
-          <li><i class="fa-solid fa-chart-simple"></i><span>Reports</span></li>
-          <li><i class="fa-solid fa-gear"></i><span>Settings</span></li>
-          <li>
-            <i class="fa-solid fa-arrow-right-from-bracket"></i
-            ><span>Logout</span>
-          </li>
-        </ul>
-
-        <div class="sidebar-bg">
-          <img src="images/sidebar-bg.png" alt="" />
+        <div class="card">
+          <div>
+            <span>Pending Orders</span>
+            <h2>186</h2>
+            <p><i class="fa-solid fa-arrow-up text-warning"></i> 8.2% from last month</p>
+          </div>
+          <i class="fa-regular fa-clock card-icon-orange"></i>
         </div>
-      </aside>
 
-      <main class="main">
-        <header class="topbar">
-          <div class="left">
-            <i class="fa-solid fa-bars"></i>
-            <h1>Dashboard</h1>
+        <div class="card">
+          <div>
+            <span>Inventory Items</span>
+            <h2>4,865</h2>
+            <p><i class="fa-solid fa-arrow-up text-success"></i> 8.3% from last month</p>
           </div>
+          <i class="fa-solid fa-cube card-icon-green"></i>
+        </div>
 
-          <div class="right">
-            <div class="search-box">
-              <input type="text" placeholder="Search anything..." />
-              <i class="fa-solid fa-magnifying-glass"></i>
-            </div>
+        <div class="card">
+          <div>
+            <span>Total Employees</span>
+            <h2>182</h2>
+            <p><i class="fa-solid fa-arrow-up text-success"></i> 5.4% from last month</p>
+          </div>
+          <i class="fa-solid fa-users card-icon-purple"></i>
+        </div>
 
-            <div class="notify">
-              <div class="icon">
-                <i class="fa-regular fa-bell"></i><span>5</span>
-              </div>
-              <div class="icon">
-                <i class="fa-regular fa-message"></i><span>3</span>
-              </div>
-            </div>
+        <div class="card">
+          <div>
+            <span>Active Services</span>
+            <h2>128</h2>
+            <p><i class="fa-solid fa-arrow-up text-success"></i> 10.2% from last month</p>
+          </div>
+          <i class="fa-solid fa-screwdriver-wrench card-icon-orange"></i>
+        </div>
+      </section>
 
-            <div class="profile">
-              <img src="images/admin.png" alt="" />
-              <div>
-                <h4>Admin User</h4>
-                <p>Administrator</p>
-              </div>
-              <i class="fa-solid fa-angle-down"></i>
-            </div>
+      <!-- DASHBOARD GRID -->
+      <section class="dashboard-grid">
+        <!-- Recent Orders -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Recent Orders</h3>
+            <a href="pages/orders.html"><button class="view-all-btn">View All</button></a>
           </div>
-        </header>
-
-        <section class="welcome">
-          <div class="welcome-left">
-            <h2>Welcome Back, Admin User</h2>
-            <p>Here's what's happening with your business today.</p>
-          </div>
-          <div class="date-box">
-            <i class="fa-regular fa-calendar"></i>
-            <span>20 May 2025</span>
-            <i class="fa-solid fa-angle-down"></i>
-          </div>
-        </section>
-
-        <section class="cards">
-          <div class="card">
-            <div class="icon blue">
-              <i class="fa-solid fa-bag-shopping"></i>
-            </div>
-            <div>
-              <h5>Total Orders</h5>
-              <h2>1,250</h2>
-              <p>
-                <i class="fa-solid fa-arrow-up"></i>12.5%
-                <span>from last month</span>
-              </p>
-            </div>
-          </div>
-          <div class="card">
-            <div class="icon green"><i class="fa-solid fa-cube"></i></div>
-            <div>
-              <h5>Total Inventory Items</h5>
-              <h2>4,865</h2>
-              <p>
-                <i class="fa-solid fa-arrow-up"></i>8.3%
-                <span>from last month</span>
-              </p>
-            </div>
-          </div>
-          <div class="card">
-            <div class="icon purple"><i class="fa-solid fa-users"></i></div>
-            <div>
-              <h5>Total Employees</h5>
-              <h2>182</h2>
-              <p>
-                <i class="fa-solid fa-arrow-up"></i>5.4%
-                <span>from last month</span>
-              </p>
-            </div>
-          </div>
-          <div class="card">
-            <div class="icon orange">
-              <i class="fa-solid fa-screwdriver-wrench"></i>
-            </div>
-            <div>
-              <h5>Active Services</h5>
-              <h2>128</h2>
-              <p>
-                <i class="fa-solid fa-arrow-up"></i>10.2%
-                <span>from last month</span>
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section class="dashboard-grid">
-          <div class="recent-orders">
-            <div class="section-header">
-              <h3>Recent Orders</h3>
-              <button>View All</button>
-            </div>
-            <div class="order-list">
-              <div class="order">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1025</h4>
-                    <p>20 May 2025</p>
-                  </div>
+          
+          <div class="order-list">
+            <div class="order-item">
+              <div class="order-left">
+                <div class="order-icon">
+                  <i class="fa-solid fa-file-medical"></i>
                 </div>
-                <span class="badge pending">Pending</span>
-                <strong>₹24,500</strong>
+                <div>
+                  <h4>ORD1025</h4>
+                  <p>20 May 2025</p>
+                </div>
+              </div>
+              <span class="status pending">Pending</span>
+              <strong>₹24,500</strong>
+            </div>
+
+            <div class="order-item">
+              <div class="order-left">
+                <div class="order-icon">
+                  <i class="fa-solid fa-file-medical"></i>
+                </div>
+                <div>
+                  <h4>ORD1024</h4>
+                  <p>19 May 2025</p>
+                </div>
+              </div>
+              <span class="status delivered">Delivered</span>
+              <strong>₹18,750</strong>
+            </div>
+
+            <div class="order-item">
+              <div class="order-left">
+                <div class="order-icon">
+                  <i class="fa-solid fa-file-medical"></i>
+                </div>
+                <div>
+                  <h4>ORD1023</h4>
+                  <p>18 May 2025</p>
+                </div>
+              </div>
+              <span class="status processing">Processing</span>
+              <strong>₹32,100</strong>
+            </div>
+
+            <div class="order-item">
+              <div class="order-left">
+                <div class="order-icon">
+                  <i class="fa-solid fa-file-medical"></i>
+                </div>
+                <div>
+                  <h4>ORD1022</h4>
+                  <p>17 May 2025</p>
+                </div>
+              </div>
+              <span class="status cancelled">Cancelled</span>
+              <strong>₹8,450</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Panel -->
+        <div class="dashboard-right">
+          <!-- Inventory Status -->
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Inventory Status</h3>
+              <a href="pages/inventory.html"><button class="view-all-btn">View All</button></a>
+            </div>
+            
+            <div class="inventory-status">
+              <div class="inventory-item">
+                <div class="inventory-head">
+                  <div><i class="fa-solid fa-circle-check text-success"></i> Stock Available</div>
+                  <strong>3,256</strong>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill green" style="width:67%"></div>
+                </div>
+                <small>67%</small>
               </div>
 
-              <div class="order">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1024</h4>
-                    <p>19 May 2025</p>
-                  </div>
+              <div class="inventory-item">
+                <div class="inventory-head">
+                  <div><i class="fa-solid fa-triangle-exclamation text-warning"></i> Low Stock Items</div>
+                  <strong>1,125</strong>
                 </div>
-                <span class="badge delivered">Delivered</span>
-                <strong>₹18,750</strong>
+                <div class="progress-bar">
+                  <div class="progress-fill orange" style="width:23%"></div>
+                </div>
+                <small>23%</small>
               </div>
 
-              <div class="order">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1023</h4>
-                    <p>18 May 2025</p>
-                  </div>
+              <div class="inventory-item">
+                <div class="inventory-head">
+                  <div><i class="fa-solid fa-circle-xmark text-danger"></i> Out Of Stock</div>
+                  <strong>484</strong>
                 </div>
-                <span class="badge processing">Processing</span>
-                <strong>₹32,100</strong>
-              </div>
-
-              <div class="order">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1022</h4>
-                    <p>17 May 2025</p>
-                  </div>
+                <div class="progress-bar">
+                  <div class="progress-fill red" style="width:10%"></div>
                 </div>
-                <span class="badge shipped">Shipped</span>
-                <strong>₹15,200</strong>
-              </div>
-
-              <div class="order">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1021</h4>
-                    <p>16 May 2025</p>
-                  </div>
-                </div>
-                <span class="badge cancelled">Cancelled</span>
-                <strong>₹8,450</strong>
+                <small>10%</small>
               </div>
             </div>
           </div>
 
-          <div class="dashboard-right">
-            <div class="panel">
-              <div class="section-header">
-                <h3>Inventory Status</h3>
-                <button>View All</button>
-              </div>
-              <div class="inventory">
-                <div class="inventory-item">
-                  <div class="inventory-head">
-                    <div>
-                      <i class="fa-solid fa-circle-check success"></i
-                      ><span>Stock Available</span>
-                    </div>
-                    <strong>3,256</strong>
-                  </div>
-                  <div class="progress">
-                    <div class="progress-bar green" style="width: 67%"></div>
-                  </div>
-                  <small>67%</small>
-                </div>
-                <div class="inventory-item">
-                  <div class="inventory-head">
-                    <div>
-                      <i class="fa-solid fa-triangle-exclamation warning"></i
-                      ><span>Low Stock Items</span>
-                    </div>
-                    <strong>1,125</strong>
-                  </div>
-                  <div class="progress">
-                    <div class="progress-bar orange" style="width: 23%"></div>
-                  </div>
-                  <small>23%</small>
-                </div>
-                <div class="inventory-item">
-                  <div class="inventory-head">
-                    <div>
-                      <i class="fa-solid fa-circle-xmark danger"></i
-                      ><span>Out Of Stock</span>
-                    </div>
-                    <strong>484</strong>
-                  </div>
-                  <div class="progress">
-                    <div class="progress-bar red" style="width: 10%"></div>
-                  </div>
-                  <small>10%</small>
-                </div>
-              </div>
+          <!-- Service Requests -->
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Service Requests</h3>
+              <a href="pages/service.html"><button class="view-all-btn">View All</button></a>
             </div>
-
-            <div class="panel">
-              <div class="section-header">
-                <h3>Service Requests</h3>
-                <button>View All</button>
+            
+            <div class="service-list">
+              <div class="service-item">
+                <div>
+                  <h4>Ticket #251</h4>
+                  <p>20 May 2025</p>
+                </div>
+                <span class="status pending">Open</span>
               </div>
-              <div class="service-list">
-                <div class="service">
-                  <div>
-                    <h4>Ticket #251</h4>
-                    <p>20 May 2025</p>
-                  </div>
-                  <span class="badge pending">Open</span>
+
+              <div class="service-item">
+                <div>
+                  <h4>Ticket #250</h4>
+                  <p>19 May 2025</p>
                 </div>
-                <div class="service">
-                  <div>
-                    <h4>Ticket #250</h4>
-                    <p>19 May 2025</p>
-                  </div>
-                  <span class="badge delivered">Closed</span>
+                <span class="status delivered">Closed</span>
+              </div>
+
+              <div class="service-item">
+                <div>
+                  <h4>Ticket #249</h4>
+                  <p>18 May 2025</p>
                 </div>
-                <div class="service">
-                  <div>
-                    <h4>Ticket #249</h4>
-                    <p>18 May 2025</p>
-                  </div>
-                  <span class="badge processing">Pending</span>
+                <span class="status processing">Pending</span>
+              </div>
+
+              <div class="service-item">
+                <div>
+                  <h4>Ticket #248</h4>
+                  <p>17 May 2025</p>
                 </div>
-                <div class="service">
-                  <div>
-                    <h4>Ticket #248</h4>
-                    <p>17 May 2025</p>
-                  </div>
-                  <span class="badge cancelled">On Hold</span>
-                </div>
+                <span class="status cancelled">On Hold</span>
               </div>
             </div>
           </div>
-        </section>
-      </main>
+        </div>
+      </section>
+    </main>
+    
+  </div>
+  <!-- Logout Modal -->
+<div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+
+        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+
+        <h2>Logout?</h2>
+
+        <p>
+            Are you sure you want to logout from your account?
+        </p>
+
+        <div class="logout-actions">
+
+            <button class="cancel-btn"
+                onclick="closeLogoutModal()">
+                Cancel
+            </button>
+
+            <button class="confirm-btn"
+                onclick="logoutNow()">
+                Logout
+            </button>
+
+        </div>
+
     </div>
-  </body>
+</div>
+<script>
+
+function openLogoutModal(e){
+
+    e.preventDefault();
+
+    document
+        .getElementById("logoutModal")
+        .classList.add("active");
+
+}
+
+function closeLogoutModal(){
+
+    document
+        .getElementById("logoutModal")
+        .classList.remove("active");
+
+}
+
+function logoutNow(){
+
+    window.location.href="pages/users.html";
+
+}
+
+</script>
+</body>
 </html>

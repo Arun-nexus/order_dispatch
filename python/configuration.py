@@ -1,5 +1,5 @@
 import yaml
-from logger import logging
+from python import logging
 
 def load_params()->dict:
     try:
