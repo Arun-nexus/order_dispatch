@@ -43,7 +43,7 @@ function clearSession() {
 }
 
 function loginPath() {
-  return location.pathname.includes('/pages/') ? '../index.html' : 'index.html';
+  return location.pathname.includes('/pages/') ? '/index.html' : 'index.html';
 }
 
 function homePathFor(role) {

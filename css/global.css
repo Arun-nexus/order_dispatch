@@ -41,10 +41,11 @@
   font-family: 'Poppins', sans-serif;
 }
 
-body {
-  background: var(--bg-main);
-  color: var(--text-secondary);
-  overflow-x: hidden;
+body{
+    background:var(--bg-main);
+    color:var(--text-secondary);
+    overflow-x:hidden;
+    min-width:1200px;
 }
 
 a {
@@ -182,11 +183,10 @@ img {
   display: inline-block;
 }
 
-main {
-  margin-left: var(--sidebar-width);
-  width: calc(100% - var(--sidebar-width));
-  padding: 35px;
-  min-height: 100vh;
+main{
+    margin-left:var(--sidebar-width);
+    width:calc(100% - var(--sidebar-width));
+    padding:2vw;
 }
 
 header,
