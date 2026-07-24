@@ -23,12 +23,16 @@ async function loadOrders() {
 }
 
 function updateCards(orders) {
-  const cardValues = document.querySelectorAll('.cards .card p');
+  const cardValues = document.querySelectorAll('.cards .card h2');
   if (!cardValues.length) return;
+  const today = new Date().toDateString();
+  const todaysOrders = orders.filter(o => o.order_date && new Date(o.order_date).toDateString() === today);
+  // orders.html card order: Total Orders, Today's Orders, Pending Orders, Delivered Orders, Cancelled Orders
   cardValues[0].textContent = orders.length;
-  cardValues[1].textContent = orders.filter(o => o.status === 'placed').length;
-  cardValues[2].textContent = orders.filter(o => o.status === 'delivered').length;
-  cardValues[3].textContent = orders.filter(o => o.status === 'cancelled').length;
+  if (cardValues[1]) cardValues[1].textContent = todaysOrders.length;
+  if (cardValues[2]) cardValues[2].textContent = orders.filter(o => o.status === 'placed').length;
+  if (cardValues[3]) cardValues[3].textContent = orders.filter(o => o.status === 'delivered').length;
+  if (cardValues[4]) cardValues[4].textContent = orders.filter(o => o.status === 'cancelled').length;
 }
 
 function statusClass(status) {
@@ -74,6 +78,7 @@ function rowOrder(e) {
 
 function wireHeaderButtons() {
   const buttons = document.querySelectorAll('header > div:last-child button');
+  // Order in orders.html: Track Order, Export, New Order
   if (buttons[0]) buttons[0].addEventListener('click', () => {
     const id = prompt('Enter order ID to track:');
     if (id) trackOrder(id);

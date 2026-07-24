@@ -13,7 +13,7 @@ class ServiceStatus(str, enum.Enum):
 
 class service_detail(mongodbclient):
 
-    def __init__(self, product_id: str, serial_no: str, status="active"):
+    def __init__(self, product_id: str = None, serial_no: str = None, status="active"):
         super().__init__()
 
         self.product_id = product_id
@@ -111,4 +111,3 @@ class service_detail(mongodbclient):
 
     def technician_location(self, user_id):
         pass
-

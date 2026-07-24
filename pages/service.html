@@ -201,6 +201,163 @@
             </div>
         </div>
     </div>
+    <!-- ================= Action Menu Modal ================= -->
+
+<div id="actionModal" class="logout-modal">
+
+    <div class="logout-box" style="max-width:420px;">
+
+        <h2 style="margin-bottom:20px;">
+            Service Actions
+        </h2>
+
+        <div class="action-buttons">
+
+            <button id="viewBtn" class="confirm-btn" style="width:100%;margin-bottom:12px;">
+
+                <i class="fa-solid fa-eye"></i>
+
+                View Details
+
+            </button>
+
+            <button id="statusBtn" class="confirm-btn" style="width:100%;margin-bottom:12px;background:#0d6efd;">
+
+                <i class="fa-solid fa-pen"></i>
+
+                Update Status
+
+            </button>
+
+            <button id="managerBtn" class="confirm-btn" style="width:100%;margin-bottom:12px;background:#198754;display:none;">
+
+                <i class="fa-solid fa-check-double"></i>
+
+                Manager Confirm Return
+
+            </button>
+
+            <button
+                class="cancel-btn"
+                onclick="closeActionModal()"
+                style="width:100%;">
+
+                Close
+
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+<!-- ================= ACTION MENU ================= -->
+
+<div id="actionModal" class="logout-modal">
+
+    <div class="logout-box action-box">
+
+        <h2>Service Actions</h2>
+
+        <button id="updateStatusBtn" class="action-btn blue">
+
+            <i class="fa-solid fa-pen"></i>
+
+            Update Status
+
+        </button>
+
+        <button id="managerConfirmBtn" class="action-btn green">
+
+            <i class="fa-solid fa-check-double"></i>
+
+            Manager Confirm Return
+
+        </button>
+
+        <button
+            class="cancel-btn"
+            onclick="closeActionModal()">
+
+            Close
+
+        </button>
+
+    </div>
+
+</div>
+<!-- ================= MANAGER CONFIRM ================= -->
+
+<div id="managerModal" class="logout-modal">
+
+    <div class="logout-box manager-box">
+
+        <h2>Manager Confirmation</h2>
+
+        <div class="form-group">
+
+            <label>
+
+                Spare Parts Returned?
+
+            </label>
+
+            <select id="spareReturned">
+
+                <option value="true">
+
+                    Yes
+
+                </option>
+
+                <option value="false">
+
+                    No
+
+                </option>
+
+            </select>
+
+        </div>
+
+        <div class="form-group">
+
+            <label>
+
+                Remarks
+
+            </label>
+
+            <textarea
+                id="managerRemarks"
+                rows="4"
+                placeholder="Remarks..."></textarea>
+
+        </div>
+
+        <div class="logout-actions">
+
+            <button
+                class="cancel-btn"
+                onclick="closeManagerModal()">
+
+                Cancel
+
+            </button>
+
+            <button
+                class="confirm-btn"
+                id="saveManagerBtn">
+
+                Save
+
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
     <script src="../common_auth.js"></script>
     <script>
         function openLogoutModal(e) {

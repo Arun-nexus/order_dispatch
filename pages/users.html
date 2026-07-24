@@ -36,12 +36,12 @@
                 <li>
                     <a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a>
                 </li>
-                <li>
-                    <a href="#" onclick="openLogoutModal(event)">
-                        <i class="fa-solid fa-arrow-right-from-bracket"></i>
-                        <span>Logout</span>
-                    </a>
-                </li>
+  <li>
+    <a href="#" onclick="openLogoutModal(event)">
+        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+        <span>Logout</span>
+    </a>
+</li>
             </ul>
 
             <div class="sidebar-profile">
@@ -52,7 +52,10 @@
                 </div>
             </div>
         </aside>
+
+        <!-- ===== MAIN ===== -->
         <main>
+            <!-- HEADER -->
             <header>
                 <div>
                     <h1>Users Management</h1>
@@ -74,6 +77,8 @@
                     </div>
                 </div>
             </header>
+
+            <!-- CARDS -->
             <section class="cards">
                 <div class="card">
                     <div>
@@ -116,6 +121,8 @@
                     <i class="fa-solid fa-truck"></i>
                 </div>
             </section>
+
+            <!-- TOP ACTIONS -->
             <div class="top-actions">
                 <button class="export">
                     <i class="fa-solid fa-file-export"></i> Export
@@ -124,6 +131,8 @@
                     <i class="fa-solid fa-user-plus"></i> Add User
                 </button>
             </div>
+
+            <!-- FILTER SECTION -->
             <section class="filter-section">
                 <div class="filter-box">
                     <i class="fa-solid fa-magnifying-glass"></i>
@@ -147,6 +156,8 @@
                     <i class="fa-solid fa-filter"></i> Apply Filter
                 </button>
             </section>
+
+            <!-- TABLE -->
             <div class="table-container">
                 <table>
                     <thead>
@@ -163,9 +174,13 @@
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody></tbody>
+                    <tbody>
+                        <!-- rows rendered dynamically by users.js -->
+                    </tbody>
                 </table>
             </div>
+
+            <!-- PAGINATION -->
             <div class="pagination">
                 <button class="page-btn">
                     <i class="fa-solid fa-angle-left"></i>
@@ -180,42 +195,226 @@
             </div>
         </main>
     </div>
-    <div id="logoutModal" class="logout-modal">
-        <div class="logout-box">
-            <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
-
-            <h2>Logout?</h2>
-
-            <p>Are you sure you want to logout from your account?</p>
-
-            <div class="logout-actions">
-                <button class="cancel-btn" onclick="closeLogoutModal()">
-                    Cancel
-                </button>
-
-                <button class="confirm-btn" onclick="logoutNow()">Logout</button>
-            </div>
+  <!-- Add User Modal -->
+  <div id="addModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:440px;max-height:85vh;overflow-y:auto;">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Add User</h3>
+        <span class="close" style="cursor:pointer;font-size:20px;">&times;</span>
+      </div>
+      <form style="display:flex;flex-direction:column;gap:10px;">
+        <input type="text" placeholder="Username" required>
+        <input type="text" placeholder="Full Name" required>
+        <input type="text" placeholder="Mobile No" required>
+        <input type="email" placeholder="Email" required>
+        <input type="text" placeholder="Company Name" required>
+        <input type="text" placeholder="GST Number" required>
+        <input type="password" placeholder="Password" required>
+        <select required>
+          <option value="">Select Role</option>
+          <option value="admin">Admin</option>
+          <option value="employee">Employee</option>
+          <option value="technician">Technician</option>
+          <option value="distributor">Distributor</option>
+        </select>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;">Add User</button>
         </div>
+      </form>
     </div>
+  </div>
+
+  <!-- Edit User Modal -->
+  <div id="editModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:440px;max-height:85vh;overflow-y:auto;">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Edit User</h3>
+        <span class="close" style="cursor:pointer;font-size:20px;">&times;</span>
+      </div>
+      <form style="display:flex;flex-direction:column;gap:10px;">
+        <input type="text" placeholder="Username" disabled style="background:#f3f4f6;">
+        <input type="text" placeholder="Full Name">
+        <input type="text" placeholder="Mobile No">
+        <input type="email" placeholder="Email">
+        <input type="text" placeholder="Company Name">
+        <input type="text" placeholder="GST Number">
+        <select>
+          <option value="admin">Admin</option>
+          <option value="employee">Employee</option>
+          <option value="technician">Technician</option>
+          <option value="distributor">Distributor</option>
+        </select>
+        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- View User Modal -->
+  <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:420px;">
+      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>User Details</h3>
+        <span class="close" style="cursor:pointer;font-size:20px;">&times;</span>
+      </div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>User ID</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Username</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Full Name</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Mobile</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Email</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Company</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>GST Number</strong><p></p></div>
+      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;"><strong>Role</strong><p></p></div>
+    </div>
+  </div>
+
+  <!-- Delete User Modal -->
+  <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
+    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:380px;text-align:center;">
+      <h3 style="margin-bottom:10px;">Delete User?</h3>
+      <p style="color:#64748b;margin-bottom:20px;">Are you sure you want to delete this user? This cannot be undone.</p>
+      <div class="modal-footer" style="display:flex;justify-content:center;gap:10px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+        <button class="delete-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
+      </div>
+    </div>
+  </div>
+    <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+
+        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+
+        <h2>Logout?</h2>
+
+        <p>
+            Are you sure you want to logout from your account?
+        </p>
+
+        <div class="logout-actions">
+
+            <button class="cancel-btn"
+                onclick="closeLogoutModal()">
+                Cancel
+            </button>
+
+            <button class="confirm-btn"
+                onclick="logoutNow()">
+                Logout
+            </button>
+
+        </div>
+
+    </div>
+</div>
+
+    <!-- common_auth.js MUST load first: enforces login + role-based page access (admin-only page) -->
     <script src="../common_auth.js"></script>
+
+    <!-- View User Modal -->
+    <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3>User Details</h3>
+          <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+        </div>
+        <div class="detail"><small>User ID</small><p></p></div>
+        <div class="detail"><small>Username</small><p></p></div>
+        <div class="detail"><small>Full Name</small><p></p></div>
+        <div class="detail"><small>Phone</small><p></p></div>
+        <div class="detail"><small>Email</small><p></p></div>
+        <div class="detail"><small>Company</small><p></p></div>
+        <div class="detail"><small>GST Number</small><p></p></div>
+        <div class="detail"><small>Role</small><p></p></div>
+      </div>
+    </div>
+
+    <!-- Add User Modal -->
+    <div id="addModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3>Add User</h3>
+          <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+        </div>
+        <form style="display:flex;flex-direction:column;gap:10px;">
+          <input placeholder="Username" required>
+          <input placeholder="Full Name" required>
+          <input placeholder="Mobile No" required>
+          <input type="email" placeholder="Email" required>
+          <input placeholder="Company Name" required>
+          <input placeholder="GST Number" required>
+          <input type="password" placeholder="Password" required>
+          <select required>
+            <option value="">Select Role</option>
+            <option value="admin">Admin</option>
+            <option value="employee">Employee</option>
+            <option value="technician">Technician</option>
+            <option value="distributor">Distributor</option>
+          </select>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+            <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h3>Edit User</h3>
+          <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+        </div>
+        <form style="display:flex;flex-direction:column;gap:10px;">
+          <input placeholder="Username" disabled style="background:#f3f4f6;">
+          <input placeholder="Full Name">
+          <input placeholder="Mobile No">
+          <input type="email" placeholder="Email">
+          <input placeholder="Company Name">
+          <input placeholder="GST Number">
+          <select>
+            <option value="admin">Admin</option>
+            <option value="employee">Employee</option>
+            <option value="technician">Technician</option>
+            <option value="distributor">Distributor</option>
+          </select>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+            <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Delete User Modal -->
+    <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
+        <h3 style="margin-bottom:10px;">Delete User?</h3>
+        <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
+        <div style="display:flex;justify-content:center;gap:10px;">
+          <button class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button class="delete-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <script>
-        function openLogoutModal(e) {
+        function openLogoutModal(e){
             e.preventDefault();
             document.getElementById("logoutModal").classList.add("active");
         }
-        function closeLogoutModal() {
+        function closeLogoutModal(){
             document.getElementById("logoutModal").classList.remove("active");
         }
-        document.addEventListener("DOMContentLoaded", () => {
-            const role = getRole() || "";
-            const uname = getUsername() || "User";
-            const label = role.charAt(0).toUpperCase() + role.slice(1);
-            ["sidebarUserName", "headerUserName"].forEach(
-                (id) => (document.getElementById(id).textContent = uname),
-            );
-            ["sidebarUserRole", "headerUserRole"].forEach(
-                (id) => (document.getElementById(id).textContent = label),
-            );
+        document.addEventListener('DOMContentLoaded', () => {
+          const role = getRole() || '';
+          const uname = getUsername() || 'User';
+          const label = role.charAt(0).toUpperCase() + role.slice(1);
+          ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+          ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
         });
     </script>
     <script src="users.js"></script>

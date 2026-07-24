@@ -16,7 +16,8 @@ function applyRolePermissions() {
     const addBtn = document.querySelector('.add-product');
     if (addBtn) addBtn.style.display = 'none';
   }
-
+  // delete buttons are re-hidden per row after each render too (renderInventoryTable),
+  // this just covers the static "Add Product" button up front.
   window.__invCanManage = canManage;
   window.__invCanDelete = canDelete;
 }
@@ -28,12 +29,29 @@ async function loadInventory() {
     const data = await res.json();
     invState.products = data.dataset || [];
     renderInventoryTable(invState.products);
+    updateInventoryCards(invState.products);
   } catch (err) {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
       alert('Could not load inventory data.');
     }
   }
+}
+
+function updateInventoryCards(products) {
+  const cardValues = document.querySelectorAll('.cards .card h2');
+  if (!cardValues.length) return;
+  const totalStock = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+  const lowStock = products.filter(p => (Number(p.quantity) || 0) <= 10).length;
+  const suppliers = new Set(products.map(p => p.supplier).filter(Boolean)).size;
+  const inventoryValue = products.reduce((sum, p) => sum + (Number(p.price) || 0) * (Number(p.quantity) || 0), 0);
+
+  // inventory.html card order: Total Products, Total Stock, Low Stock, Suppliers, Inventory Value
+  cardValues[0].textContent = products.length;
+  if (cardValues[1]) cardValues[1].textContent = totalStock;
+  if (cardValues[2]) cardValues[2].textContent = lowStock;
+  if (cardValues[3]) cardValues[3].textContent = suppliers;
+  if (cardValues[4]) cardValues[4].textContent = `₹${(inventoryValue / 100000).toFixed(1)}L`;
 }
 
 function stockClass(qty) {

@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', loadDashboard);
 
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) throw new Error(`${url} failed`);
   return res.json();
 }
@@ -32,10 +32,12 @@ async function loadDashboard() {
 
 function renderCards(orders, inventory, accounts, services) {
   const cardValues = document.querySelectorAll('.cards .card h2');
+  // main_dashboard.html card order: Total Orders, Pending Orders, Inventory Items, Total Employees, Active Services
   if (cardValues[0]) cardValues[0].textContent = orders.length;
-  if (cardValues[1]) cardValues[1].textContent = inventory.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
-  if (cardValues[2]) cardValues[2].textContent = accounts.length;
-  if (cardValues[3]) cardValues[3].textContent = services.filter(s => s.status !== 'completed' && s.status !== 'rejected').length;
+  if (cardValues[1]) cardValues[1].textContent = orders.filter(o => o.status === 'placed').length;
+  if (cardValues[2]) cardValues[2].textContent = inventory.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+  if (cardValues[3]) cardValues[3].textContent = accounts.length;
+  if (cardValues[4]) cardValues[4].textContent = services.filter(s => s.status !== 'completed' && s.status !== 'rejected').length;
 }
 
 function statusBadgeClass(status) {
@@ -60,7 +62,7 @@ function renderRecentOrders(orders) {
 
   recent.forEach(o => {
     const div = document.createElement('div');
-    div.className = 'order';
+    div.className = 'order-item';
     div.innerHTML = `
       <div class="order-left">
         <div class="order-icon"><i class="fa-solid fa-file-medical"></i></div>
@@ -69,14 +71,14 @@ function renderRecentOrders(orders) {
           <p>${o.order_date ? new Date(o.order_date).toLocaleDateString() : ''}</p>
         </div>
       </div>
-      <span class="badge ${statusBadgeClass(o.status)}">${o.status ?? ''}</span>
+      <span class="status ${statusBadgeClass(o.status)}">${o.status ?? ''}</span>
       <strong>₹${o.total_mrp ?? o.price ?? 0}</strong>`;
     container.appendChild(div);
   });
 }
 
 function renderInventoryStatus(inventory) {
-  const items = document.querySelectorAll('.inventory .inventory-item');
+  const items = document.querySelectorAll('.inventory-status .inventory-item');
   if (!items.length) return;
 
   const total = inventory.length || 1;
@@ -88,7 +90,7 @@ function renderInventoryStatus(inventory) {
   items.forEach((item, i) => {
     const pct = Math.round((counts[i] / total) * 100);
     item.querySelector('.inventory-head strong').textContent = counts[i];
-    item.querySelector('.progress-bar').style.width = `${pct}%`;
+    item.querySelector('.progress-fill').style.width = `${pct}%`;
     item.querySelector('small').textContent = `${pct}%`;
   });
 }
@@ -107,13 +109,13 @@ function renderServiceRequests(services) {
 
   services.slice(0, 4).forEach(s => {
     const div = document.createElement('div');
-    div.className = 'service';
+    div.className = 'service-item';
     div.innerHTML = `
       <div>
         <h4>${s.service_id?.slice(0, 8) ?? ''}</h4>
         <p>${s.purchase_date ?? ''}</p>
       </div>
-      <span class="badge ${statusMap[s.status] || 'pending'}">${s.status ?? ''}</span>`;
+      <span class="status ${statusMap[s.status] || 'pending'}">${s.status ?? ''}</span>`;
     container.appendChild(div);
   });
 }

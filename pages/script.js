@@ -97,14 +97,60 @@ function rowService(e) {
   return svcState.services.find(s => s.service_id === tr.dataset.serviceId);
 }
 
-function openActionMenu(s) {
-  if (!s) return;
-  const role = getRole();
-  const canConfirmReturn = role === 'admin' || role === 'employee';
-  const choice = canConfirmReturn
-    ? confirm('OK = View Details, Cancel = Update Status (Shift+click ellipsis again for Manager Confirm)')
-    : confirm('OK = View Details, Cancel = Update Status');
-  if (choice) openViewModal(s); else openStatusModal(s);
+function openActionMenu(service){
+
+    if(!service) return;
+
+    const modal=document.getElementById("actionModal");
+
+    modal.classList.add("active");
+
+    document.getElementById("viewBtn").onclick=function(){
+
+        closeActionModal();
+
+        openViewModal(service);
+
+    };
+
+    document.getElementById("statusBtn").onclick=function(){
+
+        closeActionModal();
+
+        openStatusModal(service);
+
+    };
+
+    const managerBtn=document.getElementById("managerBtn");
+
+    if(getRole()=="admin"){
+
+        managerBtn.style.display="block";
+
+        managerBtn.onclick=function(){
+
+            closeActionModal();
+
+            managerConfirmReturn(service.service_id);
+
+        };
+
+    }
+
+    else{
+
+        managerBtn.style.display="none";
+
+    }
+
+}
+
+function closeActionModal(){
+
+    document
+    .getElementById("actionModal")
+    .classList.remove("active");
+
 }
 
 function openViewModal(s) {

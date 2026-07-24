@@ -1741,3 +1741,73 @@ form .save-btn {
 
     background:#b91c1c;
 }
+
+.action-box{
+
+    width:360px;
+
+}
+
+.action-btn{
+
+    width:100%;
+
+    margin-bottom:15px;
+
+    border:none;
+
+    padding:13px;
+
+    border-radius:10px;
+
+    color:#fff;
+
+    cursor:pointer;
+
+    font-size:15px;
+
+}
+
+.action-btn.blue{
+
+    background:#1665ff;
+
+}
+
+.action-btn.green{
+
+    background:#16a34a;
+
+}
+
+.manager-box{
+
+    width:430px;
+
+}
+
+.manager-box select,
+
+.manager-box textarea{
+
+    width:100%;
+
+    margin-top:8px;
+
+    margin-bottom:18px;
+
+    padding:10px;
+
+    border-radius:8px;
+
+    border:1px solid #ddd;
+
+    font-size:14px;
+
+}
+
+.manager-box label{
+
+    font-weight:600;
+
+}
