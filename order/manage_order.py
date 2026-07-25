@@ -6,13 +6,14 @@ import uuid
 
 class order_manager(mongodbclient):
 
-    def __init__(self, product_name=None, product_id=None, company_name=None,gst_number=None, payment_mode=None, price=None, tax_rate=None, discount=0):
+    def __init__(self, product_name=None, product_id=None, serial_no=None, company_name=None,gst_number=None, payment_mode=None, price=None, tax_rate=None, discount=0):
 
         super().__init__()
 
         self.product_name = product_name
         self.order_id = str(uuid.uuid4())
         self.product_id = product_id
+        self.serial_no = serial_no
         self.company_name = company_name
         self.gst_number = gst_number
         self.payment_mode = payment_mode
@@ -29,6 +30,7 @@ class order_manager(mongodbclient):
                 "product_name": self.product_name,
                 "order_id": self.order_id,
                 "product_id": self.product_id,
+                "serial_no": self.serial_no,
                 "company_name": self.company_name,
                 "gst_number": self.gst_number,
                 "payment_mode": self.payment_mode,

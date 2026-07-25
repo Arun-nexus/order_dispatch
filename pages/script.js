@@ -1,29 +1,24 @@
-const svcState = { services: [], activeServiceId: null };
+const svcState = { services: [], orders: [], activeServiceId: null };
 
 document.addEventListener('DOMContentLoaded', () => {
-  patchMarkupBugs();
   loadServices();
   wireTopActions();
   wireFilters();
   wireModals();
 });
 
-function patchMarkupBugs() {
-  document.querySelectorAll('[id]').forEach(el => {
-    if (el.id !== el.id.trim()) el.id = el.id.trim();
-  });
-  document.querySelectorAll('.model').forEach(el => el.classList.add('modal'));
-  document.querySelectorAll('.model-content').forEach(el => el.classList.add('modal-content'));
-  document.querySelectorAll('.model-header').forEach(el => el.classList.add('modal-header'));
-  document.querySelectorAll('.model-footer').forEach(el => el.classList.add('modal-footer'));
-}
-
 async function loadServices() {
   try {
-    const res = await apiFetch('/service/');
-    if (!res.ok) throw new Error('failed to fetch services');
-    const data = await res.json();
-    svcState.services = data.dataset || [];
+    const [svcRes, orderRes] = await Promise.all([
+      apiFetch('/service/'),
+      apiFetch('/order/')
+    ]);
+    if (!svcRes.ok) throw new Error('failed to fetch services');
+    const svcData = await svcRes.json();
+    const orderData = orderRes.ok ? await orderRes.json() : { dataset: [] };
+
+    svcState.services = svcData.dataset || [];
+    svcState.orders = orderData.dataset || [];
     renderServiceTable(svcState.services);
     updateCards(svcState.services);
   } catch (err) {
@@ -47,6 +42,35 @@ function updateCards(services) {
 function statusBadge(status) {
   const map = { active: 'pending', in_progress: 'progress', completed: 'completed', rejected: 'rejected' };
   return map[status] || 'pending';
+}
+
+// finds the order this service's product belongs to (matches serial_no first, falls back to product_id)
+function findOrderForService(s) {
+  return svcState.orders.find(o => s.serial_no && o.serial_no === s.serial_no)
+      || svcState.orders.find(o => o.product_id === s.product_id);
+}
+
+// warranty = manual override (warranty_until) if admin/employee set one, else order_date + 365 days
+function computeWarranty(s) {
+  if (s.warranty_until) {
+    const until = new Date(s.warranty_until);
+    const daysLeft = Math.ceil((until - new Date()) / 86400000);
+    return { until, daysLeft, underWarranty: daysLeft >= 0, manual: true };
+  }
+  const order = findOrderForService(s);
+  if (!order || !order.order_date) return null;
+  const until = new Date(order.order_date);
+  until.setDate(until.getDate() + 365);
+  const daysLeft = Math.ceil((until - new Date()) / 86400000);
+  return { until, daysLeft, underWarranty: daysLeft >= 0, manual: false };
+}
+
+function warrantyCellHtml(s) {
+  const w = computeWarranty(s);
+  if (!w) return '<span class="pending">No order match</span>';
+  const label = w.underWarranty ? `Under Warranty (${w.daysLeft}d left)` : 'Expired';
+  const cls = w.underWarranty ? 'delivered' : 'cancelled';
+  return `<span class="${cls}">${label}</span>${w.manual ? ' <small>(extended)</small>' : ''}`;
 }
 
 function renderServiceTable(services) {
@@ -79,6 +103,8 @@ function renderServiceTable(services) {
       <td>${s.serial_no ?? ''}</td>
       <td><div class="tech">${s.technician_alloted ?? ''}</div></td>
       <td>${s.issue ?? ''}</td>
+      <td>${(s.location || 'indoor').charAt(0).toUpperCase() + (s.location || 'indoor').slice(1)}</td>
+      <td>${warrantyCellHtml(s)}</td>
       <td><span class="${statusBadge(s.status)}">${(s.status ?? '').replace('_', ' ')}</span></td>
       <td>${returnCell}</td>
       <td>${actionsHtml}</td>`;
@@ -88,7 +114,7 @@ function renderServiceTable(services) {
   tbody.querySelectorAll('.location-btn').forEach(btn =>
     btn.addEventListener('click', e => alert('Technician location tracking is not yet implemented on the backend.')));
   tbody.querySelectorAll('.image-btn').forEach(btn => btn.addEventListener('click', e => openImageModal(rowService(e))));
-  tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openActionMenu(rowService(e))));
+  tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openActionMenu(rowService(e), e)));
   tbody.querySelectorAll('.reason-btn').forEach(btn => btn.addEventListener('click', e => openReasonModal(rowService(e))));
 }
 
@@ -97,66 +123,59 @@ function rowService(e) {
   return svcState.services.find(s => s.service_id === tr.dataset.serviceId);
 }
 
-function openActionMenu(service){
+// ---------- Action menu (replaces old confirm()-chain approach) ----------
+function openActionMenu(s, evt) {
+  if (!s) return;
+  closeActionMenu();
 
-    if(!service) return;
+  const role = getRole();
+  const canManage = role === 'admin' || role === 'employee';
 
-    const modal=document.getElementById("actionModal");
+  const menu = document.createElement('div');
+  menu.id = 'svcActionMenu';
+  menu.style.cssText = 'position:absolute;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:200px;';
+  const rect = evt.target.closest('button').getBoundingClientRect();
+  menu.style.top = `${rect.bottom + 6}px`;
+  menu.style.left = `${Math.max(10, rect.left - 150)}px`;
 
-    modal.classList.add("active");
+  const items = [
+    { label: 'View Details', action: () => openViewModal(s) },
+    { label: 'Update Status', action: () => openStatusModal(s) },
+  ];
+  if (canManage) {
+    items.push({ label: 'Manager Confirm Return', action: () => managerConfirmReturn(s.service_id) });
+    items.push({ label: 'Extend Warranty', action: () => extendWarranty(s.service_id) });
+  }
 
-    document.getElementById("viewBtn").onclick=function(){
+  items.forEach(item => {
+    const btn = document.createElement('button');
+    btn.textContent = item.label;
+    btn.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border:none;background:none;border-radius:6px;cursor:pointer;font-size:14px;';
+    btn.onmouseenter = () => btn.style.background = '#f1f5f9';
+    btn.onmouseleave = () => btn.style.background = 'none';
+    btn.addEventListener('click', () => { closeActionMenu(); item.action(); });
+    menu.appendChild(btn);
+  });
 
-        closeActionModal();
-
-        openViewModal(service);
-
-    };
-
-    document.getElementById("statusBtn").onclick=function(){
-
-        closeActionModal();
-
-        openStatusModal(service);
-
-    };
-
-    const managerBtn=document.getElementById("managerBtn");
-
-    if(getRole()=="admin"){
-
-        managerBtn.style.display="block";
-
-        managerBtn.onclick=function(){
-
-            closeActionModal();
-
-            managerConfirmReturn(service.service_id);
-
-        };
-
-    }
-
-    else{
-
-        managerBtn.style.display="none";
-
-    }
-
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener('click', closeActionMenuOnClickAway), 0);
 }
 
-function closeActionModal(){
+function closeActionMenu() {
+  const existing = document.getElementById('svcActionMenu');
+  if (existing) existing.remove();
+  document.removeEventListener('click', closeActionMenuOnClickAway);
+}
 
-    document
-    .getElementById("actionModal")
-    .classList.remove("active");
-
+function closeActionMenuOnClickAway(e) {
+  const menu = document.getElementById('svcActionMenu');
+  if (menu && !menu.contains(e.target)) closeActionMenu();
 }
 
 function openViewModal(s) {
   const modal = document.getElementById('viewModal');
   if (!modal) return;
-  const values = modal.querySelectorAll('.detail p, .details p');
+  const values = modal.querySelectorAll('.detail p');
   const fields = [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None'];
   values.forEach((el, i) => el.textContent = fields[i] ?? '');
   modal.style.display = 'flex';
@@ -165,8 +184,21 @@ function openViewModal(s) {
 function openImageModal(s) {
   const modal = document.getElementById('imageModal');
   if (!modal) return;
+
+  const hasImage = !!s.image;
+  const hasVideo = !!s.video;
+
+  if (!hasImage && !hasVideo) {
+    alert('Image or video was not present for this service.');
+    return;
+  }
+
   const img = modal.querySelector('img');
-  if (img && s.image) img.src = s.image;
+  const video = modal.querySelector('video');
+
+  if (hasImage) { img.src = s.image; img.style.display = 'block'; } else { img.style.display = 'none'; img.removeAttribute('src'); }
+  if (hasVideo) { video.src = s.video; video.style.display = 'block'; } else { video.style.display = 'none'; video.removeAttribute('src'); }
+
   modal.style.display = 'flex';
 }
 
@@ -196,6 +228,23 @@ async function managerConfirmReturn(serviceId) {
   }
 }
 
+async function extendWarranty(serviceId) {
+  const newDate = prompt('Enter new warranty end date (YYYY-MM-DD):');
+  if (!newDate) return;
+  try {
+    const res = await apiFetch(`/service/extend_warranty/${serviceId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warranty_until: newDate })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'warranty extension failed');
+    await loadServices();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
+}
+
 function wireTopActions() {
   const newServiceBtn = document.querySelector('.new-service');
   if (newServiceBtn) newServiceBtn.addEventListener('click', openCreateModal);
@@ -205,8 +254,8 @@ function wireTopActions() {
 }
 
 function exportServicesCSV() {
-  const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Status'];
-  const rows = svcState.services.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.status]);
+  const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Location', 'Status'];
+  const rows = svcState.services.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.location, s.status]);
   const csv = [header, ...rows].map(r => r.join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -234,6 +283,8 @@ function wireFilters() {
   });
 }
 
+// --- Create Service modal (injected: service.html ships a "new-service"
+// button but no matching modal markup) ---
 function openCreateModal() {
   let modal = document.getElementById('createServiceModal');
   if (!modal) {
@@ -244,11 +295,16 @@ function openCreateModal() {
       <div style="background:#fff;border-radius:16px;padding:26px;width:460px;">
         <h2 style="margin-bottom:18px;">New Service Request</h2>
         <form id="createServiceForm" style="display:flex;flex-direction:column;gap:12px;">
-          <input name="product_id" placeholder="Product ID" required>
+          <input name="product_id" placeholder="Product" required>
+          <select name="location" required>
+            <option value="indoor">Indoor</option>
+            <option value="outdoor">Outdoor</option>
+          </select>
           <input name="serial_no" placeholder="Serial No" required>
           <input name="technician_id" placeholder="Technician ID" required>
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
+          <textarea name="spare_parts" placeholder="Spare parts requested (optional)" style="min-height:50px;"></textarea>
           <input name="image" placeholder="Image URL (optional)">
           <input name="video" placeholder="Video URL (optional)">
           <div style="display:flex;justify-content:flex-end;gap:10px;">
@@ -264,6 +320,16 @@ function openCreateModal() {
       e.preventDefault();
       const fd = new FormData(e.target);
       const payload = Object.fromEntries(fd.entries());
+
+      // outdoor services must reference a serial number that actually exists in Orders
+      if (payload.location === 'outdoor') {
+        const matchInOrders = svcState.orders.some(o => o.serial_no === payload.serial_no);
+        if (!matchInOrders) {
+          alert('This Serial No. was not found in Orders. Outdoor services must match an existing order.');
+          return;
+        }
+      }
+
       try {
         const res = await apiFetch('/services/create', {
           method: 'POST',
@@ -292,14 +358,26 @@ function wireModals() {
     statusForm.addEventListener('submit', async e => {
       e.preventDefault();
       const select = statusForm.querySelector('select');
-      const reasonBox = statusForm.querySelector('textarea');
+      const textareas = statusForm.querySelectorAll('textarea');
+      const reasonBox = textareas[0];
+      const sparePartsBox = textareas[1];
 
       const statusMap = { 'Active': 'active', 'In Progress': 'in_progress', 'Completed': 'completed', 'Rejected': 'rejected' };
       const service_status = statusMap[select.value] || select.value.toLowerCase().replace(' ', '_');
 
+      if (service_status === 'completed' && !sparePartsBox.value.trim()) {
+        alert('Spare part used must be written before marking the service as Completed.');
+        return;
+      }
+      if (service_status === 'rejected' && !reasonBox.value.trim()) {
+        alert('Reason must be provided before rejecting a service.');
+        return;
+      }
+
       const payload = {
         service_status,
         reason: reasonBox ? reasonBox.value : '',
+        spare_parts: sparePartsBox ? sparePartsBox.value : '',
         spare_parts_used: false
       };
 
@@ -312,6 +390,7 @@ function wireModals() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'status update failed');
         document.getElementById('statusModal').style.display = 'none';
+        statusForm.reset();
         await loadServices();
       } catch (err) {
         if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);

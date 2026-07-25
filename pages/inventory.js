@@ -170,7 +170,8 @@ function wireModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
-  document.querySelector('#addModal form').addEventListener('submit', async e => {
+  const addForm = document.querySelector('#addModal form');
+  if (addForm) addForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
     const payload = {
@@ -198,7 +199,8 @@ function wireModals() {
     }
   });
 
-  document.querySelector('#editModal form').addEventListener('submit', async e => {
+  const editForm = document.querySelector('#editModal form');
+  if (editForm) editForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
     const updated_values = {
@@ -225,7 +227,8 @@ function wireModals() {
     }
   });
 
-  document.querySelector('#deleteModal .delete-btn').addEventListener('click', async () => {
+  const deleteBtn = document.querySelector('#deleteModal .delete-btn');
+  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
     try {
       const res = await apiFetch(`/inventory/delete/${invState.activeProductId}`, { method: 'POST' });
       const data = await res.json();

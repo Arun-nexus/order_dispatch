@@ -1,4 +1,15 @@
-document.addEventListener('DOMContentLoaded', loadDashboard);
+document.addEventListener('DOMContentLoaded', () => {
+  loadDashboard();
+  setTodayDate();
+});
+
+function setTodayDate() {
+  const dateBox = document.querySelector('.date-box span');
+  if (!dateBox) return;
+  const today = new Date();
+  const options = { day: '2-digit', month: 'short', year: 'numeric' };
+  dateBox.textContent = today.toLocaleDateString('en-GB', options).replace(/ /g, ' ');
+}
 
 async function fetchJSON(url) {
   const res = await apiFetch(url);

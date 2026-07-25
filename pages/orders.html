@@ -38,7 +38,10 @@
     </div>
   </div>
 </aside>
+
+    <!-- ===== MAIN ===== -->
     <main>
+      <!-- HEADER -->
       <header>
         <div>
           <h1>Orders</h1>
@@ -60,7 +63,10 @@
           </div>
         </div>
       </header>
+
+      <!-- ===== CARDS ===== -->
       <section class="cards">
+        <!-- Total Orders -->
         <div class="card">
           <div>
             <span>Total Orders</span>
@@ -69,6 +75,8 @@
           </div>
           <i class="fa-solid fa-box"></i>
         </div>
+
+        <!-- Today's Orders -->
         <div class="card">
           <div>
             <span>Today's Orders</span>
@@ -77,6 +85,8 @@
           </div>
           <i class="fa-solid fa-calendar-day" style="background:#fff4e5;color:#f59e0b;"></i>
         </div>
+
+        <!-- Pending Orders -->
         <div class="card">
           <div>
             <span>Pending Orders</span>
@@ -85,6 +95,8 @@
           </div>
           <i class="fa-regular fa-clock"></i>
         </div>
+
+        <!-- Delivered Orders -->
         <div class="card">
           <div>
             <span>Delivered Orders</span>
@@ -93,6 +105,8 @@
           </div>
           <i class="fa-solid fa-circle-check"></i>
         </div>
+
+        <!-- Cancelled Orders -->
         <div class="card">
           <div>
             <span>Cancelled Orders</span>
@@ -102,10 +116,14 @@
           <i class="fa-solid fa-circle-xmark"></i>
         </div>
       </section>
+
+      <!-- TOP ACTIONS -->
       <div class="top-actions">
         <button class="export"><i class="fa-solid fa-download"></i> Export</button>
         <button class="add-product"><i class="fa-solid fa-plus"></i> New Order</button>
       </div>
+
+      <!-- FILTER SECTION -->
       <section class="filter-section">
         <div class="filter-box">
           <i class="fa-solid fa-filter"></i>
@@ -133,6 +151,8 @@
         </div>
         <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
       </section>
+
+      <!-- TABLE -->
       <div class="table-container">
         <table>
           <thead>
@@ -140,6 +160,7 @@
               <th><input type="checkbox"></th>
               <th>Order ID</th>
               <th>Product</th>
+              <th>Serial No</th>
               <th>Ordered By</th>
               <th>Payment Mode</th>
               <th>Order Date</th>
@@ -149,10 +170,12 @@
             </tr>
           </thead>
           <tbody>
+            <!-- rows are rendered dynamically by orders.js -->
           </tbody>
         </table>
       </div>
 
+      <!-- ===== PAGINATION ===== -->
       <div class="pagination">
         <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
         <button class="page active-page">1</button>
@@ -165,6 +188,7 @@
     </main>
     
   </div>
+  <!-- Logout Modal -->
 <div id="logoutModal" class="logout-modal">
     <div class="logout-box">
 
@@ -192,7 +216,82 @@
 
     </div>
 </div>
+
+  <!-- common_auth.js MUST load first: enforces login + role-based page access -->
   <script src="../common_auth.js"></script>
+
+  <!-- View Order Modal -->
+  <div id="viewOrderModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Order Details</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <div class="detail"><small>Order ID</small><p></p></div>
+      <div class="detail"><small>Product</small><p></p></div>
+      <div class="detail"><small>Serial No.</small><p></p></div>
+      <div class="detail"><small>Company</small><p></p></div>
+      <div class="detail"><small>GST Number</small><p></p></div>
+      <div class="detail"><small>Payment Mode</small><p></p></div>
+      <div class="detail"><small>Status</small><p></p></div>
+      <div class="detail"><small>Cancellation Reason</small><p></p></div>
+      <div class="detail"><small>Price / Tax / Discount</small><p></p></div>
+      <div class="detail"><small>Total Amount</small><p></p></div>
+    </div>
+  </div>
+
+  <!-- Edit Order Modal -->
+  <div id="editOrderModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Edit Order</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form style="display:flex;flex-direction:column;gap:10px;">
+        <input placeholder="Product Name">
+        <input placeholder="Product ID" disabled style="background:#f3f4f6;">
+        <input placeholder="Serial No">
+        <input placeholder="Company Name">
+        <input placeholder="GST Number">
+        <input type="number" placeholder="Price">
+        <input type="number" placeholder="Tax Rate (%)">
+        <input type="number" placeholder="Discount">
+        <select>
+          <option value="UPI">UPI</option>
+          <option value="Card">Card</option>
+          <option value="Cash">Cash</option>
+          <option value="NetBanking">Net Banking</option>
+        </select>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Update Order Status Modal -->
+  <div id="orderStatusModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Update Order Status</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form style="display:flex;flex-direction:column;gap:10px;">
+        <select required>
+          <option value="placed">Pending</option>
+          <option value="processing">Processing</option>
+          <option value="delivered">Delivered</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <textarea class="cancel-reason" placeholder="Reason for cancellation" rows="3" style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Update</button>
+        </div>
+      </form>
+    </div>
+  </div>
   <script>
     function openLogoutModal(e){
         e.preventDefault();
@@ -207,6 +306,8 @@
       const label = role.charAt(0).toUpperCase() + role.slice(1);
       ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
       ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+
+      // distributor/technician can't create new orders manually via UI action - only admin/employee do fulfillment ops
       if (role === 'distributor') {
         document.querySelectorAll('.filter-btn, .export').forEach(el => {}); // read-only view is fine
       }

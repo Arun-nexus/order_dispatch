@@ -26,6 +26,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# resolve everything relative to THIS file's own folder, not whatever
+# directory uvicorn happens to be launched from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
@@ -64,12 +66,14 @@ class ServiceRequest(BaseModel):
     issue: str
     image: str
     video: str
+    location: str = "indoor"
     spare_parts: str = ""
 
 
 class CreateOrderRequest(BaseModel):
     product_name: str
     product_id: str
+    serial_no: str = ""
     company_name: str
     gst_number: str
     payment_mode: str
@@ -87,6 +91,11 @@ class ServiceUpdateRequest(BaseModel):
     reason: str = ""
     image: str = None
     spare_parts_used: bool = False
+    spare_parts: str = ""
+
+
+class ExtendWarrantyRequest(BaseModel):
+    warranty_until: str
 
 
 class OrderUpdatedValue(BaseModel):
@@ -233,6 +242,7 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(get_cur
         order = order_manager(
             product_name=request.product_name,
             product_id=request.product_id,
+            serial_no=request.serial_no,
             company_name=request.company_name,
             gst_number=request.gst_number,
             payment_mode=request.payment_mode,
@@ -348,6 +358,7 @@ async def create_service(request: ServiceRequest, user: dict = Depends(require_r
             image=request.image,
             video=request.video,
             technician_id=request.technician_id,
+            location=request.location,
             spare_parts=request.spare_parts
         )
         logging.info(f"service creation was successful with service_id {service.service_id}!")
@@ -382,7 +393,8 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
             collection_name=SERVICE_COLLECTION,
             query={"service_id": service_id},
             image=request.image,
-            spare_parts_used=request.spare_parts_used
+            spare_parts_used=request.spare_parts_used,
+            spare_parts=request.spare_parts
         )
         logging.info("service was updated")
         return {"message": "service was updated successfully", "service_id": service_id}
@@ -400,6 +412,17 @@ async def manager_confirm(service_id: str, user: dict = Depends(require_role("ad
     except Exception as e:
         logging.error("manager confirmation failed!")
         raise HTTPException(status_code=500, detail="manager confirmation failed")
+
+
+@app.post("/service/extend_warranty/{service_id}")
+async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = service_detail(product_id="", serial_no="")
+        db.extend_warranty(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, warranty_until=request.warranty_until)
+        return {"message": "warranty extended", "service_id": service_id, "warranty_until": request.warranty_until}
+    except Exception as e:
+        logging.error("warranty extension failed!")
+        raise HTTPException(status_code=500, detail="warranty extension failed")
 
 
 @app.get("/inventory/")
@@ -460,7 +483,9 @@ async def delete_product(product_id: str, user: dict = Depends(require_role("adm
         logging.error("product deletion was failed!")
         raise HTTPException(status_code=500, detail="product cannot be deleted")
 
+
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")
 app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
 app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
+
 app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")
