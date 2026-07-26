@@ -1,4 +1,4 @@
-from mongo.mongodb_connection import mongodbclient
+from mongodb.mongodb_connection import mongodbclient
 from logger import logging
 
 
@@ -58,7 +58,6 @@ class inventory_manager(mongodbclient):
 
     def delete(self, collection_name):
         try:
-            # pehle quantity nikal lo, delete karne se PEHLE (warna document mil hi nahi payega)
             existing = self.get_data(collection_name=collection_name, query={"product_id": self.product_id})
             if not existing:
                 raise Exception(f"no product found with id {self.product_id}")

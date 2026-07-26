@@ -1,5 +1,5 @@
 from logger import logging
-from mongo.mongodb_connection import mongodbclient
+from mongodb.mongodb_connection import mongodbclient
 import uuid
 import enum
 
@@ -13,19 +13,10 @@ class login_role(str, enum.Enum):
 
 class login(mongodbclient):
 
-    # NOTE: all fields now default to None. Several routes in main.py do
-    # `db = login()` just to reuse get_data/delete/update (inherited from
-    # mongodbclient) without wanting to construct a full user object.
-    # Previously every field was a required positional arg, so those calls
-    # raised TypeError before ever reaching the try/except in the route.
-    def __init__(self, username: str = None, name: str = None, phone: str = None,
-                 email: str = None, company_name: str = None, gst_number: str = None,
-                 role: str = None, password: str = None):
+    def __init__(self, username: str = None, name: str = None, phone: str = None,email: str = None, company_name: str = None, gst_number: str = None,role: str = None, password: str = None):
 
         super().__init__()
 
-        # Only validate role if one was actually supplied (i.e. we're really
-        # creating/registering a user, not just borrowing db methods).
         if role is not None and role not in [r.value for r in login_role]:
             raise Exception(f"invalid role {role}")
 
@@ -75,8 +66,7 @@ class login(mongodbclient):
 
     def update(self, collection_name, query, update_values, many=False):
         try:
-            updated_data = super().update_data(collection_name=collection_name, query=query,
-                                                 update_values=update_values, many=many)
+            updated_data = super().update_data(collection_name=collection_name, query=query,update_values=update_values, many=many)
             return updated_data
         except Exception as e:
             logging.error("data updation was failed!")

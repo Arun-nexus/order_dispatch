@@ -1,5 +1,4 @@
-connection_url:
-database_name:
-account_creation_collection_name:
-order_collection_name:
-service_collection_name:
+account_creation_collection_name: users
+order_collection_name: orders
+service_collection_name: service
+inventory_collection_name: inventory

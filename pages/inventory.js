@@ -5,19 +5,53 @@ document.addEventListener('DOMContentLoaded', () => {
   wireTopActions();
   wireFilter();
   wireModals();
+  applyRolePermissions();
 });
+
+function applyRolePermissions() {
+  const role = getRole();
+  const canManage = role === 'admin' || role === 'employee';
+  const canDelete = role === 'admin';
+  if (!canManage) {
+    const addBtn = document.querySelector('.add-product');
+    if (addBtn) addBtn.style.display = 'none';
+  }
+  // delete buttons are re-hidden per row after each render too (renderInventoryTable),
+  // this just covers the static "Add Product" button up front.
+  window.__invCanManage = canManage;
+  window.__invCanDelete = canDelete;
+}
 
 async function loadInventory() {
   try {
-    const res = await fetch('/inventory/');
+    const res = await apiFetch('/inventory/');
     if (!res.ok) throw new Error('failed to fetch inventory');
     const data = await res.json();
     invState.products = data.dataset || [];
     renderInventoryTable(invState.products);
+    updateInventoryCards(invState.products);
   } catch (err) {
     console.error(err);
-    alert('Could not load inventory data.');
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      alert('Could not load inventory data.');
+    }
   }
+}
+
+function updateInventoryCards(products) {
+  const cardValues = document.querySelectorAll('.cards .card h2');
+  if (!cardValues.length) return;
+  const totalStock = products.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+  const lowStock = products.filter(p => (Number(p.quantity) || 0) <= 10).length;
+  const suppliers = new Set(products.map(p => p.supplier).filter(Boolean)).size;
+  const inventoryValue = products.reduce((sum, p) => sum + (Number(p.price) || 0) * (Number(p.quantity) || 0), 0);
+
+  // inventory.html card order: Total Products, Total Stock, Low Stock, Suppliers, Inventory Value
+  cardValues[0].textContent = products.length;
+  if (cardValues[1]) cardValues[1].textContent = totalStock;
+  if (cardValues[2]) cardValues[2].textContent = lowStock;
+  if (cardValues[3]) cardValues[3].textContent = suppliers;
+  if (cardValues[4]) cardValues[4].textContent = `₹${(inventoryValue / 100000).toFixed(1)}L`;
 }
 
 function stockClass(qty) {
@@ -29,6 +63,9 @@ function stockClass(qty) {
 function renderInventoryTable(products) {
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
+
+  const canManage = window.__invCanManage;
+  const canDelete = window.__invCanDelete;
 
   products.forEach(p => {
     const tr = document.createElement('tr');
@@ -45,8 +82,8 @@ function renderInventoryTable(products) {
       <td>${p.tax_rate ?? 0}%</td>
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
-        <button class="icon-btn edit-btn"><i class="fa-solid fa-pen"></i></button>
-        <button class="icon-btn delete delete-btn"><i class="fa-solid fa-trash"></i></button>
+        ${canManage ? '<button class="icon-btn edit-btn"><i class="fa-solid fa-pen"></i></button>' : ''}
+        ${canDelete ? '<button class="icon-btn delete delete-btn"><i class="fa-solid fa-trash"></i></button>' : ''}
       </td>`;
     tbody.appendChild(tr);
   });
@@ -133,7 +170,8 @@ function wireModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
-  document.querySelector('#addModal form').addEventListener('submit', async e => {
+  const addForm = document.querySelector('#addModal form');
+  if (addForm) addForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
     const payload = {
@@ -147,7 +185,7 @@ function wireModals() {
       tax_rate: Number(inputs[7].value)
     };
     try {
-      const res = await fetch('/inventory/create', {
+      const res = await apiFetch('/inventory/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -157,11 +195,12 @@ function wireModals() {
       document.getElementById('addModal').style.display = 'none';
       await loadInventory();
     } catch (err) {
-      alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 
-  document.querySelector('#editModal form').addEventListener('submit', async e => {
+  const editForm = document.querySelector('#editModal form');
+  if (editForm) editForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
     const updated_values = {
@@ -174,7 +213,7 @@ function wireModals() {
       tax_rate: Number(inputs[7].value)
     };
     try {
-      const res = await fetch(`/inventory/update/${invState.activeProductId}`, {
+      const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updated_values })
@@ -184,19 +223,20 @@ function wireModals() {
       document.getElementById('editModal').style.display = 'none';
       await loadInventory();
     } catch (err) {
-      alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 
-  document.querySelector('#deleteModal .delete-btn').addEventListener('click', async () => {
+  const deleteBtn = document.querySelector('#deleteModal .delete-btn');
+  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
     try {
-      const res = await fetch(`/inventory/delete/${invState.activeProductId}`, { method: 'POST' });
+      const res = await apiFetch(`/inventory/delete/${invState.activeProductId}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'delete failed');
       document.getElementById('deleteModal').style.display = 'none';
       await loadInventory();
     } catch (err) {
-      alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 }

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Create Account | Acer Biomedicals</title>
+
+    <link rel="stylesheet" href="../css/signup.css" />
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+</head>
+
+<body>
+    <div class="create-container">
+        <!-- Left Panel -->
+
+        <div class="left-panel">
+            <img src="../images/comapny_logo-Photoroom.png" alt="Logo" />
+
+            <h1>Acer Biomedicals</h1>
+
+            <p>Caring For Life</p>
+
+            <div class="feature">
+                <i class="fa-solid fa-user-plus"></i>
+
+                <div>
+                    <h4>Create Users</h4>
+
+                    <span>Admin Only Access</span>
+                </div>
+            </div>
+
+            <div class="feature">
+                <i class="fa-solid fa-lock"></i>
+
+                <div>
+                    <h4>Secure Accounts</h4>
+
+                    <span>Protected Authentication</span>
+                </div>
+            </div>
+
+            <div class="feature">
+                <i class="fa-solid fa-users"></i>
+
+                <div>
+                    <h4>User Management</h4>
+
+                    <span>Manage Employees</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel -->
+
+        <div class="right-panel">
+            <h2>Create New Account</h2>
+
+            <p class="subtitle">Fill all required details below.</p>
+
+            <div id="msg"></div>
+
+            <form id="createForm">
+                <!-- Full Name -->
+
+                <div class="form-group">
+                    <label>Full Name</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-user"></i>
+
+                        <input type="text" id="full_name" placeholder="Enter Full Name" required />
+                    </div>
+                </div>
+
+                <!-- Username -->
+
+                <div class="form-group">
+                    <label>Username</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-id-card"></i>
+
+                        <input type="text" id="username" placeholder="Enter Username" required />
+                    </div>
+                </div>
+
+                <!-- Password -->
+
+                <div class="form-group">
+                    <label>Password</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-lock"></i>
+
+                        <input type="password" id="password" placeholder="Enter Password" required />
+                    </div>
+                </div>
+
+                <!-- Email -->
+
+                <div class="form-group">
+                    <label>Email</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-envelope"></i>
+
+                        <input type="email" id="email" placeholder="Enter Email" />
+                    </div>
+                </div>
+                <!-- Phone Number -->
+
+                <div class="form-group">
+                    <label>Phone Number</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-phone"></i>
+
+                        <input type="text" id="phone" placeholder="Enter Phone Number" />
+                    </div>
+                </div>
+
+                <!-- Company Name -->
+
+                <div class="form-group">
+                    <label>Company Name</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-building"></i>
+
+                        <input type="text" id="company" placeholder="Enter Company Name" />
+                    </div>
+                </div>
+
+                <!-- GST Number -->
+
+                <div class="form-group">
+                    <label>GST Number</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-file-invoice"></i>
+
+                        <input type="text" id="gst" placeholder="Enter GST Number" />
+                    </div>
+                </div>
+
+                <!-- User Role -->
+
+                <div class="form-group">
+                    <label>User Role</label>
+
+                    <div class="input-box">
+                        <i class="fa-solid fa-user-tag"></i>
+
+                        <select id="role" required>
+                            <option value="">Select Role</option>
+
+                            <option value="admin">Admin</option>
+
+                            <option value="employee">Employee</option>
+
+                            <option value="technician">Technician</option>
+
+                            <option value="distributor">Distributor</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Buttons -->
+
+                <div class="button-area">
+                    <button type="submit" id="createBtn" class="btn btn-primary">
+                        <i class="fa-solid fa-user-plus"></i>
+
+                        Create Account
+                    </button>
+
+                    <button type="button" class="btn btn-secondary" onclick="window.location = 'users.html'">
+                        <i class="fa-solid fa-arrow-left"></i>
+
+                        Back
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="../common_auth.js"></script>
+    <script src="create_account.js"></script>
+</body>
+
+</html>

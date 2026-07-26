@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function fetchJSON(url) {
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) throw new Error(`${url} failed`);
   return res.json();
 }
@@ -58,9 +58,6 @@ function groupByMonth(items, dateField, valueFn) {
 
 function renderCharts(orders, inventory, services) {
   if (typeof Chart === 'undefined') return;
-
-  // Revenue & order count by month (falls back to a single "no date" bucket
-  // for orders created before order_date existed).
   const revenueByMonth = groupByMonth(orders, 'order_date', o => Number(o.total_mrp) || 0);
   const ordersByMonth = groupByMonth(orders, 'order_date', () => 1);
 
@@ -136,8 +133,6 @@ function renderQuickAnalytics(orders, services) {
   if (miniValues[0]) miniValues[0].textContent = todaysOrders.length;
   if (miniValues[1]) miniValues[1].textContent = `₹${todaysRevenue.toLocaleString('en-IN')}`;
   if (miniValues[2]) miniValues[2].textContent = pendingServices;
-  // Active technicians & low stock products need distinct backend queries
-  // not currently exposed; left as-is (static) rather than guessed.
 }
 
 function wireModalButtons() {
@@ -146,11 +141,11 @@ function wireModalButtons() {
 
   const generateBtn = document.querySelector('.generate');
   if (generateBtn) generateBtn.addEventListener('click', () => {
-    document.getElementById('generateModal').style.display = 'flex';
+    alert('Report generation modal not implemented yet.');
   });
 
   document.querySelectorAll('.export').forEach(btn =>
     btn.addEventListener('click', () => {
-      document.getElementById('exportModal').style.display = 'flex';
+      alert('Export modal not implemented yet.');
     }));
 }

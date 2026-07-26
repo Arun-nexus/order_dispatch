@@ -1,19 +1,19 @@
-from mongo.mongodb_connection import mongodbclient
+from mongodb.mongodb_connection import mongodbclient
 from logger import logging
 import uuid
 import enum
 
 
 class ServiceStatus(str, enum.Enum):
+    
     active = "active"
     in_progress = "in_progress"
     completed = "completed"
     rejected = "rejected"
 
-
 class service_detail(mongodbclient):
 
-    def __init__(self, product_id: str, serial_no: str, status="active"):
+    def __init__(self, product_id: str = None, serial_no: str = None, status="active"):
         super().__init__()
 
         self.product_id = product_id
@@ -22,7 +22,7 @@ class service_detail(mongodbclient):
         self.spare_parts = ""
         self.service_id = str(uuid.uuid4())
 
-    def add_service(self, technician_id, purchase_date: str, issue: str,image: str, video: str, collection_name: str,spare_parts: str = "", status="active"):
+    def add_service(self, technician_id, purchase_date: str, issue: str, image: str, video: str, collection_name: str,location: str = "indoor", spare_parts: str = "", status="active"):
         try:
             self.spare_parts = spare_parts
             self.status = status
@@ -35,10 +35,13 @@ class service_detail(mongodbclient):
                 "issue": issue,
                 "image": image,
                 "video": video,
+                "location": location,
                 "status": status,
                 "reason": "",
                 "spare_parts": self.spare_parts,
-                "manager_confirmed_return": False
+                "spare_parts_requested": "",
+                "manager_confirmed_return": False,
+                "warranty_until": None
             }
 
             added_service = super().add(collection_name=collection_name, dictionary=new_service)
@@ -58,7 +61,7 @@ class service_detail(mongodbclient):
             logging.error("service was not able to delete!")
             raise Exception(e)
 
-    def update_service_status(self, service_status, reason: str, collection_name, query,image=None, spare_parts_used: bool = False):
+    def update_service_status(self, service_status, reason: str, collection_name, query, image=None,spare_parts_used: bool = False, spare_parts: str = ""):
         try:
             if service_status not in [s.value for s in ServiceStatus]:
                 raise Exception(f"invalid status: {service_status}")
@@ -67,6 +70,8 @@ class service_detail(mongodbclient):
                 raise Exception("reason was not provided for rejected service")
 
             if service_status == "completed":
+                if not spare_parts or not spare_parts.strip():
+                    raise Exception("spare part used must be written before marking service as completed")
                 if spare_parts_used:
                     if not image:
                         raise Exception("image proof is required to close the service since spare parts were used")
@@ -80,6 +85,8 @@ class service_detail(mongodbclient):
                 "reason": reason,
                 "spare_parts_used": spare_parts_used
             }
+            if spare_parts:
+                update_values["spare_parts"] = spare_parts
             if image:
                 update_values["image"] = image
 
@@ -100,6 +107,16 @@ class service_detail(mongodbclient):
             logging.error("manager confirmation failed!")
             raise Exception(e)
 
+    def extend_warranty(self, collection_name, query, warranty_until: str):
+        try:
+            update_values = {"warranty_until": warranty_until}
+            result = super().update_data(collection_name=collection_name, update_values=update_values, query=query)
+            logging.info("warranty extended")
+            return result
+        except Exception as e:
+            logging.error("warranty extension failed!")
+            raise Exception(e)
+
     def get_service_data(self, collection_name, query=None, projection=None):
         try:
             service = super().get_data(collection_name=collection_name, query=query, projection=projection)
@@ -111,4 +128,3 @@ class service_detail(mongodbclient):
 
     def technician_location(self, user_id):
         pass
-

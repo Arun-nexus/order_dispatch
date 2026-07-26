@@ -9,15 +9,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadUsers() {
   try {
-    const res = await fetch('/account/');
+    const res = await apiFetch('/account/');
     if (!res.ok) throw new Error('failed to fetch users');
     const data = await res.json();
     userState.users = data.dataset || [];
     renderUsersTable(userState.users);
+    updateUsersCards(userState.users);
   } catch (err) {
     console.error(err);
-    alert('Could not load users data.');
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      alert('Could not load users data.');
+    }
   }
+}
+
+function updateUsersCards(users) {
+  const cardValues = document.querySelectorAll('.cards .card h2');
+  if (!cardValues.length) return;
+  // users.html card order: Total Users, Admins, Employees, Technicians, Distributors
+  cardValues[0].textContent = users.length;
+  if (cardValues[1]) cardValues[1].textContent = users.filter(u => u.role === 'admin').length;
+  if (cardValues[2]) cardValues[2].textContent = users.filter(u => u.role === 'employee').length;
+  if (cardValues[3]) cardValues[3].textContent = users.filter(u => u.role === 'technician').length;
+  if (cardValues[4]) cardValues[4].textContent = users.filter(u => u.role === 'distributor').length;
 }
 
 function roleClass(role) {
@@ -144,7 +158,8 @@ function wireModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
-  document.querySelector('#addModal form').addEventListener('submit', async e => {
+  const addForm = document.querySelector('#addModal form');
+  if (addForm) addForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
     const select = e.target.querySelector('select');
@@ -164,7 +179,7 @@ function wireModals() {
     };
 
     try {
-      const res = await fetch('/account/create_account/', {
+      const res = await apiFetch('/account/create_account/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -174,11 +189,12 @@ function wireModals() {
       document.getElementById('addModal').style.display = 'none';
       await loadUsers();
     } catch (err) {
-      alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 
-  document.querySelector('#editModal form').addEventListener('submit', async e => {
+  const editForm = document.querySelector('#editModal form');
+  if (editForm) editForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
     const select = e.target.querySelector('select');
@@ -191,7 +207,7 @@ function wireModals() {
       role: select.value.trim().toLowerCase()
     };
     try {
-      const res = await fetch(`/login/update_account/${userState.activeUsername}`, {
+      const res = await apiFetch(`/login/update_account/${userState.activeUsername}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updated_values })
@@ -201,19 +217,20 @@ function wireModals() {
       document.getElementById('editModal').style.display = 'none';
       await loadUsers();
     } catch (err) {
-      alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 
-  document.querySelector('#deleteModal .delete-btn').addEventListener('click', async () => {
+  const deleteBtn = document.querySelector('#deleteModal .delete-btn');
+  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
     try {
-      const res = await fetch(`/login/delete_account/${userState.activeUsername}`, { method: 'POST' });
+      const res = await apiFetch(`/login/delete_account/${userState.activeUsername}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'delete failed');
       document.getElementById('deleteModal').style.display = 'none';
       await loadUsers();
     } catch (err) {
-      alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 }
