@@ -7,14 +7,14 @@ const AUTH = {
 const ROLE_ACCESS = {
   admin:       ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'users.html', 'reports.html', 'create_account.html'],
   employee:    ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'reports.html'],
-  technician:  ['main_dashboard.html', 'technician.html'],
+  technician:  ['technician_dashboard.html', 'technician.html'],
   distributor: ['main_dashboard.html', 'orders.html'],
 };
 
 const ROLE_HOME = {
   admin: 'main_dashboard.html',
   employee: 'main_dashboard.html',
-  technician: 'technician.html',
+  technician: 'technician_dashboard.html',
   distributor: 'orders.html',
 };
 

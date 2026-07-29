@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard | Acer Biomedical</title>
+
+  <link rel="stylesheet" href="../css/global.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+</head>
+
+<body>
+  <div class="container">
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical" />
+      </div>
+
+      <ul>
+        <li class="active"><a href="technician_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Technician" />
+        <div>
+          <h4 id="sidebarUserName">Technician</h4>
+          <p id="sidebarUserRole">Technician</p>
+        </div>
+      </div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div class="left">
+          <h1>Dashboard</h1>
+        </div>
+        <div class="right">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Search anything..." />
+          </div>
+          <button><i class="fa-regular fa-bell"></i></button>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Technician" />
+            <div>
+              <h4 id="headerUserName">Technician</h4>
+              <p id="headerUserRole">Technician</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="welcome-section">
+        <div class="welcome-left">
+          <h2 id="welcomeText">Welcome Back, Technician</h2>
+          <p>Here's your service activity for this month.</p>
+        </div>
+        <div class="date-box">
+          <i class="fa-regular fa-calendar"></i>
+          <span>20 May 2025</span>
+        </div>
+      </section>
+
+      <section class="cards">
+        <div class="card">
+          <div><span>Total Services (This Month)</span><h2 id="cardTotalMonth">0</h2><p>All services this month</p></div>
+          <i class="fa-solid fa-layer-group card-icon-blue"></i>
+        </div>
+        <div class="card">
+          <div><span>Completed</span><h2 id="cardCompleted">0</h2><p>Successfully closed</p></div>
+          <i class="fa-solid fa-circle-check card-icon-green"></i>
+        </div>
+        <div class="card">
+          <div><span>Pending</span><h2 id="cardPending">0</h2><p>Active + In Progress</p></div>
+          <i class="fa-regular fa-clock card-icon-orange"></i>
+        </div>
+        <div class="card">
+          <div><span>Rejected</span><h2 id="cardRejected">0</h2><p>Not accepted</p></div>
+          <i class="fa-solid fa-circle-xmark card-icon-purple"></i>
+        </div>
+        <div class="card">
+          <div><span>Total Revenue</span><h2 id="cardRevenue">₹0</h2><p>From completed services</p></div>
+          <i class="fa-solid fa-indian-rupee-sign card-icon-orange"></i>
+        </div>
+      </section>
+
+      <section class="cards">
+        <div class="card">
+          <div><span>Spare Parts Used</span><h2 id="cardPartsUsed">0</h2><p>Used in your services</p></div>
+          <i class="fa-solid fa-gears card-icon-blue"></i>
+        </div>
+        <div class="card">
+          <div><span>Spare Parts Return Alert</span><h2 id="cardPartsOverdue">0</h2><p>Overdue for return</p></div>
+          <i class="fa-solid fa-triangle-exclamation card-icon-purple"></i>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Recent Services</h3>
+            <a href="technician.html"><button class="view-all-btn">View All</button></a>
+          </div>
+          <div class="order-list" id="recentServiceList"></div>
+        </div>
+        <div class="dashboard-right">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Service Status</h3>
+              <a href="technician.html"><button class="view-all-btn">View All</button></a>
+            </div>
+            <div class="inventory-status">
+              <div class="inventory-item">
+                <div class="inventory-head">
+                  <div><i class="fa-solid fa-circle-check text-success"></i> Completed</div>
+                  <strong>0</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill green" style="width: 0%"></div></div>
+                <small>0%</small>
+              </div>
+              <div class="inventory-item">
+                <div class="inventory-head">
+                  <div><i class="fa-solid fa-triangle-exclamation text-warning"></i> Pending</div>
+                  <strong>0</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill orange" style="width: 0%"></div></div>
+                <small>0%</small>
+              </div>
+              <div class="inventory-item">
+                <div class="inventory-head">
+                  <div><i class="fa-solid fa-circle-xmark text-danger"></i> Rejected</div>
+                  <strong>0</strong>
+                </div>
+                <div class="progress-bar"><div class="progress-fill red" style="width: 0%"></div></div>
+                <small>0%</small>
+              </div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Spare Parts</h3>
+              <a href="technician.html"><button class="view-all-btn">View All</button></a>
+            </div>
+            <div class="service-list" id="sparePartList"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../common_auth.js"></script>
+  <script>
+    function openLogoutModal(e) {
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
+    }
+    function closeLogoutModal() {
+      document.getElementById("logoutModal").classList.remove("active");
+    }
+    document.addEventListener("DOMContentLoaded", () => {
+      const role = getRole() || "technician";
+      const uname = getUsername() || "Technician";
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ["sidebarUserName", "headerUserName"].forEach(id => document.getElementById(id).textContent = uname);
+      ["sidebarUserRole", "headerUserRole"].forEach(id => document.getElementById(id).textContent = label);
+      document.getElementById("welcomeText").textContent = `Welcome Back, ${uname}`;
+    });
+  </script>
+  <script src="technician_dashboard.js"></script>
+</body>
+</html>

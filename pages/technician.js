@@ -47,10 +47,6 @@ function renderCards() {
 
   document.getElementById('cardTotal').textContent = services.length;
   document.getElementById('cardActive').textContent = services.filter(s => s.status === 'active').length;
-  document.getElementById('cardInProgress').textContent = services.filter(s => s.status === 'in_progress').length;
-  document.getElementById('cardCompleted').textContent = services.filter(s => s.status === 'completed').length;
-  document.getElementById('cardRejected').textContent = services.filter(s => s.status === 'rejected').length;
-
   const earned = services
     .filter(s => s.status === 'completed')
     .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
@@ -58,7 +54,6 @@ function renderCards() {
 
   document.getElementById('cardPartsHeld').textContent = parts.filter(a => a.return_status !== 'returned').length;
   document.getElementById('cardPartsOverdue').textContent = parts.filter(isOverdue).length;
-  document.getElementById('cardPartsReturned').textContent = parts.filter(a => a.return_status === 'returned').length;
 }
 
 function statusBadgeClass(status) {
