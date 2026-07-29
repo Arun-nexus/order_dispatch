@@ -104,7 +104,7 @@
       const roleHome = {
         admin: 'main_dashboard.html',
         employee: 'main_dashboard.html',
-        technician: 'pages/service.html',
+        technician: 'pages/technician.html',
         distributor: 'pages/orders.html'
       };
       if (token && role) window.location.href = roleHome[role] || 'main_dashboard.html';
@@ -139,7 +139,7 @@
         const roleHome = {
           admin: 'main_dashboard.html',
           employee: 'main_dashboard.html',
-          technician: 'pages/service.html',
+          technician: 'pages/technician.html',
           distributor: 'pages/orders.html'
         };
         window.location.href = roleHome[data.role] || 'main_dashboard.html';

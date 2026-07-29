@@ -40,6 +40,7 @@ class service_detail(mongodbclient):
                 "reason": "",
                 "spare_parts": self.spare_parts,
                 "spare_parts_requested": "",
+                "service_charges": None,
                 "manager_confirmed_return": False,
                 "warranty_until": None
             }
@@ -61,7 +62,7 @@ class service_detail(mongodbclient):
             logging.error("service was not able to delete!")
             raise Exception(e)
 
-    def update_service_status(self, service_status, reason: str, collection_name, query, image=None,spare_parts_used: bool = False, spare_parts: str = ""):
+    def update_service_status(self, service_status, reason: str, collection_name, query, image=None, video=None, spare_parts_used: bool = False, spare_parts: str = ""):
         try:
             if service_status not in [s.value for s in ServiceStatus]:
                 raise Exception(f"invalid status: {service_status}")
@@ -89,12 +90,50 @@ class service_detail(mongodbclient):
                 update_values["spare_parts"] = spare_parts
             if image:
                 update_values["image"] = image
+            if video:
+                update_values["video"] = video
 
             service = super().update_data(collection_name=collection_name,update_values=update_values, query=query)
             logging.info("service status was updated!")
             return service
         except Exception as e:
             logging.error("service completion was failed!")
+            raise Exception(e)
+
+    def set_service_charges(self, collection_name, query, service_charges: float):
+        try:
+            result = super().update_data(collection_name=collection_name, query=query,
+                                          update_values={"service_charges": service_charges})
+            logging.info("service charges updated")
+            return result
+        except Exception as e:
+            logging.error("service charges update failed!")
+            raise Exception(e)
+
+    def attach_media(self, collection_name, query, image=None, video=None):
+        try:
+            update_values = {}
+            if image:
+                update_values["image"] = image
+            if video:
+                update_values["video"] = video
+            if not update_values:
+                raise Exception("no image or video provided")
+            result = super().update_data(collection_name=collection_name, query=query, update_values=update_values)
+            logging.info("service media updated")
+            return result
+        except Exception as e:
+            logging.error("service media update failed!")
+            raise Exception(e)
+
+    def request_spare_part(self, collection_name, query, note: str):
+        try:
+            result = super().update_data(collection_name=collection_name, query=query,
+                                          update_values={"spare_parts_requested": note})
+            logging.info("spare part requested for service")
+            return result
+        except Exception as e:
+            logging.error("spare part request failed!")
             raise Exception(e)
 
     def manager_confirm_return(self, collection_name, query):

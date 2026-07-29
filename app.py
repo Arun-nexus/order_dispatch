@@ -5,10 +5,13 @@ from logger import logging
 from configuration import load_params
 from dotenv import load_dotenv
 from mongodb.mongodb_connection import mongodbclient
-from user.customer_details import login
+from user.company import login
 from order.manage_order import order_manager
 from service.service_details import service_detail
 from inventory.inventory_handling import inventory_manager
+from user.customer_details import customer_manager
+from sales.sales_person_manager import sales_person_manager
+from allocation.allocation import allocation_manager
 from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +37,9 @@ ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
 SERVICE_COLLECTION = params["service_collection_name"]
 INVENTORY_COLLECTION = params["inventory_collection_name"]
+CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
+SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
+ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
 
 
 class LoginRequest(BaseModel):
@@ -70,16 +76,64 @@ class ServiceRequest(BaseModel):
     spare_parts: str = ""
 
 
-class CreateOrderRequest(BaseModel):
-    product_name: str
+class OrderItem(BaseModel):
     product_id: str
-    serial_no: str = ""
-    company_name: str
-    gst_number: str
-    payment_mode: str
+    product_name: str
+    quantity: int
     price: float
-    tax_rate: float
+    tax_rate: float = 0
+
+
+class CreateOrderRequest(BaseModel):
+    customer_id: str = ""          # set when an existing customer was picked
+    customer: dict = {}            # denormalized snapshot: company_name, company_address,
+                                    # gst_number, contractor_person, contractor_number, contractor_email
+    items: list[OrderItem]
+    payment_mode: str
+    payment_details: dict = {}     # credit_days / cheque_number+cheque_date / dd_number+dd_date etc.
     discount: float = 0
+
+
+class CustomerRequest(BaseModel):
+    company_name: str
+    company_address: str = ""
+    gst_number: str = ""
+    contractor_person: str = ""
+    contractor_number: str = ""
+    contractor_email: str = ""
+
+
+class CustomerUpdateRequest(BaseModel):
+    updated_values: dict
+
+
+class SalesPersonRequest(BaseModel):
+    name: str
+    company_name: str = ""
+    address: str = ""
+    contact_number: str = ""
+    email: str = ""
+
+
+class AllocationItem(BaseModel):
+    product_id: str
+    product_name: str
+    quantity: int
+
+
+class SparePartAllocation(BaseModel):
+    service_id: str
+    part_name: str
+    quantity: int = 1
+
+
+class CreateAllocationRequest(BaseModel):
+    sales_person_id: str = ""
+    sales_person: dict = {}
+    items: list[AllocationItem] = []
+    spare_part: SparePartAllocation | None = None
+    company_name: str = ""
+    address: str = ""
 
 
 class OrderStatusRequest(BaseModel):
@@ -90,8 +144,22 @@ class ServiceUpdateRequest(BaseModel):
     service_status: str
     reason: str = ""
     image: str = None
+    video: str = None
     spare_parts_used: bool = False
     spare_parts: str = ""
+
+
+class ServiceChargeRequest(BaseModel):
+    service_charges: float
+
+
+class ServiceMediaRequest(BaseModel):
+    image: str = None
+    video: str = None
+
+
+class SparePartRequest(BaseModel):
+    note: str
 
 
 class ExtendWarrantyRequest(BaseModel):
@@ -111,6 +179,9 @@ class InventoryRequest(BaseModel):
     supplier: str
     price: str
     tax_rate: int
+    model_no: str = ""
+    supplier_address: str = ""
+    serial_numbers: list[str] = []
 
 
 class InventoryUpdateRequest(BaseModel):
@@ -170,6 +241,22 @@ async def account(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("account dataset cannot be fetched")
         raise HTTPException(status_code=500, detail="account informations cannot be fetched")
+
+
+@app.get("/account/technicians")
+async def list_technicians(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"role": "technician"})
+        technicians = [
+            {k: v for k, v in acc.items() if k not in ("password", "confirm_password", "_id")}
+            for acc in dataset
+        ]
+        logging.info("technician list was fetched successfully")
+        return {"message": "technician list", "dataset": technicians}
+    except Exception as e:
+        logging.error("technician list cannot be fetched")
+        raise HTTPException(status_code=500, detail="technician list cannot be fetched")
 
 
 @app.post("/account/create_account/")
@@ -236,18 +323,99 @@ async def update_account(username: str, updated_values: UpdateAccountRequest, us
         raise HTTPException(status_code=500, detail="account details updation was unsuccessful")
 
 
+VALID_PAYMENT_MODES = {"Credit", "NetBanking", "UPI", "Cheque", "DemandDraft", "Cash"}
+
+
 @app.post("/order/create_order/")
 async def create_order(request: CreateOrderRequest, user: dict = Depends(get_current_user)):
     try:
+        if not request.items:
+            raise HTTPException(status_code=400, detail="add at least one product to the order")
+
+        if request.payment_mode not in VALID_PAYMENT_MODES:
+            raise HTTPException(status_code=400, detail="invalid payment mode")
+
+        if request.payment_mode == "Credit":
+            credit_days = request.payment_details.get("credit_days")
+            if not credit_days or not (0 < int(credit_days) <= 60):
+                raise HTTPException(status_code=400, detail="credit days must be between 1 and 60")
+
+        if request.payment_mode == "Cheque" and not request.payment_details.get("cheque_number"):
+            raise HTTPException(status_code=400, detail="cheque number is required")
+
+        if request.payment_mode == "DemandDraft" and not request.payment_details.get("dd_number"):
+            raise HTTPException(status_code=400, detail="demand draft number is required")
+
+        if request.payment_mode == "UPI" and not request.payment_details.get("upi_id"):
+            raise HTTPException(status_code=400, detail="UPI ID is required")
+
+        if request.payment_mode == "NetBanking" and not (
+            request.payment_details.get("bank_name")
+            and request.payment_details.get("account_number")
+            and request.payment_details.get("ifsc_code")
+        ):
+            raise HTTPException(status_code=400, detail="bank name, account number and IFSC code are required")
+
+        if request.payment_mode == "Cash" and not request.payment_details.get("received_by"):
+            raise HTTPException(status_code=400, detail="received-by person name is required")
+
+        customer_db = customer_manager()
+        customer_snapshot = dict(request.customer or {})
+
+        if request.customer_id:
+            existing = customer_db.get_data(CUSTOMER_COLLECTION, query={"customer_id": request.customer_id})
+            if not existing:
+                raise HTTPException(status_code=404, detail="selected customer not found")
+            customer_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
+        else:
+            if not customer_snapshot.get("company_name"):
+                raise HTTPException(status_code=400, detail="customer details are required")
+            new_customer = customer_manager(
+                company_name=customer_snapshot.get("company_name"),
+                company_address=customer_snapshot.get("company_address"),
+                gst_number=customer_snapshot.get("gst_number"),
+                contractor_person=customer_snapshot.get("contractor_person"),
+                contractor_number=customer_snapshot.get("contractor_number"),
+                contractor_email=customer_snapshot.get("contractor_email"),
+            )
+            new_customer.add(collection_name=CUSTOMER_COLLECTION)
+            customer_snapshot = {
+                "customer_id": new_customer.customer_id,
+                "company_name": new_customer.company_name,
+                "company_address": new_customer.company_address,
+                "gst_number": new_customer.gst_number,
+                "contractor_person": new_customer.contractor_person,
+                "contractor_number": new_customer.contractor_number,
+                "contractor_email": new_customer.contractor_email,
+            }
+
+        inventory_db = inventory_manager()
+
+        # pre-check availability for every line before mutating any inventory
+        for item in request.items:
+            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id)
+            if available < item.quantity:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"insufficient stock for {item.product_name}: only {available} available"
+                )
+
+        order_items = []
+        for item in request.items:
+            allocated_serials = inventory_db.allocate_serials(
+                collection_name=INVENTORY_COLLECTION,
+                product_id=item.product_id,
+                quantity=item.quantity
+            )
+            order_item = item.dict()
+            order_item["serial_numbers"] = allocated_serials
+            order_items.append(order_item)
+
         order = order_manager(
-            product_name=request.product_name,
-            product_id=request.product_id,
-            serial_no=request.serial_no,
-            company_name=request.company_name,
-            gst_number=request.gst_number,
+            customer=customer_snapshot,
+            items=order_items,
             payment_mode=request.payment_mode,
-            price=request.price,
-            tax_rate=request.tax_rate,
+            payment_details=request.payment_details,
             discount=request.discount
         )
         order.add(collection_name=ORDERS_COLLECTION)
@@ -255,6 +423,8 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(get_cur
         logging.info(f"order {order.order_id} created successfully")
         return {"message": "order created successfully", "order_id": order.order_id}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error("order creation failed!")
         raise HTTPException(status_code=500, detail="order creation failed")
@@ -348,7 +518,7 @@ async def services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/services/create")
-async def create_service(request: ServiceRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
+async def create_service(request: ServiceRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
         service = service_detail(product_id=request.product_id, serial_no=request.serial_no)
         service.add_service(
@@ -393,6 +563,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
             collection_name=SERVICE_COLLECTION,
             query={"service_id": service_id},
             image=request.image,
+            video=request.video,
             spare_parts_used=request.spare_parts_used,
             spare_parts=request.spare_parts
         )
@@ -401,6 +572,51 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
     except Exception as e:
         logging.error("service updation was unsuccessful!")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/service/my")
+async def my_services(user: dict = Depends(get_current_user)):
+    try:
+        db = service_detail()
+        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={"technician_alloted": user["username"]})
+        logging.info(f"service dataset fetched for technician {user['username']}")
+        return {"message": "my service dataset", "dataset": dataset}
+    except Exception as e:
+        logging.error("technician service dataset cannot be fetched")
+        raise HTTPException(status_code=500, detail="service dataset cannot be fetched")
+
+
+@app.post("/service/update_charges/{service_id}")
+async def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = service_detail()
+        db.set_service_charges(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, service_charges=request.service_charges)
+        return {"message": "service charges updated", "service_id": service_id, "service_charges": request.service_charges}
+    except Exception as e:
+        logging.error("service charges update failed!")
+        raise HTTPException(status_code=500, detail="service charges cannot be updated")
+
+
+@app.post("/service/upload_media/{service_id}")
+async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
+    try:
+        db = service_detail()
+        db.attach_media(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, image=request.image, video=request.video)
+        return {"message": "media uploaded successfully", "service_id": service_id}
+    except Exception as e:
+        logging.error("service media upload failed!")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/service/request_spare_part/{service_id}")
+async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
+    try:
+        db = service_detail()
+        db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=request.note)
+        return {"message": "spare part requested successfully", "service_id": service_id}
+    except Exception as e:
+        logging.error("spare part request failed!")
+        raise HTTPException(status_code=500, detail="spare part request failed")
 
 
 @app.post("/service/manager_confirm/{service_id}")
@@ -440,6 +656,11 @@ async def inventory(user: dict = Depends(get_current_user)):
 @app.post("/inventory/create")
 async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
+        if len(request.serial_numbers) != request.quantity:
+            raise HTTPException(status_code=400, detail="number of serial numbers must match quantity")
+        if len(set(request.serial_numbers)) != len(request.serial_numbers):
+            raise HTTPException(status_code=400, detail="serial numbers must be unique")
+
         inventory_item = inventory_manager(
             product_name=request.product_name,
             product_id=request.product_id,
@@ -448,12 +669,17 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
             lot_no=request.lot_no,
             supplier=request.supplier,
             price=request.price,
-            tax_rate=request.tax_rate
+            tax_rate=request.tax_rate,
+            model_no=request.model_no,
+            supplier_address=request.supplier_address,
+            serial_numbers=request.serial_numbers
         )
         inventory_item.add(collection_name=INVENTORY_COLLECTION)
         logging.info("product listed successfully on inventory")
         return {"message": "product was listed successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error("product cannot be listed to the inventory")
         raise HTTPException(status_code=500, detail="product can't list into the inventory")
@@ -482,6 +708,252 @@ async def delete_product(product_id: str, user: dict = Depends(require_role("adm
     except Exception as e:
         logging.error("product deletion was failed!")
         raise HTTPException(status_code=500, detail="product cannot be deleted")
+
+
+@app.get("/customer/")
+async def customers(user: dict = Depends(get_current_user)):
+    try:
+        db = customer_manager()
+        dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
+        logging.info("customer dataset was fetched successfully")
+        return {"message": "customer dataset", "dataset": dataset}
+    except Exception as e:
+        logging.error("customer dataset cannot be fetched")
+        raise HTTPException(status_code=500, detail="customer dataset cannot be fetched")
+
+
+@app.get("/customer/search")
+async def search_customer(term: str = "", user: dict = Depends(get_current_user)):
+    try:
+        db = customer_manager()
+        dataset = db.search(collection_name=CUSTOMER_COLLECTION, term=term) if term else db.get_data(CUSTOMER_COLLECTION, query={})
+        return {"message": "customer search results", "dataset": dataset}
+    except Exception as e:
+        logging.error("customer search failed")
+        raise HTTPException(status_code=500, detail="customer search failed")
+
+
+@app.post("/customer/create")
+async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        new_customer = customer_manager(
+            company_name=request.company_name,
+            company_address=request.company_address,
+            gst_number=request.gst_number,
+            contractor_person=request.contractor_person,
+            contractor_number=request.contractor_number,
+            contractor_email=request.contractor_email,
+        )
+        new_customer.add(collection_name=CUSTOMER_COLLECTION)
+        logging.info("customer created successfully")
+        return {
+            "message": "customer created successfully",
+            "customer_id": new_customer.customer_id,
+            "customer": {
+                "customer_id": new_customer.customer_id,
+                "company_name": new_customer.company_name,
+                "company_address": new_customer.company_address,
+                "gst_number": new_customer.gst_number,
+                "contractor_person": new_customer.contractor_person,
+                "contractor_number": new_customer.contractor_number,
+                "contractor_email": new_customer.contractor_email,
+            }
+        }
+    except Exception as e:
+        logging.error("customer creation failed!")
+        raise HTTPException(status_code=500, detail="customer creation failed")
+
+
+@app.post("/customer/update/{customer_id}")
+async def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = customer_manager()
+        result = db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
+                            update_values=request.updated_values)
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="no customer found with this id")
+        logging.info("customer was updated")
+        return {"message": "customer updated successfully", "customer_id": customer_id,
+                "updated_value": request.updated_values}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("customer updation was unsuccessful!")
+        raise HTTPException(status_code=500, detail="customer cannot be updated")
+
+
+@app.post("/customer/delete/{customer_id}")
+async def delete_customer(customer_id: str, user: dict = Depends(require_role("admin"))):
+    try:
+        db = customer_manager()
+        db.delete(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id})
+        logging.info(f"customer was deleted successfully {customer_id}")
+        return {"message": "customer deletion was successful", "customer_id": customer_id}
+    except Exception as e:
+        logging.error("customer deletion was failed!")
+        raise HTTPException(status_code=500, detail="customer cannot be deleted")
+
+
+@app.get("/salesperson/search")
+async def search_salesperson(term: str = "", user: dict = Depends(get_current_user)):
+    try:
+        db = sales_person_manager()
+        dataset = db.search(collection_name=SALESPERSON_COLLECTION, term=term) if term else db.get_data(SALESPERSON_COLLECTION, query={})
+        return {"message": "sales person search results", "dataset": dataset}
+    except Exception as e:
+        logging.error("sales person search failed")
+        raise HTTPException(status_code=500, detail="sales person search failed")
+
+
+@app.post("/salesperson/create")
+async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        new_sp = sales_person_manager(
+            name=request.name,
+            company_name=request.company_name,
+            address=request.address,
+            contact_number=request.contact_number,
+            email=request.email,
+        )
+        new_sp.add(collection_name=SALESPERSON_COLLECTION)
+        return {
+            "message": "sales person created successfully",
+            "sales_person_id": new_sp.sales_person_id,
+            "sales_person": {
+                "sales_person_id": new_sp.sales_person_id,
+                "name": new_sp.name,
+                "company_name": new_sp.company_name,
+                "address": new_sp.address,
+                "contact_number": new_sp.contact_number,
+                "email": new_sp.email,
+            }
+        }
+    except Exception as e:
+        logging.error("sales person creation failed!")
+        raise HTTPException(status_code=500, detail="sales person creation failed")
+
+
+@app.get("/service/active")
+async def active_services(user: dict = Depends(get_current_user)):
+    try:
+        db = service_detail()
+        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION,
+                                       query={"status": {"$in": ["active", "in_progress"]}})
+        return {"message": "active services", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching active services failed")
+        raise HTTPException(status_code=500, detail="active services cannot be fetched")
+
+
+@app.get("/allocation/")
+async def allocations(user: dict = Depends(get_current_user)):
+    try:
+        db = allocation_manager()
+        dataset = db.get_data(collection_name=ALLOCATION_COLLECTION, query={})
+        return {"message": "allocation dataset", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching allocations failed")
+        raise HTTPException(status_code=500, detail="allocation dataset cannot be fetched")
+
+
+@app.post("/allocation/create")
+async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        if not request.items and not request.spare_part:
+            raise HTTPException(status_code=400, detail="add at least one product or a spare part")
+
+        sales_person_snapshot = {}
+        if request.items:
+            sp_db = sales_person_manager()
+            if request.sales_person_id:
+                existing = sp_db.get_data(SALESPERSON_COLLECTION, query={"sales_person_id": request.sales_person_id})
+                if not existing:
+                    raise HTTPException(status_code=404, detail="selected sales person not found")
+                sales_person_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
+            else:
+                if not request.sales_person.get("name"):
+                    raise HTTPException(status_code=400, detail="sales person details are required")
+                new_sp = sales_person_manager(
+                    name=request.sales_person.get("name"),
+                    company_name=request.sales_person.get("company_name"),
+                    address=request.sales_person.get("address"),
+                    contact_number=request.sales_person.get("contact_number"),
+                    email=request.sales_person.get("email"),
+                )
+                new_sp.add(collection_name=SALESPERSON_COLLECTION)
+                sales_person_snapshot = {
+                    "sales_person_id": new_sp.sales_person_id,
+                    "name": new_sp.name,
+                    "company_name": new_sp.company_name,
+                    "address": new_sp.address,
+                    "contact_number": new_sp.contact_number,
+                    "email": new_sp.email,
+                }
+
+        inventory_db = inventory_manager()
+        allocation_items = []
+        for item in request.items:
+            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id)
+            if available < item.quantity:
+                raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}: only {available} available")
+
+        for item in request.items:
+            allocated_serials = inventory_db.allocate_serials(
+                collection_name=INVENTORY_COLLECTION,
+                product_id=item.product_id,
+                quantity=item.quantity
+            )
+            allocation_items.append({
+                "product_id": item.product_id,
+                "product_name": item.product_name,
+                "quantity": item.quantity,
+                "serial_numbers": allocated_serials
+            })
+
+        spare_part_dict = None
+        redirect_to = None
+        if request.spare_part:
+            svc_db = service_detail()
+            existing_service = svc_db.get_service_data(SERVICE_COLLECTION, query={"service_id": request.spare_part.service_id})
+            if not existing_service:
+                raise HTTPException(status_code=404, detail="selected service not found")
+
+            svc_db.update_data(
+                collection_name=SERVICE_COLLECTION,
+                query={"service_id": request.spare_part.service_id},
+                update_values={"spare_parts_requested": request.spare_part.part_name}
+            )
+            spare_part_dict = request.spare_part.dict()
+            redirect_to = "service.html"
+
+        allocation = allocation_manager(
+            sales_person=sales_person_snapshot,
+            items=allocation_items,
+            spare_part=spare_part_dict,
+            company_name=request.company_name,
+            address=request.address
+        )
+        allocation.add(collection_name=ALLOCATION_COLLECTION)
+
+        logging.info(f"allocation {allocation.allocation_id} created successfully")
+        return {"message": "allocation created successfully", "allocation_id": allocation.allocation_id, "redirect": redirect_to}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("allocation creation failed!")
+        raise HTTPException(status_code=500, detail="allocation creation failed")
+
+
+@app.post("/allocation/return/{allocation_id}")
+async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = allocation_manager()
+        db.mark_returned(collection_name=ALLOCATION_COLLECTION, allocation_id=allocation_id)
+        return {"message": "allocation marked as returned", "allocation_id": allocation_id}
+    except Exception as e:
+        logging.error("marking allocation as returned failed!")
+        raise HTTPException(status_code=500, detail="allocation cannot be marked as returned")
 
 
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")

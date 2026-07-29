@@ -1,4 +1,4 @@
-const svcState = { services: [], orders: [], activeServiceId: null };
+const svcState = { services: [], orders: [], activeServiceId: null, technicians: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadServices();
@@ -27,6 +27,19 @@ async function loadServices() {
       alert('Could not load service data.');
     }
   }
+}
+
+async function loadTechnicians() {
+  try {
+    const res = await apiFetch('/account/technicians');
+    if (!res.ok) throw new Error('failed to fetch technicians');
+    const data = await res.json();
+    svcState.technicians = data.dataset || [];
+  } catch (err) {
+    console.error(err);
+    svcState.technicians = [];
+  }
+  return svcState.technicians;
 }
 
 function updateCards(services) {
@@ -285,7 +298,7 @@ function wireFilters() {
 
 // --- Create Service modal (injected: service.html ships a "new-service"
 // button but no matching modal markup) ---
-function openCreateModal() {
+async function openCreateModal() {
   let modal = document.getElementById('createServiceModal');
   if (!modal) {
     modal = document.createElement('div');
@@ -297,11 +310,13 @@ function openCreateModal() {
         <form id="createServiceForm" style="display:flex;flex-direction:column;gap:12px;">
           <input name="product_id" placeholder="Product" required>
           <select name="location" required>
-            <option value="indoor">Indoor</option>
-            <option value="outdoor">Outdoor</option>
+            <option value="indoor">Inhouse</option>
+            <option value="outdoor">Field</option>
           </select>
           <input name="serial_no" placeholder="Serial No" required>
-          <input name="technician_id" placeholder="Technician ID" required>
+          <select name="technician_id" id="technicianSelect" required>
+            <option value="">Select Technician</option>
+          </select>
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
           <textarea name="spare_parts" placeholder="Spare parts requested (optional)" style="min-height:50px;"></textarea>
@@ -346,6 +361,19 @@ function openCreateModal() {
       }
     });
   }
+
+  // refresh the technician dropdown every time the modal opens, so it always
+  // reflects current usernames from Users → technician accounts
+  const select = modal.querySelector('#technicianSelect');
+  select.innerHTML = '<option value="">Loading technicians...</option>';
+  const technicians = await loadTechnicians();
+  if (!technicians.length) {
+    select.innerHTML = '<option value="">No technicians found — add one from Users</option>';
+  } else {
+    select.innerHTML = '<option value="">Select Technician</option>' +
+      technicians.map(t => `<option value="${t.username}">${t.username}${t.name ? ' — ' + t.name : ''}</option>`).join('');
+  }
+
   modal.style.display = 'flex';
 }
 

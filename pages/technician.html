@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Services | Acer Biomedical</title>
+
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+  <div class="container">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+
+      <ul>
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li class="active"><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
+        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Technician">
+        <div>
+          <h4 id="sidebarUserName">Technician</h4>
+          <p id="sidebarUserRole">Technician</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>My Services</h1>
+          <p>Services allotted to you — update status, upload proof, request spare parts</p>
+        </div>
+        <div class="right-header">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Search service ID or product...">
+          </div>
+          <button><i class="fa-regular fa-bell"></i></button>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Technician">
+            <div>
+              <h4 id="headerUserName">Technician</h4>
+              <p id="headerUserRole">Technician</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- SERVICE STATUS CARDS -->
+      <section class="cards">
+        <div class="card">
+          <div><span>Total Allotted</span><h2 id="cardTotal">0</h2><p>All services assigned to you</p></div>
+          <i class="fa-solid fa-layer-group"></i>
+        </div>
+        <div class="card">
+          <div><span>Active</span><h2 id="cardActive">0</h2><p>Not started yet</p></div>
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+                <div class="card">
+          <div><span>Total Earned</span><h2 id="cardEarned">₹0</h2><p>From completed services</p></div>
+          <i class="fa-solid fa-indian-rupee-sign"></i>
+        </div>
+        <div class="card">
+          <div><span>Spare Parts Held</span><h2 id="cardPartsHeld">0</h2><p>Currently with you</p></div>
+          <i class="fa-solid fa-box-open"></i>
+        </div>
+        <div class="card">
+          <div><span>Return Overdue</span><h2 id="cardPartsOverdue">0</h2><p>Past 7-day return window</p></div>
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          </div>
+      </section>
+
+
+      <!-- FILTER -->
+      <section class="filter-section">
+        <div class="filter-box">
+          <i class="fa-solid fa-filter"></i>
+          <select id="statusFilter">
+            <option>All Status</option>
+            <option value="active">Active</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <button class="filter-btn"><i class="fa-solid fa-magnifying-glass"></i> Apply Filter</button>
+      </section>
+
+      <!-- TABLE -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Service ID</th>
+              <th>Product ID</th>
+              <th>Serial No.</th>
+              <th>Issue</th>
+              <th>Location</th>
+              <th>Status</th>
+              <th>Service Charges</th>
+              <th>Warranty</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- rows rendered dynamically by technician_service.js -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button class="page active-page">1</button>
+        <button class="page">2</button>
+        <button class="page">3</button>
+        <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Logout Modal -->
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- common_auth.js MUST load first: enforces login + role-based page access -->
+  <script src="../common_auth.js"></script>
+
+  <!-- View Service Modal -->
+  <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;"></div>
+  </div>
+
+  <!-- Image / Video Modal -->
+  <div id="mediaModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:480px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Service Proof</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <img style="max-width:100%;border-radius:10px;display:none;">
+      <video controls style="max-width:100%;border-radius:10px;display:none;"></video>
+    </div>
+  </div>
+
+  <!-- Action Modal (upload / spare part / status update, built dynamically) -->
+  <div id="actionModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;"></div>
+  </div>
+
+  <script>
+    function openLogoutModal(e){
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
+    }
+    function closeLogoutModal(){
+      document.getElementById("logoutModal").classList.remove("active");
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const role = getRole() || '';
+      const uname = getUsername() || 'User';
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+    });
+  </script>
+  <script src="technician.js"></script>
+</body>
+</html>

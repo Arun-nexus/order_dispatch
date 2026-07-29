@@ -6,37 +6,62 @@ import uuid
 
 class order_manager(mongodbclient):
 
-    def __init__(self, product_name=None, product_id=None, serial_no=None, company_name=None,gst_number=None, payment_mode=None, price=None, tax_rate=None, discount=0):
+    def __init__(self, customer=None, items=None, payment_mode=None, payment_details=None, discount=0):
+        """
+        customer: dict -> {customer_id, company_name, company_address, gst_number,
+                            contractor_person, contractor_number, contractor_email}
+        items: list of dicts -> {product_id, product_name, serial_no, quantity, price, tax_rate}
+        payment_details: dict, shape depends on payment_mode
+            Credit       -> {"credit_days": int}
+            Cheque       -> {"cheque_number": str, "cheque_date": str, "bank_name": str}
+            DemandDraft  -> {"dd_number": str, "dd_date": str, "bank_name": str}
+            UPI/Cash/NetBanking -> {}
+        """
 
         super().__init__()
 
-        self.product_name = product_name
         self.order_id = str(uuid.uuid4())
-        self.product_id = product_id
-        self.serial_no = serial_no
-        self.company_name = company_name
-        self.gst_number = gst_number
+        self.customer = customer or {}
+        self.items = items or []
         self.payment_mode = payment_mode
+        self.payment_details = payment_details or {}
         self.status = "placed"
-        self.price = price
-        self.tax_rate = tax_rate
         self.discount = discount
 
     def add(self, collection_name):
         try:
-            total_mrp = self.price + (self.tax_rate * self.price / 100) - self.discount
+            if not self.items:
+                raise Exception("order must contain at least one product")
+
+            subtotal = 0.0
+            tax_total = 0.0
+
+            for item in self.items:
+                quantity = item.get("quantity", 0)
+                price = item.get("price", 0)
+                tax_rate = item.get("tax_rate", 0)
+
+                line_amount = price * quantity
+                line_tax = line_amount * tax_rate / 100
+
+                item["line_amount"] = line_amount
+                item["line_tax"] = line_tax
+                item["line_total"] = line_amount + line_tax
+
+                subtotal += line_amount
+                tax_total += line_tax
+
+            total_mrp = subtotal + tax_total - self.discount
 
             order_dict = {
-                "product_name": self.product_name,
                 "order_id": self.order_id,
-                "product_id": self.product_id,
-                "serial_no": self.serial_no,
-                "company_name": self.company_name,
-                "gst_number": self.gst_number,
+                "customer": self.customer,
+                "items": self.items,
                 "payment_mode": self.payment_mode,
+                "payment_details": self.payment_details,
                 "status": self.status,
-                "price": self.price,
-                "tax_rate": self.tax_rate,
+                "subtotal": subtotal,
+                "tax_total": tax_total,
                 "discount": self.discount,
                 "total_mrp": total_mrp,
                 "order_date": datetime.now(timezone.utc).isoformat()

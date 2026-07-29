@@ -5,16 +5,16 @@ const AUTH = {
 };
 
 const ROLE_ACCESS = {
-  admin:       ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'users.html', 'reports.html', 'create_account.html'],
-  employee:    ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'reports.html'],
-  technician:  ['main_dashboard.html', 'service.html'],
+  admin:       ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'users.html', 'reports.html', 'create_account.html'],
+  employee:    ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'reports.html'],
+  technician:  ['main_dashboard.html', 'technician.html'],
   distributor: ['main_dashboard.html', 'orders.html'],
 };
 
 const ROLE_HOME = {
   admin: 'main_dashboard.html',
   employee: 'main_dashboard.html',
-  technician: 'service.html',
+  technician: 'technician.html',
   distributor: 'orders.html',
 };
 
