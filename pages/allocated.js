@@ -1,13 +1,116 @@
-const allocState = { allocations: [], products: [] };
+const allocState = { allocations: [], products: [], requests: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadAllocations();
   loadInventoryForAllocation();
+  loadPendingRequests();
   wireTopActions();
   wireFilter();
   injectAllocateModal();
+  wireNotifBell();
   setInterval(() => renderAllocationsTable(allocState.allocations), 60 * 1000); // keep countdowns fresh
+  setInterval(loadPendingRequests, 60 * 1000);
 });
+
+function wireNotifBell() {
+  const bell = document.getElementById('notifBell');
+  if (bell) bell.addEventListener('click', () => {
+    document.getElementById('pendingRequestsSection')?.scrollIntoView({ behavior: 'smooth' });
+  });
+}
+
+async function loadPendingRequests() {
+  try {
+    const res = await apiFetch('/request/');
+    if (!res.ok) throw new Error('failed to fetch requests');
+    const data = await res.json();
+    allocState.requests = data.dataset || [];
+    renderPendingRequests();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function renderPendingRequests() {
+  const box = document.getElementById('pendingRequestsList');
+  const badge = document.getElementById('notifBadge');
+  const countLabel = document.getElementById('pendingCountLabel');
+  if (!box) return;
+
+  const pending = allocState.requests
+    .filter(r => r.status === 'pending')
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  if (badge) {
+    badge.style.display = pending.length ? 'inline-block' : 'none';
+    badge.textContent = pending.length;
+  }
+  if (countLabel) countLabel.textContent = pending.length ? `(${pending.length})` : '';
+
+  if (!pending.length) {
+    box.innerHTML = '<p style="color:#94a3b8;padding:10px;">No pending requests.</p>';
+    return;
+  }
+
+  box.innerHTML = pending.map(r => {
+    const isDemo = r.request_type === 'demo_unit';
+    const title = isDemo
+      ? `Demo Unit — ${r.details?.customer?.company_name || 'New customer'}`
+      : `Spare Part — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+    const subtitle = isDemo
+      ? (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
+      : (r.details?.note || '');
+    return `
+      <div class="order-item" data-id="${r.request_id}">
+        <div class="order-left">
+          <div class="order-icon"><i class="fa-solid ${isDemo ? 'fa-handshake' : 'fa-gears'}"></i></div>
+          <div>
+            <h4>${title}</h4>
+            <p>${subtitle} • raised by ${r.raised_by}</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="req-approve-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Approve</button>
+          <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  box.querySelectorAll('.req-approve-btn').forEach(btn => btn.addEventListener('click', e => approveRequest(rowRequestId(e))));
+  box.querySelectorAll('.req-reject-btn').forEach(btn => btn.addEventListener('click', e => rejectRequest(rowRequestId(e))));
+}
+
+function rowRequestId(e) {
+  return e.target.closest('.order-item').dataset.id;
+}
+
+async function approveRequest(requestId) {
+  if (!confirm('Approve this request?')) return;
+  try {
+    const res = await apiFetch(`/request/approve/${requestId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'approval failed');
+    await loadPendingRequests();
+    await loadAllocations();
+    await loadInventoryForAllocation();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
+}
+
+async function rejectRequest(requestId) {
+  const reason = prompt('Reason for rejecting (optional):') || '';
+  try {
+    const res = await apiFetch(`/request/reject/${requestId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'rejection failed');
+    await loadPendingRequests();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
+}
 
 async function loadAllocations() {
   try {

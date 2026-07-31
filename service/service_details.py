@@ -62,7 +62,7 @@ class service_detail(mongodbclient):
             logging.error("service was not able to delete!")
             raise Exception(e)
 
-    def update_service_status(self, service_status, reason: str, collection_name, query, image=None, video=None, spare_parts_used: bool = False, spare_parts: str = ""):
+    def update_service_status(self, service_status, reason: str, collection_name, query, image=None, video=None, spare_parts_used: bool = False, spare_parts: str = "", service_charges=None):
         try:
             if service_status not in [s.value for s in ServiceStatus]:
                 raise Exception(f"invalid status: {service_status}")
@@ -80,6 +80,8 @@ class service_detail(mongodbclient):
                     existing = self.get_service_data(collection_name=collection_name, query=query)
                     if not existing or not existing[0].get("manager_confirmed_return"):
                         raise Exception("service cannot be closed until the inventory manager confirms the returned spare part")
+                if service_charges is None:
+                    raise Exception("service charges must be entered before marking service as completed")
 
             update_values = {
                 "status": service_status,
@@ -92,6 +94,8 @@ class service_detail(mongodbclient):
                 update_values["image"] = image
             if video:
                 update_values["video"] = video
+            if service_charges is not None:
+                update_values["service_charges"] = service_charges
 
             service = super().update_data(collection_name=collection_name,update_values=update_values, query=query)
             logging.info("service status was updated!")

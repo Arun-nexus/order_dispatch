@@ -1,426 +1,188 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Users | Acer Biomedical</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Users | Acer Biomedical</title>
 
-    <link rel="stylesheet" href="../css/global.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
-
 <body>
-    <div class="container">
-        <aside class="sidebar">
-            <div class="logo">
-                <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical" />
-            </div>
+  <div class="container">
 
-            <ul>
-                <li>
-                    <a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a>
-                </li>
-                <li>
-                    <a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a>
-                </li>
-
-                <li>
-                    <a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
-                </li>
-                <li>
-                    <a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a>
-                </li>
-                <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
-
-                <li class="active">
-                    <a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a>
-                </li>
-                <li>
-                    <a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a>
-                </li>
-  <li>
-    <a href="#" onclick="openLogoutModal(event)">
-        <i class="fa-solid fa-arrow-right-from-bracket"></i>
-        <span>Logout</span>
-    </a>
-</li>
-            </ul>
-
-            <div class="sidebar-profile">
-                <img src="../images/admin.jpg" alt="Admin" />
-                <div>
-                    <h4 id="sidebarUserName">Admin</h4>
-                    <p id="sidebarUserRole">Super Admin</p>
-                </div>
-            </div>
-        </aside>
-
-        <!-- ===== MAIN ===== -->
-        <main>
-            <!-- HEADER -->
-            <header>
-                <div>
-                    <h1>Users Management</h1>
-                    <p>Manage all registered users</p>
-                </div>
-                <div class="right-header">
-                    <div class="search">
-                        <i class="fa-solid fa-magnifying-glass"></i>
-                        <input type="text" placeholder="Search users, email, phone..." />
-                    </div>
-                    <button><i class="fa-regular fa-bell"></i></button>
-                    <button><i class="fa-regular fa-envelope"></i></button>
-                    <div class="profile">
-                        <img src="../images/admin.jpg" alt="Admin" />
-                        <div>
-                            <h4 id="headerUserName">Admin</h4>
-                            <p id="headerUserRole">Super Admin</p>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            <!-- CARDS -->
-            <section class="cards">
-                <div class="card">
-                    <div>
-                        <span>Total Users</span>
-                        <h2>256</h2>
-                        <p>Registered Users</p>
-                    </div>
-                    <i class="fa-solid fa-users"></i>
-                </div>
-                <div class="card">
-                    <div>
-                        <span>Admins</span>
-                        <h2>5</h2>
-                        <p>System Admins</p>
-                    </div>
-                    <i class="fa-solid fa-user-shield"></i>
-                </div>
-                <div class="card">
-                    <div>
-                        <span>Employees</span>
-                        <h2>72</h2>
-                        <p>Company Employees</p>
-                    </div>
-                    <i class="fa-solid fa-user-tie"></i>
-                </div>
-                <div class="card">
-                    <div>
-                        <span>Technicians</span>
-                        <h2>48</h2>
-                        <p>Field Technicians</p>
-                    </div>
-                    <i class="fa-solid fa-screwdriver-wrench"></i>
-                </div>
-                <div class="card">
-                    <div>
-                        <span>Distributors</span>
-                        <h2>131</h2>
-                        <p>Authorized Partners</p>
-                    </div>
-                    <i class="fa-solid fa-truck"></i>
-                </div>
-            </section>
-
-            <!-- TOP ACTIONS -->
-            <div class="top-actions">
-                <button class="export">
-                    <i class="fa-solid fa-file-export"></i> Export
-                </button>
-                <button class="add-user">
-                    <i class="fa-solid fa-user-plus"></i> Add User
-                </button>
-            </div>
-
-            <!-- FILTER SECTION -->
-            <section class="filter-section">
-                <div class="filter-box">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" placeholder="Search by username, email, mobile..." />
-                </div>
-                <div class="filter-box">
-                    <i class="fa-solid fa-user-tag"></i>
-                    <select>
-                        <option>All Roles</option>
-                        <option>Admin</option>
-                        <option>Employee</option>
-                        <option>Technician</option>
-                        <option>Distributor</option>
-                    </select>
-                </div>
-                <div class="filter-box">
-                    <i class="fa-solid fa-building"></i>
-                    <input type="text" placeholder="Company Name" />
-                </div>
-                <button class="filter-btn">
-                    <i class="fa-solid fa-filter"></i> Apply Filter
-                </button>
-            </section>
-
-            <!-- TABLE -->
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th><input type="checkbox" /></th>
-                            <th>User ID</th>
-                            <th>Username</th>
-                            <th>Full Name</th>
-                            <th>Email</th>
-                            <th>Phone</th>
-                            <th>Company</th>
-                            <th>GST Number</th>
-                            <th>Role</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- rows rendered dynamically by users.js -->
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- PAGINATION -->
-            <div class="pagination">
-                <button class="page-btn">
-                    <i class="fa-solid fa-angle-left"></i>
-                </button>
-                <button class="page active-page">1</button>
-                <button class="page">2</button>
-                <button class="page">3</button>
-                <button class="page">4</button>
-                <button class="page-btn">
-                    <i class="fa-solid fa-angle-right"></i>
-                </button>
-            </div>
-        </main>
-    </div>
-  <!-- Add User Modal -->
-  <div id="addModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
-    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:440px;max-height:85vh;overflow-y:auto;">
-      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3>Add User</h3>
-        <span class="close" style="cursor:pointer;font-size:20px;">&times;</span>
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
       </div>
-      <form style="display:flex;flex-direction:column;gap:10px;">
-        <input type="text" placeholder="Username" required>
-        <input type="text" placeholder="Full Name" required>
-        <input type="text" placeholder="Mobile No" required>
-        <input type="email" placeholder="Email" required>
-        <input type="text" placeholder="Company Name" required>
-        <input type="text" placeholder="GST Number" required>
-        <input type="password" placeholder="Password" required>
-        <select required>
-          <option value="">Select Role</option>
-          <option value="admin">Admin</option>
-          <option value="employee">Employee</option>
-          <option value="technician">Technician</option>
-          <option value="distributor">Distributor</option>
-        </select>
-        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;">Add User</button>
+
+      <ul>
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li class="active"><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Admin">
+        <div>
+          <h4 id="sidebarUserName">Admin</h4>
+          <p id="sidebarUserRole">Super Admin</p>
         </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- Edit User Modal -->
-  <div id="editModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
-    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:440px;max-height:85vh;overflow-y:auto;">
-      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3>Edit User</h3>
-        <span class="close" style="cursor:pointer;font-size:20px;">&times;</span>
       </div>
-      <form style="display:flex;flex-direction:column;gap:10px;">
-        <input type="text" placeholder="Username" disabled style="background:#f3f4f6;">
-        <input type="text" placeholder="Full Name">
-        <input type="text" placeholder="Mobile No">
-        <input type="email" placeholder="Email">
-        <input type="text" placeholder="Company Name">
-        <input type="text" placeholder="GST Number">
-        <select>
-          <option value="admin">Admin</option>
-          <option value="employee">Employee</option>
-          <option value="technician">Technician</option>
-          <option value="distributor">Distributor</option>
-        </select>
-        <div class="modal-footer" style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;">Save Changes</button>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>Users</h1>
+          <p>Manage staff accounts and roles</p>
         </div>
-      </form>
-    </div>
-  </div>
+        <div class="right-header">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" placeholder="Search username or name">
+          </div>
+          <button><i class="fa-regular fa-bell"></i></button>
+          <button><i class="fa-regular fa-envelope"></i></button>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Admin">
+            <div>
+              <h4 id="headerUserName">Admin</h4>
+              <p id="headerUserRole">Super Admin</p>
+            </div>
+          </div>
+        </div>
+      </header>
 
-  <!-- View User Modal -->
-  <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
-    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:420px;">
-      <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3>User Details</h3>
-        <span class="close" style="cursor:pointer;font-size:20px;">&times;</span>
+      <section class="cards">
+        <div class="card">
+          <div><span>Total Users</span><h2 id="cardTotal">0</h2><p>All accounts</p></div>
+          <i class="fa-solid fa-users"></i>
+        </div>
+        <div class="card">
+          <div><span>Admins</span><h2 id="cardAdmins">0</h2><p>Full access</p></div>
+          <i class="fa-solid fa-user-shield"></i>
+        </div>
+        <div class="card">
+          <div><span>Employees</span><h2 id="cardEmployees">0</h2><p>Orders, inventory, service</p></div>
+          <i class="fa-solid fa-user-tie"></i>
+        </div>
+        <div class="card">
+          <div><span>Technicians</span><h2 id="cardTechnicians">0</h2><p>Field service</p></div>
+          <i class="fa-solid fa-user-gear"></i>
+        </div>
+        <div class="card">
+          <div><span>Distributors</span><h2 id="cardDistributors">0</h2><p>Sales &amp; demo units</p></div>
+          <i class="fa-solid fa-handshake"></i>
+        </div>
+      </section>
+
+      <div class="top-actions">
+        <button class="add-product"><i class="fa-solid fa-plus"></i> Add User</button>
       </div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>User ID</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Username</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Full Name</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Mobile</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Email</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>Company</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><strong>GST Number</strong><p></p></div>
-      <div class="detail" style="display:flex;justify-content:space-between;padding:6px 0;"><strong>Role</strong><p></p></div>
+
+      <section class="filter-section">
+        <div class="filter-box">
+          <i class="fa-solid fa-filter"></i>
+          <select id="roleFilter">
+            <option>All Roles</option>
+            <option value="admin">Admin</option>
+            <option value="employee">Employee</option>
+            <option value="technician">Technician</option>
+            <option value="distributor">Distributor</option>
+          </select>
+        </div>
+        <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
+      </section>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Company</th>
+              <th>Mobile</th>
+              <th>Team Manager</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- rows rendered dynamically by users.js -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button class="page active-page">1</button>
+        <button class="page">2</button>
+        <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Logout Modal -->
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
     </div>
   </div>
 
-  <!-- Delete User Modal -->
-  <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center;">
-    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:380px;text-align:center;">
+  <!-- common_auth.js MUST load first: enforces login + role-based page access -->
+  <script src="../common_auth.js"></script>
+
+  <!-- Add/Edit User Modal (built dynamically) -->
+  <div id="userModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
+  </div>
+
+  <!-- Delete Confirm Modal -->
+  <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
       <h3 style="margin-bottom:10px;">Delete User?</h3>
-      <p style="color:#64748b;margin-bottom:20px;">Are you sure you want to delete this user? This cannot be undone.</p>
-      <div class="modal-footer" style="display:flex;justify-content:center;gap:10px;">
-        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+      <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
+      <div style="display:flex;justify-content:center;gap:10px;">
+        <button class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
         <button class="delete-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
       </div>
     </div>
   </div>
-    <div id="logoutModal" class="logout-modal">
-    <div class="logout-box">
 
-        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
-
-        <h2>Logout?</h2>
-
-        <p>
-            Are you sure you want to logout from your account?
-        </p>
-
-        <div class="logout-actions">
-
-            <button class="cancel-btn"
-                onclick="closeLogoutModal()">
-                Cancel
-            </button>
-
-            <button class="confirm-btn"
-                onclick="logoutNow()">
-                Logout
-            </button>
-
-        </div>
-
-    </div>
-</div>
-
-    <!-- common_auth.js MUST load first: enforces login + role-based page access (admin-only page) -->
-    <script src="../common_auth.js"></script>
-
-    <!-- View User Modal -->
-    <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3>User Details</h3>
-          <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-        </div>
-        <div class="detail"><small>User ID</small><p></p></div>
-        <div class="detail"><small>Username</small><p></p></div>
-        <div class="detail"><small>Full Name</small><p></p></div>
-        <div class="detail"><small>Phone</small><p></p></div>
-        <div class="detail"><small>Email</small><p></p></div>
-        <div class="detail"><small>Company</small><p></p></div>
-        <div class="detail"><small>GST Number</small><p></p></div>
-        <div class="detail"><small>Role</small><p></p></div>
-      </div>
-    </div>
-
-    <!-- Add User Modal -->
-    <div id="addModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3>Add User</h3>
-          <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-        </div>
-        <form style="display:flex;flex-direction:column;gap:10px;">
-          <input placeholder="Username" required>
-          <input placeholder="Full Name" required>
-          <input placeholder="Mobile No" required>
-          <input type="email" placeholder="Email" required>
-          <input placeholder="Company Name" required>
-          <input placeholder="GST Number" required>
-          <input type="password" placeholder="Password" required>
-          <select required>
-            <option value="">Select Role</option>
-            <option value="admin">Admin</option>
-            <option value="employee">Employee</option>
-            <option value="technician">Technician</option>
-            <option value="distributor">Distributor</option>
-          </select>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-            <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Create</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Edit User Modal -->
-    <div id = "editModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-          <h3>Edit User</h3>
-          <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-        </div>
-        <form style="display:flex;flex-direction:column;gap:10px;">
-          <input placeholder="Username" disabled style="background:#f3f4f6;">
-          <input placeholder="Full Name">
-          <input placeholder="Mobile No">
-          <input type="email" placeholder="Email">
-          <input placeholder="Company Name">
-          <input placeholder="GST Number">
-          <select>
-            <option value="admin">Admin</option>
-            <option value="employee">Employee</option>
-            <option value="technician">Technician</option>
-            <option value="distributor">Distributor</option>
-          </select>
-          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-            <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Delete User Modal -->
-    <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-      <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
-        <h3 style="margin-bottom:10px;">Delete User?</h3>
-        <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
-        <div style="display:flex;justify-content:center;gap:10px;">
-          <button class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button class="delete-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
-        </div>
-      </div>
-    </div>
-
-    <script>
-        function openLogoutModal(e){
-            e.preventDefault();
-            document.getElementById("logoutModal").classList.add("active");
-        }
-        function closeLogoutModal(){
-            document.getElementById("logoutModal").classList.remove("active");
-        }
-        document.addEventListener('DOMContentLoaded', () => {
-          const role = getRole() || '';
-          const uname = getUsername() || 'User';
-          const label = role.charAt(0).toUpperCase() + role.slice(1);
-          ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
-          ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
-        });
-    </script>`` 
-    <script src="users.js"></script>
+  <script>
+    function openLogoutModal(e){
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
+    }
+    function closeLogoutModal(){
+      document.getElementById("logoutModal").classList.remove("active");
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const role = getRole() || '';
+      const uname = getUsername() || 'User';
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+    });
+  </script>
+  <script src="users.js"></script>
 </body>
-
 </html>

@@ -12,6 +12,7 @@ from inventory.inventory_handling import inventory_manager
 from user.customer_details import customer_manager
 from sales.sales_person_manager import sales_person_manager
 from allocation.allocation import allocation_manager
+from request.request_manager import request_manager
 from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,6 +41,7 @@ INVENTORY_COLLECTION = params["inventory_collection_name"]
 CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
 SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
+REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
 
 
 class LoginRequest(BaseModel):
@@ -58,6 +60,7 @@ class CreateAccountRequest(BaseModel):
     company_name: str
     mobile_no: str
     role: str
+    manager: str = ""
 
 
 class UpdateAccountRequest(BaseModel):
@@ -136,6 +139,12 @@ class CreateAllocationRequest(BaseModel):
     address: str = ""
 
 
+class CreateDemoUnitRequest(BaseModel):
+    customer_id: str = ""
+    customer: dict = {}
+    items: list[AllocationItem]
+
+
 class OrderStatusRequest(BaseModel):
     order_id: str
 
@@ -147,6 +156,7 @@ class ServiceUpdateRequest(BaseModel):
     video: str = None
     spare_parts_used: bool = False
     spare_parts: str = ""
+    service_charges: float = None
 
 
 class ServiceChargeRequest(BaseModel):
@@ -243,6 +253,41 @@ async def account(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="account informations cannot be fetched")
 
 
+@app.get("/account/my_team")
+async def my_team(user: dict = Depends(require_role("distributor"))):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION,
+                               query={"role": "distributor", "manager": user["username"]})
+        team = [
+            {k: v for k, v in acc.items() if k not in ("password", "confirm_password", "_id")}
+            for acc in dataset
+        ]
+        return {"message": "my team", "dataset": team}
+    except Exception as e:
+        logging.error("fetching team list failed")
+        raise HTTPException(status_code=500, detail="team list cannot be fetched")
+
+
+@app.get("/allocation/team")
+async def team_allocations(user: dict = Depends(require_role("distributor"))):
+    try:
+        acc_db = mongodbclient()
+        team = acc_db.get_data(collection_name=ACCOUNTS_COLLECTION,
+                                query={"role": "distributor", "manager": user["username"]})
+        team_usernames = [t["username"] for t in team]
+        if not team_usernames:
+            return {"message": "no team members", "dataset": []}
+
+        alloc_db = allocation_manager()
+        dataset = alloc_db.get_data(collection_name=ALLOCATION_COLLECTION,
+                                     query={"allocation_type": "demo_unit", "allocated_by": {"$in": team_usernames}})
+        return {"message": "team demo unit allocations", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching team allocations failed")
+        raise HTTPException(status_code=500, detail="team allocations cannot be fetched")
+
+
 @app.get("/account/technicians")
 async def list_technicians(user: dict = Depends(get_current_user)):
     try:
@@ -274,6 +319,11 @@ async def create_account(request: CreateAccountRequest, user: dict = Depends(req
         if existing_user:
             raise HTTPException(status_code=409, detail="username was already registered please try a different username")
 
+        if request.role == "distributor" and request.manager:
+            manager_exists = db.get_data(ACCOUNTS_COLLECTION, query={"username": request.manager, "role": "distributor"})
+            if not manager_exists:
+                raise HTTPException(status_code=400, detail="selected manager was not found among distributor accounts")
+
         new_user = login(
             username=request.username,
             name=request.name,
@@ -285,6 +335,10 @@ async def create_account(request: CreateAccountRequest, user: dict = Depends(req
             password=request.password
         )
         new_user.add(collection_name=ACCOUNTS_COLLECTION)
+
+        if request.role == "distributor" and request.manager:
+            db.update_data(collection_name=ACCOUNTS_COLLECTION, query={"username": request.username},
+                            update_values={"manager": request.manager})
 
         logging.info("account creation was successful")
         return {"message": "account creation was successful"}
@@ -565,7 +619,8 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
             image=request.image,
             video=request.video,
             spare_parts_used=request.spare_parts_used,
-            spare_parts=request.spare_parts
+            spare_parts=request.spare_parts,
+            service_charges=request.service_charges
         )
         logging.info("service was updated")
         return {"message": "service was updated successfully", "service_id": service_id}
@@ -613,6 +668,14 @@ async def request_spare_part(service_id: str, request: SparePartRequest, user: d
     try:
         db = service_detail()
         db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=request.note)
+
+        req = request_manager(
+            request_type="spare_part",
+            raised_by=user["username"],
+            details={"service_id": service_id, "note": request.note}
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+
         return {"message": "spare part requested successfully", "service_id": service_id}
     except Exception as e:
         logging.error("spare part request failed!")
@@ -734,7 +797,7 @@ async def search_customer(term: str = "", user: dict = Depends(get_current_user)
 
 
 @app.post("/customer/create")
-async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "employee", "distributor"))):
     try:
         new_customer = customer_manager(
             company_name=request.company_name,
@@ -856,6 +919,216 @@ async def allocations(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="allocation dataset cannot be fetched")
 
 
+@app.get("/allocation/mine")
+async def my_allocations(user: dict = Depends(require_role("distributor"))):
+    try:
+        db = allocation_manager()
+        dataset = db.get_data(collection_name=ALLOCATION_COLLECTION,
+                               query={"allocation_type": "demo_unit", "allocated_by": user["username"]})
+        return {"message": "my demo unit allocations", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching my allocations failed")
+        raise HTTPException(status_code=500, detail="allocation dataset cannot be fetched")
+
+
+def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_by: str):
+    """Resolves/creates the customer, deducts stock + serials from inventory, and records
+    the demo_unit allocation. Shared by the direct admin/employee endpoint and by
+    /request/approve/{request_id} when a distributor's request is approved."""
+    if not items:
+        raise HTTPException(status_code=400, detail="add at least one product")
+
+    customer_db = customer_manager()
+    customer_snapshot = dict(customer or {})
+
+    if customer_id:
+        existing = customer_db.get_data(CUSTOMER_COLLECTION, query={"customer_id": customer_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="selected customer not found")
+        customer_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
+    else:
+        if not customer_snapshot.get("company_name"):
+            raise HTTPException(status_code=400, detail="customer details are required")
+        new_customer = customer_manager(
+            company_name=customer_snapshot.get("company_name"),
+            company_address=customer_snapshot.get("company_address"),
+            gst_number=customer_snapshot.get("gst_number"),
+            contractor_person=customer_snapshot.get("contractor_person"),
+            contractor_number=customer_snapshot.get("contractor_number"),
+            contractor_email=customer_snapshot.get("contractor_email"),
+        )
+        new_customer.add(collection_name=CUSTOMER_COLLECTION)
+        customer_snapshot = {
+            "customer_id": new_customer.customer_id,
+            "company_name": new_customer.company_name,
+            "company_address": new_customer.company_address,
+            "gst_number": new_customer.gst_number,
+            "contractor_person": new_customer.contractor_person,
+            "contractor_number": new_customer.contractor_number,
+            "contractor_email": new_customer.contractor_email,
+        }
+
+    inventory_db = inventory_manager()
+    for item in items:
+        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item["product_id"])
+        if available < item["quantity"]:
+            raise HTTPException(status_code=400, detail=f"insufficient stock for {item['product_name']}: only {available} available")
+
+    demo_items = []
+    for item in items:
+        allocated_serials = inventory_db.allocate_serials(
+            collection_name=INVENTORY_COLLECTION, product_id=item["product_id"], quantity=item["quantity"]
+        )
+        demo_items.append({
+            "product_id": item["product_id"],
+            "product_name": item["product_name"],
+            "quantity": item["quantity"],
+            "serial_numbers": allocated_serials
+        })
+
+    allocation = allocation_manager(customer=customer_snapshot, items=demo_items, allocated_by=allocated_by)
+    allocation.add(collection_name=ALLOCATION_COLLECTION)
+    logging.info(f"demo unit allocation {allocation.allocation_id} created for {allocated_by}")
+    return allocation.allocation_id
+
+
+@app.post("/allocation/create_demo")
+async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        allocation_id = _fulfill_demo_unit(
+            customer_id=request.customer_id,
+            customer=request.customer,
+            items=[item.dict() for item in request.items],
+            allocated_by=user["username"]
+        )
+        return {"message": "demo unit allotted successfully", "allocation_id": allocation_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("demo unit allocation failed!")
+        raise HTTPException(status_code=500, detail="demo unit allocation failed")
+
+
+class DemoUnitRequestModel(BaseModel):
+    customer_id: str = ""
+    customer: dict = {}
+    items: list[AllocationItem]
+
+
+class SparePartRequestFlagModel(BaseModel):
+    service_id: str
+    note: str
+
+
+class RequestRejectModel(BaseModel):
+    reason: str = ""
+
+
+@app.post("/request/demo_unit")
+async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = Depends(require_role("distributor"))):
+    try:
+        if not request.items:
+            raise HTTPException(status_code=400, detail="add at least one product")
+        if not request.customer_id and not request.customer.get("company_name"):
+            raise HTTPException(status_code=400, detail="customer details are required")
+
+        req = request_manager(
+            request_type="demo_unit",
+            raised_by=user["username"],
+            details={
+                "customer_id": request.customer_id,
+                "customer": request.customer,
+                "items": [item.dict() for item in request.items]
+            }
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+        return {"message": "request raised successfully, waiting for admin/employee approval", "request_id": req.request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("raising demo unit request failed!")
+        raise HTTPException(status_code=500, detail="request could not be raised")
+
+
+@app.get("/request/")
+async def all_requests(user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = request_manager()
+        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={})
+        return {"message": "requests", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching requests failed")
+        raise HTTPException(status_code=500, detail="requests cannot be fetched")
+
+
+@app.get("/request/mine")
+async def my_requests(user: dict = Depends(get_current_user)):
+    try:
+        db = request_manager()
+        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={"raised_by": user["username"]})
+        return {"message": "my requests", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching my requests failed")
+        raise HTTPException(status_code=500, detail="requests cannot be fetched")
+
+
+@app.post("/request/approve/{request_id}")
+async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = request_manager()
+        existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="request not found")
+        req = existing[0]
+        if req["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"request already {req['status']}")
+
+        if req["request_type"] == "demo_unit":
+            details = req["details"]
+            allocation_id = _fulfill_demo_unit(
+                customer_id=details.get("customer_id", ""),
+                customer=details.get("customer", {}),
+                items=details.get("items", []),
+                allocated_by=req["raised_by"]
+            )
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "request approved and demo unit allotted", "allocation_id": allocation_id}
+
+        # spare_part requests: approving just acknowledges it — admin/employee still
+        # issues the actual part from the Allocated page (Spare Part to Service flow)
+        db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                       status="approved", resolved_by=user["username"])
+        return {"message": "request approved"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("approving request failed!")
+        raise HTTPException(status_code=500, detail="request could not be approved")
+
+
+@app.post("/request/reject/{request_id}")
+async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = request_manager()
+        existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="request not found")
+        if existing[0]["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"request already {existing[0]['status']}")
+
+        db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                       status="rejected", resolved_by=user["username"], reason=request.reason)
+        return {"message": "request rejected"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("rejecting request failed!")
+        raise HTTPException(status_code=500, detail="request could not be rejected")
+
+
 @app.post("/allocation/create")
 async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
@@ -946,7 +1219,7 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
 
 @app.post("/allocation/return/{allocation_id}")
-async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "employee", "distributor"))):
     try:
         db = allocation_manager()
         db.mark_returned(collection_name=ALLOCATION_COLLECTION, allocation_id=allocation_id)

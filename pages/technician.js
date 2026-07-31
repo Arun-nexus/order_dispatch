@@ -2,9 +2,44 @@ const techState = { services: [], allocations: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadMyServices();
+  loadMyRequests();
   wireFilter();
   wireStaticModals();
 });
+
+async function loadMyRequests() {
+  try {
+    const res = await apiFetch('/request/mine');
+    if (!res.ok) throw new Error('failed to fetch requests');
+    const data = await res.json();
+    renderMyRequests((data.dataset || []).filter(r => r.request_type === 'spare_part'));
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function requestStatusClass(status) {
+  if (status === 'approved') return 'delivered';
+  if (status === 'rejected') return 'cancelled';
+  return 'pending';
+}
+
+function renderMyRequests(requests) {
+  const box = document.getElementById('myRequestsList');
+  if (!box) return;
+  const sorted = [...requests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  box.innerHTML = sorted.length ? sorted.map(r => `
+    <div class="order-item">
+      <div class="order-left">
+        <div class="order-icon"><i class="fa-solid fa-gears"></i></div>
+        <div>
+          <h4>Service #${(r.details?.service_id || '').slice(0, 8)}</h4>
+          <p>${r.details?.note ?? ''}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
+        </div>
+      </div>
+      <span class="status ${requestStatusClass(r.status)}">${r.status}</span>
+    </div>`).join('') : '<p style="color:#94a3b8;padding:10px;">No spare part requests yet.</p>';
+}
 
 async function loadMyServices() {
   try {
@@ -47,6 +82,10 @@ function renderCards() {
 
   document.getElementById('cardTotal').textContent = services.length;
   document.getElementById('cardActive').textContent = services.filter(s => s.status === 'active').length;
+  document.getElementById('cardInProgress').textContent = services.filter(s => s.status === 'in_progress').length;
+  document.getElementById('cardCompleted').textContent = services.filter(s => s.status === 'completed').length;
+  document.getElementById('cardRejected').textContent = services.filter(s => s.status === 'rejected').length;
+
   const earned = services
     .filter(s => s.status === 'completed')
     .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
@@ -54,6 +93,7 @@ function renderCards() {
 
   document.getElementById('cardPartsHeld').textContent = parts.filter(a => a.return_status !== 'returned').length;
   document.getElementById('cardPartsOverdue').textContent = parts.filter(isOverdue).length;
+  document.getElementById('cardPartsReturned').textContent = parts.filter(a => a.return_status === 'returned').length;
 }
 
 function statusBadgeClass(status) {
@@ -235,6 +275,7 @@ function openSparePartModal(s) {
       if (!res.ok) throw new Error(data.detail || 'request failed');
       modal.style.display = 'none';
       await loadMyServices();
+      await loadMyRequests();
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }

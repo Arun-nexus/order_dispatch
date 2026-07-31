@@ -189,7 +189,7 @@ function openViewModal(s) {
   const modal = document.getElementById('viewModal');
   if (!modal) return;
   const values = modal.querySelectorAll('.detail p');
-  const fields = [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None'];
+  const fields = [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None', s.service_charges != null ? `₹${s.service_charges}` : 'Not set'];
   values.forEach((el, i) => el.textContent = fields[i] ?? '');
   modal.style.display = 'flex';
 }
@@ -389,12 +389,17 @@ function wireModals() {
       const textareas = statusForm.querySelectorAll('textarea');
       const reasonBox = textareas[0];
       const sparePartsBox = textareas[1];
+      const chargesBox = statusForm.querySelector('.service-charges-input');
 
       const statusMap = { 'Active': 'active', 'In Progress': 'in_progress', 'Completed': 'completed', 'Rejected': 'rejected' };
       const service_status = statusMap[select.value] || select.value.toLowerCase().replace(' ', '_');
 
       if (service_status === 'completed' && !sparePartsBox.value.trim()) {
         alert('Spare part used must be written before marking the service as Completed.');
+        return;
+      }
+      if (service_status === 'completed' && (chargesBox.value === '' || Number(chargesBox.value) < 0)) {
+        alert('Service charges must be entered before marking the service as Completed.');
         return;
       }
       if (service_status === 'rejected' && !reasonBox.value.trim()) {
@@ -406,7 +411,8 @@ function wireModals() {
         service_status,
         reason: reasonBox ? reasonBox.value : '',
         spare_parts: sparePartsBox ? sparePartsBox.value : '',
-        spare_parts_used: false
+        spare_parts_used: false,
+        service_charges: chargesBox.value !== '' ? Number(chargesBox.value) : null
       };
 
       try {

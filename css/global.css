@@ -1427,6 +1427,7 @@ form .save-btn {
   background: var(--bg-white);
   border-radius: var(--radius-lg);
   padding: 24px;
+  margin-top:20px;
   box-shadow: var(--shadow-sm);
 }
 
@@ -1811,3 +1812,4 @@ form .save-btn {
     font-weight:600;
 
 }
+

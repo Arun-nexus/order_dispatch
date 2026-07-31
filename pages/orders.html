@@ -118,6 +118,17 @@
         </div>
       </section>
 
+      <!-- ORDER REQUESTS (raised by distributors, pending admin/employee approval) -->
+      <section class="dashboard-grid" id="orderRequestsSection" style="display:none;">
+        <div class="panel" style="width:100%;">
+          <div class="panel-header">
+            <h3>Order Requests</h3>
+            <p style="color:#64748b;font-size:13px;">Raised by distributors — approve to create the order and deduct stock</p>
+          </div>
+          <div class="order-list" id="orderRequestsList"></div>
+        </div>
+      </section>
+
       <!-- TOP ACTIONS -->
       <div class="top-actions">
         <button class="export"><i class="fa-solid fa-download"></i> Export</button>
@@ -159,7 +170,7 @@
           <thead>
             <tr>
               <th><input type="checkbox"></th>
-              <th>Order ID</th>
+              <th>Creator</th>
               <th>Product</th>
               <th>Serial No</th>
               <th>Ordered By</th>

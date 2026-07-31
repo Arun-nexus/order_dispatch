@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Allocated | Acer Biomedical</title>
+  <title>My Demo Units | Acer Biomedical</title>
 
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -17,13 +17,8 @@
       </div>
 
       <ul>
-        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
-        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
-        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
-        <li class="active"><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
-        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
-        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <!-- <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li> -->
+        <li class="active"><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo Units</span></a></li>
         <li>
           <a href="#" onclick="openLogoutModal(event)">
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
@@ -33,10 +28,10 @@
       </ul>
 
       <div class="sidebar-profile">
-        <img src="../images/admin.jpg" alt="Admin">
+        <img src="../images/admin.jpg" alt="Sales Person">
         <div>
-          <h4 id="sidebarUserName">Admin</h4>
-          <p id="sidebarUserRole">Super Admin</p>
+          <h4 id="sidebarUserName">Sales Person</h4>
+          <p id="sidebarUserRole">Sales Person</p>
         </div>
       </div>
     </aside>
@@ -44,93 +39,110 @@
     <main>
       <header>
         <div>
-          <h1>Allocated Products</h1>
-          <p>Allocate products to sales persons and spare parts to active services</p>
+          <h1>My Demo Units</h1>
+          <p>Allot demo units to customers and track their return</p>
         </div>
         <div class="right-header">
           <div class="search">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search allocation, sales person or product">
+            <input type="text" placeholder="Search customer or product...">
           </div>
-          <div style="position:relative;">
-            <button id="notifBell"><i class="fa-regular fa-bell"></i></button>
-            <span id="notifBadge" style="display:none;position:absolute;top:2px;right:2px;background:#d62828;color:#fff;font-size:10px;border-radius:999px;padding:1px 5px;">0</span>
-          </div>
-          <button><i class="fa-regular fa-envelope"></i></button>
+          <button><i class="fa-regular fa-bell"></i></button>
           <div class="profile">
-            <img src="../images/admin.jpg" alt="Admin">
+            <img src="../images/admin.jpg" alt="Sales Person">
             <div>
-              <h4 id="headerUserName">Admin</h4>
-              <p id="headerUserRole">Super Admin</p>
+              <h4 id="headerUserName">Sales Person</h4>
+              <p id="headerUserRole">Sales Person</p>
             </div>
           </div>
         </div>
       </header>
 
-      <section class="cards">
-        <div class="card">
-          <div>
-            <span>Total Allocations</span>
-            <h2>0</h2>
-            <p>All time</p>
-          </div>
-          <i class="fa-solid fa-layer-group"></i>
+      <!-- WELCOME -->
+      <section class="welcome-section">
+        <div class="welcome-left">
+          <h2 id="welcomeText">Welcome Back</h2>
+          <p>Here's an overview of your demo unit allotments.</p>
         </div>
-        <div class="card">
-          <div>
-            <span>Pending Return</span>
-            <h2>0</h2>
-            <p>Within 7 days</p>
-          </div>
-          <i class="fa-regular fa-clock"></i>
-        </div>
-        <div class="card">
-          <div>
-            <span>Overdue</span>
-            <h2>0</h2>
-            <p>Past return date</p>
-          </div>
-          <i class="fa-solid fa-triangle-exclamation"></i>
-        </div>
-        <div class="card">
-          <div>
-            <span>Returned</span>
-            <h2>0</h2>
-            <p>Closed allocations</p>
-          </div>
-          <i class="fa-solid fa-circle-check"></i>
+        <div class="date-box">
+          <i class="fa-regular fa-calendar"></i>
+          <span id="todayDate"></span>
         </div>
       </section>
 
-      <!-- PENDING REQUESTS (notifications) -->
-      <section class="dashboard-grid" id="pendingRequestsSection">
+      <!-- DEMO UNIT CARDS -->
+      <section class="cards">
+        <div class="card">
+          <div><span>Total Allotted</span><h2 id="cardTotal">0</h2><p>All demo units you've given out</p></div>
+          <i class="fa-solid fa-layer-group"></i>
+        </div>
+        <div class="card">
+          <div><span>With Customers</span><h2 id="cardHeld">0</h2><p>Not yet returned</p></div>
+          <i class="fa-solid fa-box-open"></i>
+        </div>
+        <div class="card">
+          <div><span>Return Overdue</span><h2 id="cardOverdue">0</h2><p>Past 7-day return window</p></div>
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div class="card">
+          <div><span>Returned</span><h2 id="cardReturned">0</h2><p>Closed out</p></div>
+          <i class="fa-solid fa-rotate-left"></i>
+        </div>
+      </section>
+
+      <!-- DASHBOARD PANELS -->
+      <section class="dashboard-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Recent Demo Units</h3>
+          </div>
+          <div class="order-list" id="recentAllotmentsList"></div>
+        </div>
+        <div class="dashboard-right">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Returns Due Soon</h3>
+            </div>
+            <div class="order-list" id="returnsDueList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- MY TEAM (only populated if you're a sales manager with reports under you) -->
+      <section class="dashboard-grid" id="myTeamSection" style="display:none;">
         <div class="panel" style="width:100%;">
           <div class="panel-header">
-            <h3>Pending Requests <span id="pendingCountLabel"></span></h3>
-            <p style="color:#64748b;font-size:13px;">Demo-unit and spare-part requests from distributors/technicians</p>
+            <h3>My Team</h3>
+            <p style="color:#64748b;font-size:13px;">Distributors reporting to you and their demo unit activity</p>
           </div>
-          <div class="order-list" id="pendingRequestsList"></div>
+          <div class="order-list" id="myTeamList"></div>
+        </div>
+      </section>
+
+      <!-- MY REQUESTS -->
+      <section class="dashboard-grid">
+        <div class="panel" style="width:100%;">
+          <div class="panel-header">
+            <h3>My Requests</h3>
+            <p style="color:#64748b;font-size:13px;">Sent to admin/employee for approval — stock is only deducted once approved</p>
+          </div>
+          <div class="order-list" id="myRequestsList"></div>
         </div>
       </section>
 
       <div class="top-actions">
-        <button class="export"><i class="fa-solid fa-download"></i> Export</button>
-        <button class="add-product"><i class="fa-solid fa-plus"></i> Allocate</button>
+        <button class="add-product"><i class="fa-solid fa-plus"></i> Create Request</button>
       </div>
 
       <section class="filter-section">
         <div class="filter-box">
           <i class="fa-solid fa-filter"></i>
-          <select>
+          <select id="statusFilter">
             <option>All Status</option>
-            <option>Pending</option>
-            <option>Overdue</option>
-            <option>Returned</option>
+            <option value="pending">With Customer</option>
+            <option value="overdue">Overdue</option>
+            <option value="returned">Returned</option>
           </select>
-        </div>
-        <div class="filter-box">
-          <i class="fa-solid fa-calendar-days"></i>
-          <input type="date">
         </div>
         <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
       </section>
@@ -140,9 +152,8 @@
           <thead>
             <tr>
               <th>Allocation ID</th>
-              <th>Type</th>
-              <th>Product / Spare Part</th>
-              <th>Sales Person / Service</th>
+              <th>Customer</th>
+              <th>Product(s)</th>
               <th>Allotment Date</th>
               <th>Return Due</th>
               <th>Status</th>
@@ -150,7 +161,7 @@
             </tr>
           </thead>
           <tbody>
-            <!-- rows rendered dynamically by allocated.js -->
+            <!-- rows rendered dynamically by distributor.js -->
           </tbody>
         </table>
       </div>
@@ -159,7 +170,6 @@
         <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
         <button class="page active-page">1</button>
         <button class="page">2</button>
-        <button class="page">3</button>
         <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
       </div>
     </main>
@@ -187,8 +197,8 @@
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;"></div>
   </div>
 
-  <!-- Allocate Modal (wizard built dynamically by allocated.js) -->
-  <div id="allocateModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <!-- Allot Demo Unit Modal (wizard built dynamically) -->
+  <div id="allotModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:460px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
@@ -208,6 +218,6 @@
       ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
-  <script src="allocated.js"></script>
+  <script src="distributor.js"></script>
 </body>
 </html>

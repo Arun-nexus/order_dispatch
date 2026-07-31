@@ -74,7 +74,23 @@
           <div><span>Active</span><h2 id="cardActive">0</h2><p>Not started yet</p></div>
           <i class="fa-solid fa-circle-check"></i>
         </div>
-                <div class="card">
+        <div class="card">
+          <div><span>In Progress</span><h2 id="cardInProgress">0</h2><p>Currently working</p></div>
+          <i class="fa-solid fa-spinner"></i>
+        </div>
+        <div class="card">
+          <div><span>Completed</span><h2 id="cardCompleted">0</h2><p>Closed successfully</p></div>
+          <i class="fa-solid fa-check-double"></i>
+        </div>
+        <div class="card">
+          <div><span>Rejected</span><h2 id="cardRejected">0</h2><p>Could not be completed</p></div>
+          <i class="fa-solid fa-circle-xmark"></i>
+        </div>
+      </section>
+
+      <!-- EARNINGS & SPARE PARTS CARDS -->
+      <section class="cards">
+        <div class="card">
           <div><span>Total Earned</span><h2 id="cardEarned">₹0</h2><p>From completed services</p></div>
           <i class="fa-solid fa-indian-rupee-sign"></i>
         </div>
@@ -85,9 +101,23 @@
         <div class="card">
           <div><span>Return Overdue</span><h2 id="cardPartsOverdue">0</h2><p>Past 7-day return window</p></div>
           <i class="fa-solid fa-triangle-exclamation"></i>
-          </div>
+        </div>
+        <div class="card">
+          <div><span>Parts Returned</span><h2 id="cardPartsReturned">0</h2><p>Confirmed by admin/employee</p></div>
+          <i class="fa-solid fa-rotate-left"></i>
+        </div>
       </section>
 
+      <!-- MY SPARE PART REQUESTS -->
+      <section class="dashboard-grid">
+        <div class="panel" style="width:175%; margin-bottom:5px;">
+          <div class="panel-header">
+            <h3>My Spare Part Requests</h3>
+            <p style="color:#64748b;font-size:13px;">Sent to admin/employee for approval</p>
+          </div>
+          <div class="order-list" id="myRequestsList"></div>
+        </div>
+      </section>
 
       <!-- FILTER -->
       <section class="filter-section">
@@ -121,7 +151,7 @@
             </tr>
           </thead>
           <tbody>
-            <!-- rows rendered dynamically by technician_service.js -->
+            <!-- rows rendered dynamically by technician.js -->
           </tbody>
         </table>
       </div>

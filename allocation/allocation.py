@@ -8,18 +8,25 @@ class allocation_manager(mongodbclient):
 
     RETURN_WINDOW_DAYS = 7
 
-    def __init__(self, sales_person=None, items=None, spare_part=None, company_name=None, address=None):
+    def __init__(self, distributor=None, items=None, spare_part=None, company_name=None, address=None,
+                 customer=None, allocated_by=None):
         """
-        sales_person: dict snapshot -> {sales_person_id, name, company_name, address, contact_number, email}
-        items: list of dicts -> {product_id, product_name, quantity, serial_numbers}  (product allocation)
-        spare_part: dict -> {service_id, part_name, quantity} (spare-part allocation, tied to an active service)
+        distributor: dict snapshot -> {distributor_id, name, company_name, address, contact_number, email}
+                       (used for allocation_type='product': admin/employee allotting stock to a distributor)
+        items: list of dicts -> {product_id, product_name, quantity, serial_numbers}
+        spare_part: dict -> {service_id, part_name, quantity} (allocation_type='spare_part')
+        customer: dict snapshot -> {customer_id, company_name, ...} (allocation_type='demo_unit': a
+                  distributor allotting a demo unit to a customer)
+        allocated_by: username of the distributor who created a demo_unit allocation
         """
         super().__init__()
 
         self.allocation_id = str(uuid.uuid4())
-        self.sales_person = sales_person or {}
+        self.distributor = distributor or {}
         self.items = items or []
         self.spare_part = spare_part or {}
+        self.customer = customer or {}
+        self.allocated_by = allocated_by
         self.company_name = company_name
         self.address = address
         self.allotment_date = datetime.now(timezone.utc)
@@ -31,10 +38,19 @@ class allocation_manager(mongodbclient):
             if not self.items and not self.spare_part:
                 raise Exception("allocation must contain at least one product or a spare part")
 
+            if self.spare_part:
+                allocation_type = "spare_part"
+            elif self.customer:
+                allocation_type = "demo_unit"
+            else:
+                allocation_type = "product"
+
             allocation_dict = {
                 "allocation_id": self.allocation_id,
-                "allocation_type": "spare_part" if self.spare_part else "product",
-                "sales_person": self.sales_person,
+                "allocation_type": allocation_type,
+                "distributor": self.distributor,
+                "customer": self.customer,
+                "allocated_by": self.allocated_by,
                 "items": self.items,
                 "spare_part": self.spare_part,
                 "company_name": self.company_name,

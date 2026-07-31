@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireHeaderButtons();
   wireFilter();
   wireDetailModals();
+  loadOrderRequests();
 });
 
 async function loadInventoryForOrders() {
@@ -59,6 +60,13 @@ function statusClass(status) {
   return map[status] || 'pending';
 }
 
+function orderCreatorLabel(o) {
+  const c = o.creator;
+  if (!c) return '-';
+  if (c.type === 'request') return `${c.raised_by ?? '-'} → ${c.approved_by ?? '-'}`;
+  return c.created_by ?? '-';
+}
+
 function renderOrdersTable(orders) {
   const tbody = document.querySelector('table tbody');
   tbody.innerHTML = '';
@@ -79,10 +87,11 @@ function renderOrdersTable(orders) {
           : `${items.length} items`)
       : '-';
     const companyName = o.customer?.company_name ?? o.company_name ?? '';
+    const creatorLabel = orderCreatorLabel(o);
 
     tr.innerHTML = `
       <td><input type="checkbox"></td>
-      <td>${o.order_id?.slice(0, 8) ?? ''}</td>
+      <td>${creatorLabel}</td>
       <td>${productLabel}</td>
       <td>${serialLabel}</td>
       <td>${companyName}</td>
@@ -814,3 +823,77 @@ async function submitOrder(modeSelect, extraBox) {
 
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+// ---------- Order Requests (raised by distributors) ----------
+async function loadOrderRequests() {
+  const role = getRole();
+  if (role !== 'admin' && role !== 'employee') return;
+  try {
+    const res = await apiFetch('/request/');
+    if (!res.ok) throw new Error('failed to fetch requests');
+    const data = await res.json();
+    const pending = (data.dataset || []).filter(r => r.request_type === 'order' && r.status === 'pending');
+    const section = document.getElementById('orderRequestsSection');
+    if (section) section.style.display = pending.length ? '' : 'none';
+    renderOrderRequests(pending);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function renderOrderRequests(requests) {
+  const box = document.getElementById('orderRequestsList');
+  if (!box) return;
+  const sorted = [...requests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  box.innerHTML = sorted.length ? sorted.map(r => {
+    const productLabel = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+    const customerLabel = r.details?.customer?.company_name || 'New customer';
+    const subtotal = (r.details?.items || []).reduce((s, i) => s + (i.price || 0) * (i.quantity || 0), 0);
+    return `
+      <div class="order-item">
+        <div class="order-left">
+          <div class="order-icon"><i class="fa-solid fa-cart-shopping"></i></div>
+          <div>
+            <h4>${customerLabel}</h4>
+            <p>${productLabel} — ₹${subtotal.toFixed(2)} • raised by ${r.raised_by ?? ''}</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="icon-btn oreq-approve" data-id="${r.request_id}" title="Approve"><i class="fa-solid fa-check" style="color:#16a34a;"></i></button>
+          <button class="icon-btn oreq-reject" data-id="${r.request_id}" title="Reject"><i class="fa-solid fa-xmark" style="color:#d62828;"></i></button>
+        </div>
+      </div>`;
+  }).join('') : '<p style="color:#94a3b8;padding:10px;">No pending order requests.</p>';
+
+  box.querySelectorAll('.oreq-approve').forEach(btn => btn.addEventListener('click', () => approveOrderRequest(btn.dataset.id)));
+  box.querySelectorAll('.oreq-reject').forEach(btn => btn.addEventListener('click', () => rejectOrderRequest(btn.dataset.id)));
+}
+
+async function approveOrderRequest(requestId) {
+  if (!confirm('Approve this request and create the order? Stock will be deducted.')) return;
+  try {
+    const res = await apiFetch(`/request/approve/${requestId}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'approval failed');
+    await loadOrders();
+    await loadInventoryForOrders();
+    await loadOrderRequests();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
+}
+
+async function rejectOrderRequest(requestId) {
+  const reason = prompt('Reason for rejecting this request:') || '';
+  try {
+    const res = await apiFetch(`/request/reject/${requestId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'rejection failed');
+    await loadOrderRequests();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
+}
