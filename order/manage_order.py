@@ -6,11 +6,14 @@ import uuid
 
 class order_manager(mongodbclient):
 
-    def __init__(self, customer=None, items=None, payment_mode=None, payment_details=None, discount=0):
+    def __init__(self, customer=None, items=None, payment_mode=None, payment_details=None, discount=0, creator=None):
         """
         customer: dict -> {customer_id, company_name, company_address, gst_number,
                             contractor_person, contractor_number, contractor_email}
         items: list of dicts -> {product_id, product_name, serial_no, quantity, price, tax_rate}
+        creator: dict -> who created this order, one of:
+            direct order  -> {"type": "direct", "created_by": "<username>"}
+            approved req  -> {"type": "request", "raised_by": "<distributor>", "approved_by": "<admin/employee>"}
         payment_details: dict, shape depends on payment_mode
             Credit       -> {"credit_days": int}
             Cheque       -> {"cheque_number": str, "cheque_date": str, "bank_name": str}
@@ -27,6 +30,7 @@ class order_manager(mongodbclient):
         self.payment_details = payment_details or {}
         self.status = "placed"
         self.discount = discount
+        self.creator = creator or {}
 
     def add(self, collection_name):
         try:
@@ -64,6 +68,7 @@ class order_manager(mongodbclient):
                 "tax_total": tax_total,
                 "discount": self.discount,
                 "total_mrp": total_mrp,
+                "creator": self.creator,
                 "order_date": datetime.now(timezone.utc).isoformat()
             }
             result = super().add(collection_name=collection_name, dictionary=order_dict)

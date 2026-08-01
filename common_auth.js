@@ -7,7 +7,7 @@ const AUTH = {
 const ROLE_ACCESS = {
   admin:       ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'users.html', 'reports.html', 'create_account.html'],
   employee:    ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'reports.html'],
-  technician:  ['technician.html'],
+  technician:  ['technician.html','technician_dashboard.html'],
   distributor: ['distributor.html', 'distributor_requests.html'],
 };
 

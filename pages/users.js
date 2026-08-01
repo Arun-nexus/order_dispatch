@@ -46,7 +46,7 @@ function renderTable(users) {
     tr.dataset.username = u.username;
     tr.innerHTML = `
       <td>${u.username ?? ''}</td>
-      <td>${u.name ?? ''}</td>
+      <td>${u.full_name ?? ''}</td>
       <td><span class="stock ${roleBadgeClass(u.role)}">${u.role ?? ''}</span></td>
       <td>${u.company_name ?? ''}</td>
       <td>${u.mobile_no ?? u.phone ?? ''}</td>
@@ -84,7 +84,6 @@ function wireStaticModals() {
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 }
 
-// ---------- Add / Edit User modal ----------
 function distributorOptions(selectedUsername, excludeUsername) {
   const distributors = userState.users.filter(u => u.role === 'distributor' && u.username !== excludeUsername);
   if (!distributors.length) return '<option value="">No existing distributors yet</option>';

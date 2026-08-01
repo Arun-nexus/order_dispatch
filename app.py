@@ -397,7 +397,7 @@ def _raise_media_review_request(service_id: str, raised_by: str):
         logging.error("could not raise media review notification")
 
 
-def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float):
+def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None):
     """Validates payment details, resolves/creates the customer, deducts stock + serials,
     and creates the order record. Shared by the direct /order/create_order/ endpoint and by
     /request/approve/{request_id} when a distributor's order request is approved."""
@@ -488,7 +488,8 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
         items=order_items,
         payment_mode=payment_mode,
         payment_details=payment_details,
-        discount=discount
+        discount=discount,
+        creator=creator or {}
     )
     order.add(collection_name=ORDERS_COLLECTION)
 
@@ -505,7 +506,8 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(require
             items=[item.dict() for item in request.items],
             payment_mode=request.payment_mode,
             payment_details=request.payment_details,
-            discount=request.discount
+            discount=request.discount,
+            creator={"type": "direct", "created_by": user["username"]}
         )
         return {"message": "order created successfully", "order_id": order_id}
 
@@ -1230,7 +1232,8 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                 items=details.get("items", []),
                 payment_mode=details.get("payment_mode"),
                 payment_details=details.get("payment_details", {}),
-                discount=details.get("discount", 0)
+                discount=details.get("discount", 0),
+                creator={"type": "request", "raised_by": req["raised_by"], "approved_by": user["username"]}
             )
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
