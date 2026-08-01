@@ -1,5 +1,14 @@
 const svcState = { services: [], orders: [], activeServiceId: null, technicians: [] };
 
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadServices();
   wireTopActions();
@@ -320,8 +329,11 @@ async function openCreateModal() {
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
           <textarea name="spare_parts" placeholder="Spare parts requested (optional)" style="min-height:50px;"></textarea>
-          <input name="image" placeholder="Image URL (optional)">
-          <input name="video" placeholder="Video URL (optional)">
+          <label style="font-size:12px;color:#64748b;">Image proof (optional, max 2MB)</label>
+          <input type="file" name="image_file" accept="image/*">
+          <label style="font-size:12px;color:#64748b;">Video proof (optional, max 20MB)</label>
+          <input type="file" name="video_file" accept="video/*">
+          <p id="createServiceMediaError" style="color:#d62828;font-size:12px;display:none;"></p>
           <div style="display:flex;justify-content:flex-end;gap:10px;">
             <button type="button" id="cancelCreateService" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
             <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Create</button>
@@ -333,8 +345,37 @@ async function openCreateModal() {
     modal.querySelector('#cancelCreateService').addEventListener('click', () => modal.style.display = 'none');
     modal.querySelector('#createServiceForm').addEventListener('submit', async e => {
       e.preventDefault();
-      const fd = new FormData(e.target);
-      const payload = Object.fromEntries(fd.entries());
+      const form = e.target;
+      const fd = new FormData(form);
+      const errorBox = document.getElementById('createServiceMediaError');
+      errorBox.style.display = 'none';
+
+      const imageFile = form.querySelector('[name="image_file"]').files[0];
+      const videoFile = form.querySelector('[name="video_file"]').files[0];
+
+      const MAX_IMAGE_BYTES = 2 * 1024 * 1024;   // 2MB
+      const MAX_VIDEO_BYTES = 20 * 1024 * 1024;  // 20MB
+
+      if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
+        errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`;
+        errorBox.style.display = 'block';
+        return;
+      }
+      if (videoFile && videoFile.size > MAX_VIDEO_BYTES) {
+        errorBox.textContent = `Video is ${(videoFile.size / 1024 / 1024).toFixed(1)}MB — must be 20MB or under.`;
+        errorBox.style.display = 'block';
+        return;
+      }
+
+      const payload = {
+        product_id: fd.get('product_id'),
+        location: fd.get('location'),
+        serial_no: fd.get('serial_no'),
+        technician_id: fd.get('technician_id'),
+        purchase_date: fd.get('purchase_date'),
+        issue: fd.get('issue'),
+        spare_parts: fd.get('spare_parts') || ''
+      };
 
       // outdoor services must reference a serial number that actually exists in Orders
       if (payload.location === 'outdoor') {
@@ -345,7 +386,14 @@ async function openCreateModal() {
         }
       }
 
+      const submitBtn = form.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Uploading...';
+
       try {
+        payload.image = imageFile ? await readFileAsBase64(imageFile) : '';
+        payload.video = videoFile ? await readFileAsBase64(videoFile) : '';
+
         const res = await apiFetch('/services/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -354,10 +402,16 @@ async function openCreateModal() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'service creation failed');
         modal.style.display = 'none';
-        e.target.reset();
+        form.reset();
+        if (payload.video) {
+          showResponseModal('Service created', 'Service was created. Admin/employee have been notified to review the uploaded video.', true);
+        }
         await loadServices();
       } catch (err) {
         if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create';
       }
     });
   }

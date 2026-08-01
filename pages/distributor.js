@@ -1,4 +1,4 @@
-const spState = { allocations: [], products: [] };
+const spState = { allocations: [], products: [], myRequests: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadMyAllocations();
@@ -488,10 +488,18 @@ async function loadMyRequests() {
     const res = await apiFetch('/request/mine');
     if (!res.ok) throw new Error('failed to fetch requests');
     const data = await res.json();
-    renderMyRequests((data.dataset || []).filter(r => r.request_type === 'demo_unit' || r.request_type === 'order'));
+    spState.myRequests = (data.dataset || []).filter(r => r.request_type === 'demo_unit' || r.request_type === 'order');
+    renderMyRequests(spState.myRequests);
+    renderPendingRequestsCard();
   } catch (err) {
     console.error(err);
   }
+}
+
+function renderPendingRequestsCard() {
+  const card = document.getElementById('cardPendingRequests');
+  if (!card) return;
+  card.textContent = spState.myRequests.filter(r => r.status === 'pending').length;
 }
 
 function requestStatusClass(status) {
@@ -806,13 +814,13 @@ function buildOrderPaymentDetails(mode) {
 
 async function submitOrderRequest(modeSelect, extraBox) {
   const mode = modeSelect.value;
-  if (!mode) { alert('Please select a payment mode.'); return; }
+  if (!mode) { showResponseModal('Payment mode required', 'Please select a payment mode.', false); return; }
 
   let payment_details;
   try {
     payment_details = buildOrderPaymentDetails(mode);
   } catch (err) {
-    alert(err.message);
+    showResponseModal('Missing payment details', err.message, false);
     return;
   }
 
@@ -836,9 +844,9 @@ async function submitOrderRequest(modeSelect, extraBox) {
     if (!res.ok) throw new Error(data.detail || 'request failed');
     document.getElementById('allotModal').style.display = 'none';
     resetOrderWiz();
-    alert('Request sent — admin/employee will review and approve it.');
+    showResponseModal('Request sent', 'Your order request has been sent — admin/employee will review and approve it.', true);
     await loadMyRequests();
   } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Request failed', err.message, false);
   }
 }

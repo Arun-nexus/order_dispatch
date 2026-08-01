@@ -1,4 +1,4 @@
-const invState = { products: [], activeProductId: null };
+const invState = { products: [], activeProductId: null, editSerials: [], editRemovedSerials: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadInventory();
@@ -148,6 +148,9 @@ function openViewModal(p) {
 function openEditModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
+  invState.editSerials = [...(p.serial_numbers || [])];
+  invState.editRemovedSerials = [];
+
   const modal = document.getElementById('editModal');
   const inputs = modal.querySelectorAll('form input');
   inputs[0].value = p.product_name ?? '';
@@ -158,7 +161,74 @@ function openEditModal(p) {
   inputs[5].value = p.quantity ?? '';
   inputs[6].value = p.price ?? '';
   inputs[7].value = p.tax_rate ?? '';
+
+  renderEditSerialsUI();
+  inputs[5].removeEventListener('input', renderEditSerialsUI);
+  inputs[5].addEventListener('input', renderEditSerialsUI);
+
   modal.style.display = 'flex';
+}
+
+// Keeps the serial-number list in sync with whatever quantity is typed into
+// the edit form: shows current serials (removable if quantity is going down),
+// and prompts for new serial numbers if quantity is going up.
+function renderEditSerialsUI() {
+  const modal = document.getElementById('editModal');
+  const quantityInput = modal.querySelectorAll('form input')[5];
+  const targetQuantity = Number(quantityInput.value) || 0;
+  const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
+
+  const currentList = document.getElementById('currentSerialsList');
+  currentList.innerHTML = invState.editSerials.map(s => {
+    const removed = invState.editRemovedSerials.includes(s);
+    return `<span data-serial="${s}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;
+      background:${removed ? '#fee2e2' : '#eef3fb'};color:${removed ? '#991b1b' : '#005ca9'};text-decoration:${removed ? 'line-through' : 'none'};">
+      ${s}
+      <button type="button" class="serial-toggle-btn" data-serial="${s}" style="border:none;background:none;cursor:pointer;color:inherit;font-weight:700;">
+        ${removed ? '↺' : '×'}
+      </button>
+    </span>`;
+  }).join('') || '<span style="font-size:12px;color:#94a3b8;">No serial numbers on file.</span>';
+
+  currentList.querySelectorAll('.serial-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = btn.dataset.serial;
+      if (invState.editRemovedSerials.includes(s)) {
+        invState.editRemovedSerials = invState.editRemovedSerials.filter(x => x !== s);
+      } else {
+        invState.editRemovedSerials.push(s);
+      }
+      renderEditSerialsUI();
+    });
+  });
+
+  const msgBox = document.getElementById('serialDeltaMsg');
+  const newBox = document.getElementById('newSerialsBox');
+  const diff = targetQuantity - keptCount;
+
+  if (diff > 0) {
+    msgBox.textContent = `Quantity increased — add ${diff} new serial number(s) below.`;
+    msgBox.style.color = '#005ca9';
+    const existingInputs = newBox.querySelectorAll('input');
+    const existingValues = [...existingInputs].map(i => i.value);
+    newBox.innerHTML = '';
+    for (let i = 0; i < diff; i++) {
+      const input = document.createElement('input');
+      input.className = 'new-serial-input';
+      input.placeholder = `New serial number #${i + 1}`;
+      input.value = existingValues[i] || '';
+      input.style.cssText = 'padding:8px 10px;border:1px solid #dbe5f1;border-radius:8px;';
+      newBox.appendChild(input);
+    }
+  } else if (diff < 0) {
+    msgBox.textContent = `Quantity decreased — remove ${-diff} serial number(s) above (click × to mark for removal).`;
+    msgBox.style.color = '#b45309';
+    newBox.innerHTML = '';
+  } else {
+    msgBox.textContent = 'Quantity matches the serial numbers on file.';
+    msgBox.style.color = '#16a34a';
+    newBox.innerHTML = '';
+  }
 }
 
 function openDeleteModal(p) {
@@ -445,12 +515,29 @@ function wireModals() {
   if (editForm) editForm.addEventListener('submit', async e => {
     e.preventDefault();
     const inputs = e.target.querySelectorAll('input');
+    const targetQuantity = Number(inputs[5].value);
+
+    const new_serial_numbers = [...e.target.querySelectorAll('.new-serial-input')].map(i => i.value.trim());
+    const remove_serial_numbers = [...invState.editRemovedSerials];
+    const keptCount = invState.editSerials.length - remove_serial_numbers.length;
+
+    if (targetQuantity > keptCount) {
+      if (new_serial_numbers.some(v => !v)) {
+        showResponseModal('Missing serial numbers', 'Please fill in every new serial number field before saving.', false);
+        return;
+      }
+    }
+    if (targetQuantity < keptCount) {
+      showResponseModal('Remove more serial numbers', `Quantity is ${targetQuantity} but ${keptCount} serial number(s) are still on file — mark ${keptCount - targetQuantity} more for removal.`, false);
+      return;
+    }
+
     const updated_values = {
       product_name: inputs[0].value,
       lot_no: inputs[2].value,
       supplier: inputs[3].value,
       purchase_date: inputs[4].value,
-      quantity: Number(inputs[5].value),
+      quantity: targetQuantity,
       price: inputs[6].value,
       tax_rate: Number(inputs[7].value)
     };
@@ -458,14 +545,15 @@ function wireModals() {
       const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values })
+        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');
       document.getElementById('editModal').style.display = 'none';
+      showResponseModal('Product updated', 'Inventory was updated successfully.', true);
       await loadInventory();
     } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
     }
   });
 

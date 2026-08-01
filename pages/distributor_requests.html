@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Requests | Acer Biomedical</title>
+
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+  <div class="container">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+
+      <ul>
+        <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo Units</span></a></li>
+        <li class="active"><a href="distributor_requests.html"><i class="fa-solid fa-list-check"></i><span>My Requests</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Sales Person">
+        <div>
+          <h4 id="sidebarUserName">Sales Person</h4>
+          <p id="sidebarUserRole">Sales Person</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>My Requests</h1>
+          <p>Return due dates for demo units and the status of everything you've raised</p>
+        </div>
+        <div class="right-header">
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Sales Person">
+            <div>
+              <h4 id="headerUserName">Sales Person</h4>
+              <p id="headerUserRole">Sales Person</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- CARDS -->
+      <section class="cards">
+        <div class="card">
+          <div><span>Return Due Soon</span><h2 id="cardDueSoon">0</h2><p>Within the next 3 days</p></div>
+          <i class="fa-solid fa-hourglass-half"></i>
+        </div>
+        <div class="card">
+          <div><span>Return Overdue</span><h2 id="cardOverdue">0</h2><p>Past the 7-day window</p></div>
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div class="card">
+          <div><span>Pending Requests</span><h2 id="cardPending">0</h2><p>Awaiting admin/employee approval</p></div>
+          <i class="fa-regular fa-clock"></i>
+        </div>
+        <div class="card">
+          <div><span>Total Requests</span><h2 id="cardTotalRequests">0</h2><p>All time</p></div>
+          <i class="fa-solid fa-layer-group"></i>
+        </div>
+      </section>
+
+      <!-- RETURN DUE SOON LIST -->
+      <section class="dashboard-grid">
+        <div class="panel" style="width:100%;">
+          <div class="panel-header">
+            <h3>Demo Units — Return Due Soon</h3>
+            <p style="color:#64748b;font-size:13px;">Not yet overdue, but due back within 3 days</p>
+          </div>
+          <div class="order-list" id="dueSoonList"></div>
+        </div>
+      </section>
+
+      <!-- FILTER -->
+      <section class="filter-section">
+        <div class="filter-box">
+          <i class="fa-solid fa-filter"></i>
+          <select id="statusFilter">
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div class="filter-box">
+          <i class="fa-solid fa-tags"></i>
+          <select id="typeFilter">
+            <option value="">All Types</option>
+            <option value="demo_unit">Demo Unit</option>
+            <option value="order">Order</option>
+          </select>
+        </div>
+        <button class="filter-btn" id="applyRequestFilter"><i class="fa-solid fa-magnifying-glass"></i> Apply Filter</button>
+      </section>
+
+      <!-- MY REQUESTS TABLE -->
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Customer</th>
+              <th>Product(s)</th>
+              <th>Payment Mode</th>
+              <th>Raised On</th>
+              <th>Status</th>
+              <th>Reason / Notes</th>
+            </tr>
+          </thead>
+          <tbody id="myRequestsTbody">
+            <!-- rows rendered dynamically by distributor_requests.js -->
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Logout Modal -->
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- common_auth.js MUST load first: enforces login + role-based page access -->
+  <script src="../common_auth.js"></script>
+
+  <script>
+    function openLogoutModal(e){
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
+    }
+    function closeLogoutModal(){
+      document.getElementById("logoutModal").classList.remove("active");
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const role = getRole() || '';
+      const uname = getUsername() || 'User';
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+    });
+  </script>
+  <script src="distributor_requests.js"></script>
+</body>
+</html>

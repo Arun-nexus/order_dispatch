@@ -17,14 +17,7 @@
       </div>
 
       <ul>
-        <li><a href="technician_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
-        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
-        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
-        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
-        <li class="active"><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
-        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
-        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li class="active"><a href="technician.html"><i class="fa-solid fa-house"></i><span>My Services</span></a></li>
         <li>
           <a href="#" onclick="openLogoutModal(event)">
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
@@ -91,7 +84,7 @@
       <!-- EARNINGS & SPARE PARTS CARDS -->
       <section class="cards">
         <div class="card">
-          <div><span>Total Earned</span><h2 id="cardEarned">₹0</h2><p>From completed services</p></div>
+          <div><span>Earned Today</span><h2 id="cardEarnedToday">₹0</h2><p>From services completed today</p></div>
           <i class="fa-solid fa-indian-rupee-sign"></i>
         </div>
         <div class="card">
@@ -116,6 +109,17 @@
             <p style="color:#64748b;font-size:13px;">Sent to admin/employee for approval</p>
           </div>
           <div class="order-list" id="myRequestsList"></div>
+        </div>
+      </section>
+
+      <!-- SERVICE EARNINGS BY DAY -->
+      <section class="dashboard-grid">
+        <div class="panel" style="width:100%;">
+          <div class="panel-header">
+            <h3>Service Earnings by Day</h3>
+            <p style="color:#64748b;font-size:13px;">Amount earned from completed services, per day (last 7 days)</p>
+          </div>
+          <div class="order-list" id="dailyEarningsList"></div>
         </div>
       </section>
 

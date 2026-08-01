@@ -7,6 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
   wireStaticModals();
 });
 
+window.refreshCurrentPageData = () => { loadMyServices(); loadMyRequests(); };
+
 async function loadMyRequests() {
   try {
     const res = await apiFetch('/request/mine');
@@ -86,14 +88,48 @@ function renderCards() {
   document.getElementById('cardCompleted').textContent = services.filter(s => s.status === 'completed').length;
   document.getElementById('cardRejected').textContent = services.filter(s => s.status === 'rejected').length;
 
-  const earned = services
-    .filter(s => s.status === 'completed')
+  const today = new Date().toDateString();
+  const earnedToday = services
+    .filter(s => s.status === 'completed' && s.purchase_date && new Date(s.purchase_date).toDateString() === today)
     .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
-  document.getElementById('cardEarned').textContent = `₹${earned.toFixed(2)}`;
+  document.getElementById('cardEarnedToday').textContent = `₹${earnedToday.toFixed(2)}`;
 
   document.getElementById('cardPartsHeld').textContent = parts.filter(a => a.return_status !== 'returned').length;
   document.getElementById('cardPartsOverdue').textContent = parts.filter(isOverdue).length;
   document.getElementById('cardPartsReturned').textContent = parts.filter(a => a.return_status === 'returned').length;
+
+  renderDailyEarnings();
+}
+
+// Per-day service-earnings breakdown for the last 7 days (replaces the old lifetime "Total Earned" card)
+function renderDailyEarnings() {
+  const box = document.getElementById('dailyEarningsList');
+  if (!box) return;
+
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d);
+  }
+
+  const completed = techState.services.filter(s => s.status === 'completed');
+
+  const rows = days.map(d => {
+    const dayTotal = completed
+      .filter(s => s.purchase_date && new Date(s.purchase_date).toDateString() === d.toDateString())
+      .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
+    return { date: d, total: dayTotal };
+  });
+
+  box.innerHTML = rows.map(r => `
+    <div class="order-item">
+      <div class="order-left">
+        <div class="order-icon"><i class="fa-solid fa-calendar-day"></i></div>
+        <div><h4>${r.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</h4></div>
+      </div>
+      <strong>₹${r.total.toFixed(2)}</strong>
+    </div>`).join('');
 }
 
 function statusBadgeClass(status) {
@@ -224,6 +260,17 @@ function openUploadModal(s, kind) {
     e.preventDefault();
     const file = e.target.file.files[0];
     if (!file) return;
+
+    const maxBytes = kind === 'image' ? 2 * 1024 * 1024 : 20 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      showResponseModal(
+        'File too large',
+        `${kind === 'image' ? 'Image' : 'Video'} is ${(file.size / 1024 / 1024).toFixed(1)}MB — must be ${kind === 'image' ? '2MB' : '20MB'} or under.`,
+        false
+      );
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async () => {
       const payload = kind === 'image' ? { image: reader.result } : { video: reader.result };
@@ -234,6 +281,9 @@ function openUploadModal(s, kind) {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'upload failed');
         modal.style.display = 'none';
+        if (kind === 'video') {
+          showResponseModal('Video uploaded', 'Admin/employee have been notified to review and download this video.', true);
+        }
         await loadMyServices();
       } catch (err) {
         if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);

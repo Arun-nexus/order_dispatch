@@ -196,6 +196,8 @@ class InventoryRequest(BaseModel):
 
 class InventoryUpdateRequest(BaseModel):
     updated_values: dict
+    new_serial_numbers: list[str] = []
+    remove_serial_numbers: list[str] = []
 
 
 @app.get("/")
@@ -380,102 +382,132 @@ async def update_account(username: str, updated_values: UpdateAccountRequest, us
 VALID_PAYMENT_MODES = {"Credit", "NetBanking", "UPI", "Cheque", "DemandDraft", "Cash"}
 
 
-@app.post("/order/create_order/")
-async def create_order(request: CreateOrderRequest, user: dict = Depends(get_current_user)):
+def _raise_media_review_request(service_id: str, raised_by: str):
+    """Creates a 'media_review' request so admin/employee get a bell notification
+    to download the uploaded video. Approving it confirms the download and clears
+    the video from the database; rejecting it discards the video without keeping it."""
     try:
-        if not request.items:
-            raise HTTPException(status_code=400, detail="add at least one product to the order")
+        req = request_manager(
+            request_type="media_review",
+            raised_by=raised_by,
+            details={"service_id": service_id, "kind": "video"}
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+    except Exception:
+        logging.error("could not raise media review notification")
 
-        if request.payment_mode not in VALID_PAYMENT_MODES:
-            raise HTTPException(status_code=400, detail="invalid payment mode")
 
-        if request.payment_mode == "Credit":
-            credit_days = request.payment_details.get("credit_days")
-            if not credit_days or not (0 < int(credit_days) <= 60):
-                raise HTTPException(status_code=400, detail="credit days must be between 1 and 60")
+def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float):
+    """Validates payment details, resolves/creates the customer, deducts stock + serials,
+    and creates the order record. Shared by the direct /order/create_order/ endpoint and by
+    /request/approve/{request_id} when a distributor's order request is approved."""
+    if not items:
+        raise HTTPException(status_code=400, detail="add at least one product to the order")
 
-        if request.payment_mode == "Cheque" and not request.payment_details.get("cheque_number"):
-            raise HTTPException(status_code=400, detail="cheque number is required")
+    if payment_mode not in VALID_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail="invalid payment mode")
 
-        if request.payment_mode == "DemandDraft" and not request.payment_details.get("dd_number"):
-            raise HTTPException(status_code=400, detail="demand draft number is required")
+    if payment_mode == "Credit":
+        credit_days = payment_details.get("credit_days")
+        if not credit_days or not (0 < int(credit_days) <= 60):
+            raise HTTPException(status_code=400, detail="credit days must be between 1 and 60")
 
-        if request.payment_mode == "UPI" and not request.payment_details.get("upi_id"):
-            raise HTTPException(status_code=400, detail="UPI ID is required")
+    if payment_mode == "Cheque" and not payment_details.get("cheque_number"):
+        raise HTTPException(status_code=400, detail="cheque number is required")
 
-        if request.payment_mode == "NetBanking" and not (
-            request.payment_details.get("bank_name")
-            and request.payment_details.get("account_number")
-            and request.payment_details.get("ifsc_code")
-        ):
-            raise HTTPException(status_code=400, detail="bank name, account number and IFSC code are required")
+    if payment_mode == "DemandDraft" and not payment_details.get("dd_number"):
+        raise HTTPException(status_code=400, detail="demand draft number is required")
 
-        if request.payment_mode == "Cash" and not request.payment_details.get("received_by"):
-            raise HTTPException(status_code=400, detail="received-by person name is required")
+    if payment_mode == "UPI" and not payment_details.get("upi_id"):
+        raise HTTPException(status_code=400, detail="UPI ID is required")
 
-        customer_db = customer_manager()
-        customer_snapshot = dict(request.customer or {})
+    if payment_mode == "NetBanking" and not (
+        payment_details.get("bank_name")
+        and payment_details.get("account_number")
+        and payment_details.get("ifsc_code")
+    ):
+        raise HTTPException(status_code=400, detail="bank name, account number and IFSC code are required")
 
-        if request.customer_id:
-            existing = customer_db.get_data(CUSTOMER_COLLECTION, query={"customer_id": request.customer_id})
-            if not existing:
-                raise HTTPException(status_code=404, detail="selected customer not found")
-            customer_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
-        else:
-            if not customer_snapshot.get("company_name"):
-                raise HTTPException(status_code=400, detail="customer details are required")
-            new_customer = customer_manager(
-                company_name=customer_snapshot.get("company_name"),
-                company_address=customer_snapshot.get("company_address"),
-                gst_number=customer_snapshot.get("gst_number"),
-                contractor_person=customer_snapshot.get("contractor_person"),
-                contractor_number=customer_snapshot.get("contractor_number"),
-                contractor_email=customer_snapshot.get("contractor_email"),
+    if payment_mode == "Cash" and not payment_details.get("received_by"):
+        raise HTTPException(status_code=400, detail="received-by person name is required")
+
+    customer_db = customer_manager()
+    customer_snapshot = dict(customer or {})
+
+    if customer_id:
+        existing = customer_db.get_data(CUSTOMER_COLLECTION, query={"customer_id": customer_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="selected customer not found")
+        customer_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
+    else:
+        if not customer_snapshot.get("company_name"):
+            raise HTTPException(status_code=400, detail="customer details are required")
+        new_customer = customer_manager(
+            company_name=customer_snapshot.get("company_name"),
+            company_address=customer_snapshot.get("company_address"),
+            gst_number=customer_snapshot.get("gst_number"),
+            contractor_person=customer_snapshot.get("contractor_person"),
+            contractor_number=customer_snapshot.get("contractor_number"),
+            contractor_email=customer_snapshot.get("contractor_email"),
+        )
+        new_customer.add(collection_name=CUSTOMER_COLLECTION)
+        customer_snapshot = {
+            "customer_id": new_customer.customer_id,
+            "company_name": new_customer.company_name,
+            "company_address": new_customer.company_address,
+            "gst_number": new_customer.gst_number,
+            "contractor_person": new_customer.contractor_person,
+            "contractor_number": new_customer.contractor_number,
+            "contractor_email": new_customer.contractor_email,
+        }
+
+    inventory_db = inventory_manager()
+
+    # pre-check availability for every line before mutating any inventory
+    for item in items:
+        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item["product_id"])
+        if available < item["quantity"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"insufficient stock for {item.get('product_name', item['product_id'])}: only {available} available"
             )
-            new_customer.add(collection_name=CUSTOMER_COLLECTION)
-            customer_snapshot = {
-                "customer_id": new_customer.customer_id,
-                "company_name": new_customer.company_name,
-                "company_address": new_customer.company_address,
-                "gst_number": new_customer.gst_number,
-                "contractor_person": new_customer.contractor_person,
-                "contractor_number": new_customer.contractor_number,
-                "contractor_email": new_customer.contractor_email,
-            }
 
-        inventory_db = inventory_manager()
+    order_items = []
+    for item in items:
+        allocated_serials = inventory_db.allocate_serials(
+            collection_name=INVENTORY_COLLECTION,
+            product_id=item["product_id"],
+            quantity=item["quantity"]
+        )
+        order_item = dict(item)
+        order_item["serial_numbers"] = allocated_serials
+        order_items.append(order_item)
 
-        # pre-check availability for every line before mutating any inventory
-        for item in request.items:
-            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id)
-            if available < item.quantity:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"insufficient stock for {item.product_name}: only {available} available"
-                )
+    order = order_manager(
+        customer=customer_snapshot,
+        items=order_items,
+        payment_mode=payment_mode,
+        payment_details=payment_details,
+        discount=discount
+    )
+    order.add(collection_name=ORDERS_COLLECTION)
 
-        order_items = []
-        for item in request.items:
-            allocated_serials = inventory_db.allocate_serials(
-                collection_name=INVENTORY_COLLECTION,
-                product_id=item.product_id,
-                quantity=item.quantity
-            )
-            order_item = item.dict()
-            order_item["serial_numbers"] = allocated_serials
-            order_items.append(order_item)
+    logging.info(f"order {order.order_id} created successfully")
+    return order.order_id
 
-        order = order_manager(
-            customer=customer_snapshot,
-            items=order_items,
+
+@app.post("/order/create_order/")
+async def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        order_id = _fulfill_order(
+            customer_id=request.customer_id,
+            customer=request.customer,
+            items=[item.dict() for item in request.items],
             payment_mode=request.payment_mode,
             payment_details=request.payment_details,
             discount=request.discount
         )
-        order.add(collection_name=ORDERS_COLLECTION)
-
-        logging.info(f"order {order.order_id} created successfully")
-        return {"message": "order created successfully", "order_id": order.order_id}
+        return {"message": "order created successfully", "order_id": order_id}
 
     except HTTPException:
         raise
@@ -586,6 +618,10 @@ async def create_service(request: ServiceRequest, user: dict = Depends(require_r
             spare_parts=request.spare_parts
         )
         logging.info(f"service creation was successful with service_id {service.service_id}!")
+
+        if request.video:
+            _raise_media_review_request(service.service_id, user["username"])
+
         return {"message": "service creation was successful!", "service_id": service.service_id}
 
     except HTTPException:
@@ -657,6 +693,10 @@ async def upload_service_media(service_id: str, request: ServiceMediaRequest, us
     try:
         db = service_detail()
         db.attach_media(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, image=request.image, video=request.video)
+
+        if request.video:
+            _raise_media_review_request(service_id, user["username"])
+
         return {"message": "media uploaded successfully", "service_id": service_id}
     except Exception as e:
         logging.error("service media upload failed!")
@@ -752,10 +792,56 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
 async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = inventory_manager()
+        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="product not found")
+        current_serials = existing[0].get("serial_numbers") or []
+
+        updated_values = dict(request.updated_values)
+
+        # whenever quantity changes, keep serial_numbers in sync instead of letting
+        # them silently drift out of step with the stock count
+        if "quantity" in updated_values and updated_values["quantity"] is not None:
+            new_quantity = int(updated_values["quantity"])
+            serials = list(current_serials)
+
+            if request.remove_serial_numbers:
+                missing = [s for s in request.remove_serial_numbers if s not in serials]
+                if missing:
+                    raise HTTPException(status_code=400,
+                                         detail=f"serial number(s) not found on this product: {', '.join(missing)}")
+                serials = [s for s in serials if s not in request.remove_serial_numbers]
+
+            if request.new_serial_numbers:
+                if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
+                    raise HTTPException(status_code=400, detail="new serial numbers must be unique")
+                duplicates = [s for s in request.new_serial_numbers if s in serials]
+                if duplicates:
+                    raise HTTPException(status_code=400,
+                                         detail=f"serial number(s) already exist on this product: {', '.join(duplicates)}")
+                serials = serials + request.new_serial_numbers
+
+            if len(serials) != new_quantity:
+                if new_quantity > len(serials):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"quantity is {new_quantity} but only {len(serials)} serial number(s) provided — "
+                               f"add {new_quantity - len(serials)} more serial number(s)"
+                    )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"quantity is {new_quantity} but {len(serials)} serial number(s) are on file — "
+                           f"remove {len(serials) - new_quantity} serial number(s)"
+                )
+
+            updated_values["serial_numbers"] = serials
+
         db.update(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id},
-                   update_values=request.updated_values)
+                   update_values=updated_values)
         logging.info("inventory was updated")
         return {"message": "inventory was updated successfully", "product_id": product_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error("inventory updation was unsuccessful!")
         raise HTTPException(status_code=500, detail="inventory cannot be updated")
@@ -1021,6 +1107,15 @@ class SparePartRequestFlagModel(BaseModel):
     note: str
 
 
+class OrderRequestModel(BaseModel):
+    customer_id: str = ""
+    customer: dict = {}
+    items: list[OrderItem]
+    payment_mode: str
+    payment_details: dict = {}
+    discount: float = 0
+
+
 class RequestRejectModel(BaseModel):
     reason: str = ""
 
@@ -1048,6 +1143,37 @@ async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = De
         raise
     except Exception as e:
         logging.error("raising demo unit request failed!")
+        raise HTTPException(status_code=500, detail="request could not be raised")
+
+
+@app.post("/request/order")
+async def raise_order_request(request: OrderRequestModel, user: dict = Depends(require_role("distributor"))):
+    try:
+        if not request.items:
+            raise HTTPException(status_code=400, detail="add at least one product")
+        if not request.customer_id and not request.customer.get("company_name"):
+            raise HTTPException(status_code=400, detail="customer details are required")
+        if request.payment_mode not in VALID_PAYMENT_MODES:
+            raise HTTPException(status_code=400, detail="invalid payment mode")
+
+        req = request_manager(
+            request_type="order",
+            raised_by=user["username"],
+            details={
+                "customer_id": request.customer_id,
+                "customer": request.customer,
+                "items": [item.dict() for item in request.items],
+                "payment_mode": request.payment_mode,
+                "payment_details": request.payment_details,
+                "discount": request.discount
+            }
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+        return {"message": "request sent, waiting for admin/employee approval", "request_id": req.request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("raising order request failed!")
         raise HTTPException(status_code=500, detail="request could not be raised")
 
 
@@ -1096,6 +1222,32 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and demo unit allotted", "allocation_id": allocation_id}
 
+        if req["request_type"] == "order":
+            details = req["details"]
+            order_id = _fulfill_order(
+                customer_id=details.get("customer_id", ""),
+                customer=details.get("customer", {}),
+                items=details.get("items", []),
+                payment_mode=details.get("payment_mode"),
+                payment_details=details.get("payment_details", {}),
+                discount=details.get("discount", 0)
+            )
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "request approved and order created", "order_id": order_id}
+
+        # media_review: approving means admin/employee confirmed they downloaded the
+        # video — it's cleared from the database afterwards to free up storage.
+        if req["request_type"] == "media_review":
+            service_id = req["details"].get("service_id")
+            if service_id:
+                svc_db = service_detail()
+                svc_db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
+                                    update_values={"video": ""})
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "video download confirmed and removed from the database"}
+
         # spare_part requests: approving just acknowledges it — admin/employee still
         # issues the actual part from the Allocated page (Spare Part to Service flow)
         db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
@@ -1118,6 +1270,13 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
             raise HTTPException(status_code=404, detail="request not found")
         if existing[0]["status"] != "pending":
             raise HTTPException(status_code=400, detail=f"request already {existing[0]['status']}")
+
+        if existing[0]["request_type"] == "media_review":
+            service_id = existing[0]["details"].get("service_id")
+            if service_id:
+                svc_db = service_detail()
+                svc_db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
+                                    update_values={"video": ""})
 
         db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                        status="rejected", resolved_by=user["username"], reason=request.reason)
