@@ -616,7 +616,7 @@ function renderProductsStep() {
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:320px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#64748b;">
+        <thead><tr style="text-align:left;color:#fff;">
           <th>Product</th><th>Stock</th><th>Price</th><th style="width:70px;">Qty</th>
         </tr></thead>
         <tbody id="prodRows"></tbody>
@@ -680,6 +680,7 @@ function renderPaymentStep() {
       ${PAYMENT_MODES.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
     </select>
     <div id="paymentExtra"></div>
+    <div style = "padding-left:8px" ><small><p>Discount<p><small></div>
     <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
     <div style="display:flex;justify-content:space-between;margin-top:10px;">
       <button type="button" id="backBtn4" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>

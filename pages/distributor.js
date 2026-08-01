@@ -18,8 +18,7 @@ async function loadMyTeam() {
     const teamData = await teamRes.json();
     const allocData = teamRes.ok && teamAllocRes.ok ? await teamAllocRes.json() : { dataset: [] };
     const team = teamData.dataset || [];
-    if (!team.length) return; // not a manager — leave the section hidden
-
+    if (!team.length) return; 
     document.getElementById('myTeamSection').style.display = '';
     renderMyTeam(team, allocData.dataset || []);
   } catch (err) {
@@ -52,7 +51,31 @@ async function loadMyAllocations() {
     const res = await apiFetch('/allocation/mine');
     if (!res.ok) throw new Error('failed to fetch allocations');
     const data = await res.json();
-    spState.allocations = data.dataset || [];
+    const mine = data.dataset || [];
+
+    let team = [];
+    let teamAllocations = [];
+    try {
+      const [teamRes, teamAllocRes] = await Promise.all([
+        apiFetch('/account/my_team'),
+        apiFetch('/allocation/team')
+      ]);
+      if (teamRes.ok) team = (await teamRes.json()).dataset || [];
+      if (teamAllocRes.ok) teamAllocations = (await teamAllocRes.json()).dataset || [];
+    } catch (teamErr) {
+      console.error('could not fetch team allocations', teamErr);
+    }
+
+    spState.teamMemberMap = {};
+    team.forEach(m => { spState.teamMemberMap[m.username] = m; });
+
+    const seen = new Set(mine.map(a => a.allocation_id));
+    const merged = [...mine];
+    teamAllocations.forEach(a => {
+      if (!seen.has(a.allocation_id)) { merged.push(a); seen.add(a.allocation_id); }
+    });
+
+    spState.allocations = merged;
     renderWelcome();
     renderCards();
     renderTable(spState.allocations);
@@ -61,6 +84,13 @@ async function loadMyAllocations() {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load your demo units.');
   }
+}
+
+function creatorLabel(username) {
+  if (!username) return '-';
+  if (username === getUsername()) return `${username} (You)`;
+  const member = spState.teamMemberMap && spState.teamMemberMap[username];
+  return member ? `${member.name ?? username}` : username;
 }
 
 function renderWelcome() {
@@ -160,8 +190,10 @@ function renderTable(allocations) {
     const productLabel = (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
     const tr = document.createElement('tr');
     tr.dataset.id = a.allocation_id;
+    const category = a.allocation_type === 'demo_unit' ? 'Demo' : (a.allocation_type ? 'Order' : '-');
     tr.innerHTML = `
-      <td>${a.allocation_id?.slice(0, 8) ?? ''}</td>
+      <td>${creatorLabel(a.allocated_by)}</td>
+      <td>${category}</td>
       <td>${a.customer?.company_name ?? ''}</td>
       <td>${productLabel}</td>
       <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
@@ -393,7 +425,7 @@ function renderProductsStep() {
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#64748b;"><th>Product</th><th>Stock</th><th style="width:70px;">Qty</th></tr></thead>
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Stock</th><th style="width:70px;">Qty</th></tr></thead>
         <tbody id="prodRows"></tbody>
       </table>
     </div>
@@ -618,7 +650,7 @@ function renderOrderProductsStep() {
     <input id="oProdFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#64748b;"><th>Product</th><th>Stock</th><th>Price</th><th style="width:70px;">Qty</th></tr></thead>
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Price</th><th style="width:70px;">Qty</th></tr></thead>
         <tbody id="oProdRows"></tbody>
       </table>
     </div>
@@ -633,7 +665,6 @@ function renderOrderProductsStep() {
     rowsBox.innerHTML = list.map(p => `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
-        <td>${p.quantity ?? 0}</td>
         <td>₹${p.price ?? 0}</td>
         <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${orderWiz.cart[p.product_id]?.quantity ?? 0}"
               data-id="${p.product_id}" class="oQtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
