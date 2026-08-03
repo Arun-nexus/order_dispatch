@@ -40,15 +40,20 @@ async function loadServices() {
 
 async function loadTechnicians() {
   try {
-    const res = await apiFetch('/account/technicians');
-    if (!res.ok) throw new Error('failed to fetch technicians');
-    const data = await res.json();
-    svcState.technicians = data.dataset || [];
+    const [techRes, distRes] = await Promise.all([
+      apiFetch('/account/technicians'),
+      apiFetch('/account/distributors')
+    ]);
+    const techData = techRes.ok ? await techRes.json() : { dataset: [] };
+    const distData = distRes.ok ? await distRes.json() : { dataset: [] };
+    svcState.technicians = techData.dataset || [];
+    svcState.distributors = distData.dataset || [];
   } catch (err) {
     console.error(err);
     svcState.technicians = [];
+    svcState.distributors = [];
   }
-  return svcState.technicians;
+  return { technicians: svcState.technicians, distributors: svcState.distributors };
 }
 
 function updateCards(services) {
@@ -66,10 +71,12 @@ function statusBadge(status) {
   return map[status] || 'pending';
 }
 
-// finds the order this service's product belongs to (matches serial_no first, falls back to product_id)
+// finds the order this service's product belongs to by searching each order's
+// line items (orders store items[].serial_numbers, not a top-level serial_no)
 function findOrderForService(s) {
-  return svcState.orders.find(o => s.serial_no && o.serial_no === s.serial_no)
-      || svcState.orders.find(o => o.product_id === s.product_id);
+  if (!s.serial_no) return svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id));
+  return svcState.orders.find(o => (o.items || []).some(it => (it.serial_numbers || []).includes(s.serial_no)))
+      || svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id));
 }
 
 // warranty = manual override (warranty_until) if admin/employee set one, else order_date + 365 days
@@ -379,7 +386,7 @@ async function openCreateModal() {
 
       // outdoor services must reference a serial number that actually exists in Orders
       if (payload.location === 'outdoor') {
-        const matchInOrders = svcState.orders.some(o => o.serial_no === payload.serial_no);
+        const matchInOrders = svcState.orders.some(o => (o.items || []).some(it => (it.serial_numbers || []).includes(payload.serial_no)));
         if (!matchInOrders) {
           alert('This Serial No. was not found in Orders. Outdoor services must match an existing order.');
           return;
@@ -419,13 +426,24 @@ async function openCreateModal() {
   // refresh the technician dropdown every time the modal opens, so it always
   // reflects current usernames from Users → technician accounts
   const select = modal.querySelector('#technicianSelect');
-  select.innerHTML = '<option value="">Loading technicians...</option>';
-  const technicians = await loadTechnicians();
-  if (!technicians.length) {
-    select.innerHTML = '<option value="">No technicians found — add one from Users</option>';
+  select.innerHTML = '<option value="">Loading...</option>';
+  const { technicians, distributors } = await loadTechnicians();
+
+  if (!technicians.length && !distributors.length) {
+    select.innerHTML = '<option value="">No technicians/distributors found — add one from Users</option>';
   } else {
-    select.innerHTML = '<option value="">Select Technician</option>' +
-      technicians.map(t => `<option value="${t.username}">${t.username}${t.name ? ' — ' + t.name : ''}</option>`).join('');
+    let html = '<option value="">Select Technician/Distributor</option>';
+    if (technicians.length) {
+      html += '<optgroup label="Technicians">' +
+        technicians.map(t => `<option value="${t.username}">${t.username}${t.name ? ' — ' + t.name : ''}</option>`).join('') +
+        '</optgroup>';
+    }
+    if (distributors.length) {
+      html += '<optgroup label="Distributors">' +
+        distributors.map(d => `<option value="${d.username}">${d.username}${d.name ? ' — ' + d.name : ''}</option>`).join('') +
+        '</optgroup>';
+    }
+    select.innerHTML = html;
   }
 
   modal.style.display = 'flex';

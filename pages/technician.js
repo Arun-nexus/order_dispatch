@@ -14,7 +14,7 @@ async function loadMyRequests() {
     const res = await apiFetch('/request/mine');
     if (!res.ok) throw new Error('failed to fetch requests');
     const data = await res.json();
-    renderMyRequests((data.dataset || []).filter(r => r.request_type === 'spare_part'));
+    renderMyRequests((data.dataset || []).filter(r => r.request_type === 'spare_part' || r.request_type === 'status_update'));
   } catch (err) {
     console.error(err);
   }
@@ -30,17 +30,23 @@ function renderMyRequests(requests) {
   const box = document.getElementById('myRequestsList');
   if (!box) return;
   const sorted = [...requests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  box.innerHTML = sorted.length ? sorted.map(r => `
+  box.innerHTML = sorted.length ? sorted.map(r => {
+    const isStatusReq = r.request_type === 'status_update';
+    const label = isStatusReq
+      ? `Change status to "${(r.details?.service_status || '').replace('_', ' ')}"`
+      : (r.details?.note ?? '');
+    return `
     <div class="order-item">
       <div class="order-left">
         <div class="order-icon"><i class="fa-solid fa-gears"></i></div>
         <div>
           <h4>Service #${(r.details?.service_id || '').slice(0, 8)}</h4>
-          <p>${r.details?.note ?? ''}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
+          <p>${label}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
         </div>
       </div>
       <span class="status ${requestStatusClass(r.status)}">${r.status}</span>
-    </div>`).join('') : '<p style="color:#94a3b8;padding:10px;">No spare part requests yet.</p>';
+    </div>`;
+  }).join('') : '<p style="color:#94a3b8;padding:10px;">No spare part requests yet.</p>';
 }
 
 async function loadMyServices() {
@@ -84,7 +90,6 @@ function renderCards() {
 
   document.getElementById('cardTotal').textContent = services.length;
   document.getElementById('cardActive').textContent = services.filter(s => s.status === 'active').length;
-  document.getElementById('cardInProgress').textContent = services.filter(s => s.status === 'in_progress').length;
   document.getElementById('cardCompleted').textContent = services.filter(s => s.status === 'completed').length;
   document.getElementById('cardRejected').textContent = services.filter(s => s.status === 'rejected').length;
 
@@ -92,44 +97,12 @@ function renderCards() {
   const earnedToday = services
     .filter(s => s.status === 'completed' && s.purchase_date && new Date(s.purchase_date).toDateString() === today)
     .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
-  document.getElementById('cardEarnedToday').textContent = `₹${earnedToday.toFixed(2)}`;
 
-  document.getElementById('cardPartsHeld').textContent = parts.filter(a => a.return_status !== 'returned').length;
-  document.getElementById('cardPartsOverdue').textContent = parts.filter(isOverdue).length;
-  document.getElementById('cardPartsReturned').textContent = parts.filter(a => a.return_status === 'returned').length;
+  const totalServiceCost = services
+    .filter(s => s.status === 'completed')
+    .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
+  document.getElementById('cardServiceCost').textContent = `₹${totalServiceCost.toFixed(2)}`;
 
-  renderDailyEarnings();
-}
-
-// Per-day service-earnings breakdown for the last 7 days (replaces the old lifetime "Total Earned" card)
-function renderDailyEarnings() {
-  const box = document.getElementById('dailyEarningsList');
-  if (!box) return;
-
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    days.push(d);
-  }
-
-  const completed = techState.services.filter(s => s.status === 'completed');
-
-  const rows = days.map(d => {
-    const dayTotal = completed
-      .filter(s => s.purchase_date && new Date(s.purchase_date).toDateString() === d.toDateString())
-      .reduce((sum, s) => sum + (Number(s.service_charges) || 0), 0);
-    return { date: d, total: dayTotal };
-  });
-
-  box.innerHTML = rows.map(r => `
-    <div class="order-item">
-      <div class="order-left">
-        <div class="order-icon"><i class="fa-solid fa-calendar-day"></i></div>
-        <div><h4>${r.date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</h4></div>
-      </div>
-      <strong>₹${r.total.toFixed(2)}</strong>
-    </div>`).join('');
 }
 
 function statusBadgeClass(status) {
@@ -372,13 +345,15 @@ function openStatusModal(s) {
       spare_parts_used: fd.get('spare_parts_used') === 'on'
     };
     try {
-      const res = await apiFetch(`/service/update/${s.service_id}`, {
+      const res = await apiFetch(`/service/request_status_update/${s.service_id}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'update failed');
+      if (!res.ok) throw new Error(data.detail || 'request failed');
       modal.style.display = 'none';
+      showResponseModal('Status update requested', 'Your status change has been sent to admin/employee for approval.', true);
       await loadMyServices();
+      await loadMyRequests();
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }

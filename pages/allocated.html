@@ -102,7 +102,16 @@
         </div>
       </section>
 
-      <!-- Pending demo-unit / spare-part requests now surface in the bell icon (top right), not on-screen -->
+      <!-- Pending demo-unit / spare-part / order / status requests -->
+      <section class="dashboard-grid">
+        <div class="panel" id="pendingRequestsSection" style="width:175%; margin-bottom:15px;">
+          <div class="panel-header">
+            <h3>Pending Requests <span id="pendingCountLabel"></span></h3>
+            <p style="color:#64748b;font-size:13px;">Demo units, spare parts, orders and status changes awaiting review</p>
+          </div>
+          <div class="order-list" id="pendingRequestsList"></div>
+        </div>
+      </section>
 
       <div class="top-actions">
         <button class="export"><i class="fa-solid fa-download"></i> Export</button>

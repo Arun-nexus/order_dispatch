@@ -53,26 +53,46 @@ function renderPendingRequests() {
   }
 
   box.innerHTML = pending.map(r => {
-    const isDemo = r.request_type === 'demo_unit';
-    const title = isDemo
-      ? `Demo Unit — ${r.details?.customer?.company_name || 'New customer'}`
-      : `Spare Part — Service #${(r.details?.service_id || '').slice(0, 8)}`;
-    const subtitle = isDemo
-      ? (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
-      : (r.details?.note || '');
+    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen' };
+    const icon = iconMap[r.request_type] || 'fa-bell';
+
+    let title, subtitle;
+    if (r.request_type === 'demo_unit') {
+      title = `Demo Unit — ${r.details?.customer?.company_name || 'New customer'}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+    } else if (r.request_type === 'order') {
+      title = `Order — ${r.details?.customer?.company_name || 'New customer'}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+    } else if (r.request_type === 'media_review') {
+      title = `Service Media — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+      subtitle = 'Video uploaded, awaiting download confirmation';
+    } else if (r.request_type === 'status_update') {
+      title = `Status Change — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+      subtitle = `Requested: "${(r.details?.service_status || '').replace('_', ' ')}"${r.details?.reason ? ' — ' + r.details.reason : ''}`;
+    } else {
+      title = `Spare Part — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+      subtitle = r.details?.note || '';
+    }
+
+    // status_update is completed from the Service page's Update Status action (needs
+    // service charges etc. that this quick panel doesn't collect), so no approve/reject here
+    const actions = r.request_type === 'status_update'
+      ? `<p style="font-size:11px;color:#94a3b8;">Complete this from the Service page's Update Status action.</p>`
+      : `<div style="display:flex;gap:8px;">
+          <button class="req-approve-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Approve</button>
+          <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
+        </div>`;
+
     return `
       <div class="order-item" data-id="${r.request_id}">
         <div class="order-left">
-          <div class="order-icon"><i class="fa-solid ${isDemo ? 'fa-handshake' : 'fa-gears'}"></i></div>
+          <div class="order-icon"><i class="fa-solid ${icon}"></i></div>
           <div>
             <h4>${title}</h4>
             <p>${subtitle} • raised by ${r.raised_by}</p>
           </div>
         </div>
-        <div style="display:flex;gap:8px;">
-          <button class="req-approve-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Approve</button>
-          <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
-        </div>
+        ${actions}
       </div>`;
   }).join('');
 

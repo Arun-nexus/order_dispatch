@@ -1,4 +1,4 @@
-const techDashState = { services: [], allocations: [] };
+const techDashState = { services: [], allocations: [], requests: [] };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadTechDashboard();
@@ -15,16 +15,19 @@ function setTodayDate() {
 
 async function loadTechDashboard() {
   try {
-    const [svcRes, allocRes] = await Promise.all([
+    const [svcRes, allocRes, reqRes] = await Promise.all([
       apiFetch('/service/my'),
-      apiFetch('/allocation/')
+      apiFetch('/allocation/'),
+      apiFetch('/request/mine')
     ]);
     const svcData = await svcRes.json();
     const allocData = await allocRes.json();
+    const reqData = reqRes.ok ? await reqRes.json() : { dataset: [] };
     if (!svcRes.ok) throw new Error('failed to fetch services');
 
     techDashState.services = svcData.dataset || [];
     techDashState.allocations = allocData.dataset || [];
+    techDashState.requests = (reqData.dataset || []).filter(r => r.request_type === 'spare_part');
 
     renderCards();
     renderStatusBreakdown();
@@ -76,7 +79,10 @@ function renderCards() {
   document.getElementById('cardRejected').textContent = rejected.length;
   document.getElementById('cardRevenue').textContent = `₹${revenue.toFixed(2)}`;
   document.getElementById('cardPartsUsed').textContent = partsUsed;
+  document.getElementById('cardPartsHeld').textContent = mySparePartAllocations().filter(a => a.return_status !== 'returned').length;
   document.getElementById('cardPartsOverdue').textContent = partsOverdue;
+  document.getElementById('cardRequestsPending').textContent = techDashState.requests.filter(r => r.status === 'pending').length;
+  document.getElementById('cardRequestsRejected').textContent = techDashState.requests.filter(r => r.status === 'rejected').length;
 }
 
 function renderStatusBreakdown() {

@@ -8,7 +8,7 @@ const ROLE_ACCESS = {
   admin:       ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'users.html', 'reports.html', 'create_account.html'],
   employee:    ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'reports.html'],
   technician:  ['technician.html','technician_dashboard.html'],
-  distributor: ['distributor.html', 'distributor_requests.html'],
+  distributor: ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html'],
 };
 
 const ROLE_HOME = {
@@ -235,7 +235,7 @@ function ensureBellUI() {
 }
 
 function notifItemHtml(r, canAct) {
-  const typeLabels = { demo_unit: 'Demo Unit', order: 'Order', spare_part: 'Spare Part', media_review: 'Service Media' };
+  const typeLabels = { demo_unit: 'Demo Unit', order: 'Order', spare_part: 'Spare Part', media_review: 'Service Media', status_update: 'Service Status Update' };
   const label = typeLabels[r.request_type] || r.request_type;
   const who = r.raised_by ? `by ${r.raised_by}` : '';
   let sub = '';
@@ -245,16 +245,22 @@ function notifItemHtml(r, canAct) {
     sub = r.details?.note || '';
   } else if (r.request_type === 'media_review') {
     sub = `Service #${(r.details?.service_id || '').slice(0, 8)} uploaded media`;
+  } else if (r.request_type === 'status_update') {
+    const svcId = (r.details?.service_id || '').slice(0, 8);
+    const newStatus = (r.details?.service_status || '').replace('_', ' ');
+    sub = `Service #${svcId} — change status to "${newStatus}"${r.details?.reason ? ' — ' + r.details.reason : ''}`;
   }
   const statusPill = r.status === 'pending'
     ? '<span class="status pending">Pending</span>'
-    : `<span class="status ${r.status === 'approved' ? 'delivered' : 'cancelled'}">${r.status}</span>`;
+    : `<span class="status ${r.status === 'approved' ? 'delivered' : 'cancelled'}">${r.status}${r.resolved_by ? ' by ' + r.resolved_by : ''}</span>`;
 
-  const actions = (canAct && r.status === 'pending') ? `
+  const isStatusUpdate = r.request_type === 'status_update';
+  const actions = (canAct && r.status === 'pending' && !isStatusUpdate) ? `
     <div style="display:flex;gap:6px;margin-top:6px;">
       <button class="notif-approve" data-id="${r.request_id}" style="flex:1;padding:6px 8px;border:none;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer;font-size:12px;">Approve</button>
       <button class="notif-reject" data-id="${r.request_id}" style="flex:1;padding:6px 8px;border:none;border-radius:6px;background:#d62828;color:#fff;cursor:pointer;font-size:12px;">Reject</button>
-    </div>` : '';
+    </div>` : (canAct && r.status === 'pending' && isStatusUpdate ? `
+    <p style="font-size:11px;color:#94a3b8;margin-top:4px;">Complete this from the Service page's Update Status action.</p>` : '');
 
   return `
     <div class="notif-item" style="border-bottom:1px solid #eef1f6;padding:10px 4px;">

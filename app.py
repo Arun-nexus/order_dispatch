@@ -306,6 +306,22 @@ async def list_technicians(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="technician list cannot be fetched")
 
 
+@app.get("/account/distributors")
+async def list_distributors(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"role": "distributor"})
+        distributors = [
+            {k: v for k, v in acc.items() if k not in ("password", "confirm_password", "_id")}
+            for acc in dataset
+        ]
+        logging.info("distributor list was fetched successfully")
+        return {"message": "distributor list", "dataset": distributors}
+    except Exception as e:
+        logging.error("distributor list cannot be fetched")
+        raise HTTPException(status_code=500, detail="distributor list cannot be fetched")
+
+
 @app.post("/account/create_account/")
 async def create_account(request: CreateAccountRequest, user: dict = Depends(require_role("admin"))):
     try:
@@ -646,7 +662,7 @@ async def delete_service(service_id: str, user: dict = Depends(require_role("adm
 
 
 @app.post("/service/update/{service_id}")
-async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
+async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.update_service_status(
@@ -660,11 +676,45 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
             spare_parts=request.spare_parts,
             service_charges=request.service_charges
         )
+
+        # auto-resolve any pending status_update requests raised for this service,
+        # since admin/employee just applied the change directly from the Service page
+        req_db = request_manager()
+        pending = req_db.get_data(collection_name=REQUESTS_COLLECTION,
+                                   query={"request_type": "status_update", "status": "pending",
+                                          "details.service_id": service_id})
+        for req in pending:
+            req_db.set_status(collection_name=REQUESTS_COLLECTION, request_id=req["request_id"],
+                               status="approved", resolved_by=user["username"])
+
         logging.info("service was updated")
         return {"message": "service was updated successfully", "service_id": service_id}
     except Exception as e:
         logging.error("service updation was unsuccessful!")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/service/request_status_update/{service_id}")
+async def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+    try:
+        req = request_manager(
+            request_type="status_update",
+            raised_by=user["username"],
+            details={
+                "service_id": service_id,
+                "service_status": request.service_status,
+                "reason": request.reason,
+                "spare_parts": request.spare_parts,
+                "spare_parts_used": request.spare_parts_used,
+                "service_charges": request.service_charges
+            }
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+        logging.info(f"status update request raised for service {service_id}")
+        return {"message": "status update request sent for approval", "service_id": service_id}
+    except Exception as e:
+        logging.error("status update request failed!")
+        raise HTTPException(status_code=500, detail="status update request could not be sent")
 
 
 @app.get("/service/my")
@@ -691,7 +741,7 @@ async def update_service_charges(service_id: str, request: ServiceChargeRequest,
 
 
 @app.post("/service/upload_media/{service_id}")
-async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
+async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
     try:
         db = service_detail()
         db.attach_media(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, image=request.image, video=request.video)
@@ -706,7 +756,7 @@ async def upload_service_media(service_id: str, request: ServiceMediaRequest, us
 
 
 @app.post("/service/request_spare_part/{service_id}")
-async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("admin", "employee", "technician"))):
+async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
     try:
         db = service_detail()
         db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=request.note)
@@ -1250,6 +1300,25 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "video download confirmed and removed from the database"}
+
+        # status_update: technician-raised status change, applied only on admin/employee approval
+        if req["request_type"] == "status_update":
+            details = req["details"]
+            svc_db = service_detail(product_id="", serial_no="")
+            svc_db.update_service_status(
+                service_status=details.get("service_status"),
+                reason=details.get("reason", ""),
+                collection_name=SERVICE_COLLECTION,
+                query={"service_id": details.get("service_id")},
+                image=None,
+                video=None,
+                spare_parts_used=details.get("spare_parts_used", False),
+                spare_parts=details.get("spare_parts", ""),
+                service_charges=details.get("service_charges")
+            )
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "request approved and service status updated", "service_id": details.get("service_id")}
 
         # spare_part requests: approving just acknowledges it — admin/employee still
         # issues the actual part from the Allocated page (Spare Part to Service flow)
