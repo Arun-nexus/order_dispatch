@@ -7,14 +7,14 @@ const AUTH = {
 const ROLE_ACCESS = {
   admin:       ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'users.html', 'reports.html', 'create_account.html'],
   employee:    ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'reports.html'],
-  technician:  ['technician.html','technician_dashboard.html'],
+  technician:  ['technician.html','technician_dashboard.html',],
   distributor: ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html'],
 };
 
 const ROLE_HOME = {
   admin: 'main_dashboard.html',
   employee: 'main_dashboard.html',
-  technician: 'technician.html',
+  technician: 'technician_dashboard.html',
   distributor: 'distributor.html',
 };
 
@@ -70,7 +70,7 @@ function checkPageAccess() {
   const currentFile = location.pathname.split('/').pop() || 'main_dashboard.html';
   const allowed = ROLE_ACCESS[role] || [];
   if (!allowed.includes(currentFile)) {
-    alert('Aapke role ko is page ki permission nahi hai.');
+    alert('permission denied!');
     window.location.href = homePathFor(role);
   }
 }
@@ -101,7 +101,7 @@ async function apiFetch(url, options = {}) {
     throw new Error('unauthorized');
   }
   if (res.status === 403) {
-    alert('Aapke role ko is action ki permission nahi hai.');
+    alert('permission denied!');
     throw new Error('forbidden');
   }
   return res;
