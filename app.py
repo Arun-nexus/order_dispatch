@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 from logger import logging
 from configuration import load_params
 from dotenv import load_dotenv
@@ -61,6 +62,7 @@ class CreateAccountRequest(BaseModel):
     mobile_no: str
     role: str
     manager: str = ""
+    credit_limit: float = 0
 
 
 class UpdateAccountRequest(BaseModel):
@@ -104,6 +106,7 @@ class CustomerRequest(BaseModel):
     contractor_person: str = ""
     contractor_number: str = ""
     contractor_email: str = ""
+    credit_limit: float = 0
 
 
 class CustomerUpdateRequest(BaseModel):
@@ -149,14 +152,22 @@ class OrderStatusRequest(BaseModel):
     order_id: str
 
 
+class DispatchConfirmRequest(BaseModel):
+    docket_no: str
+    invoice_no: str
+    invoice_date: str
+    ship_to_different: bool = False
+    ship_to_address: Optional[dict]= None   # {company_name, address} — only used when ship_to_different is True
+
+
 class ServiceUpdateRequest(BaseModel):
     service_status: str
     reason: str = ""
-    image: str = None
-    video: str = None
+    image: Optional[str] = None
+    video: Optional[str] = None
     spare_parts_used: bool = False
     spare_parts: str = ""
-    service_charges: float = None
+    service_charges: Optional[float] = None
 
 
 class ServiceChargeRequest(BaseModel):
@@ -164,8 +175,8 @@ class ServiceChargeRequest(BaseModel):
 
 
 class ServiceMediaRequest(BaseModel):
-    image: str = None
-    video: str = None
+    image: Optional[str] = None
+    video: Optional[str] = None
 
 
 class SparePartRequest(BaseModel):
@@ -353,6 +364,9 @@ async def create_account(request: CreateAccountRequest, user: dict = Depends(req
             password=request.password
         )
         new_user.add(collection_name=ACCOUNTS_COLLECTION)
+
+        db.update_data(collection_name=ACCOUNTS_COLLECTION, query={"username": request.username},
+                        update_values={"credit_limit": request.credit_limit, "credit_used": 0})
 
         if request.role == "distributor" and request.manager:
             db.update_data(collection_name=ACCOUNTS_COLLECTION, query={"username": request.username},
@@ -607,6 +621,86 @@ async def order(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("order dataset cannot be fetched")
         raise HTTPException(status_code=500, detail="order dataset cannot be fetched")
+
+
+@app.get("/dispatch/")
+async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        odb = order_manager()
+        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": "processing"})
+        pending_orders = [o for o in all_orders if not o.get("dispatch")]
+
+        adb = allocation_manager()
+        all_spare = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_type": "spare_part"})
+        pending_spare = [a for a in all_spare if not a.get("dispatch")]
+
+        dispatched_orders = [o for o in all_orders if o.get("dispatch")]
+        dispatched_spare = [a for a in all_spare if a.get("dispatch")]
+
+        logging.info("dispatch queue was fetched successfully")
+        return {
+            "message": "dispatch queue",
+            "pending_orders": pending_orders,
+            "pending_spare_parts": pending_spare,
+            "dispatched_orders": dispatched_orders,
+            "dispatched_spare_parts": dispatched_spare
+        }
+    except Exception as e:
+        logging.error("dispatch queue could not be fetched")
+        raise HTTPException(status_code=500, detail="dispatch queue could not be fetched")
+
+
+@app.post("/dispatch/confirm/order/{order_id}")
+async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = order_manager()
+        matches = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="order not found")
+        order = matches[0]
+        customer = order.get("customer", {})
+        dispatch_info = {
+            "docket_no": request.docket_no,
+            "invoice_no": request.invoice_no,
+            "invoice_date": request.invoice_date,
+            "bill_to_address": {"company_name": customer.get("company_name", ""), "address": customer.get("company_address", "")},
+            "ship_to_different": request.ship_to_different,
+            "ship_to_address": request.ship_to_address if request.ship_to_different else None,
+            "dispatched_by": user["username"]
+        }
+        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values={"dispatch": dispatch_info})
+        logging.info(f"order {order_id} dispatch confirmed")
+        return {"message": "dispatch confirmed", "order_id": order_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("order dispatch confirmation failed")
+        raise HTTPException(status_code=500, detail="dispatch could not be confirmed")
+
+
+@app.post("/dispatch/confirm/spare_part/{allocation_id}")
+async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = allocation_manager()
+        matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="allocation not found")
+        dispatch_info = {
+            "docket_no": request.docket_no,
+            "invoice_no": request.invoice_no,
+            "invoice_date": request.invoice_date,
+            "ship_to_different": request.ship_to_different,
+            "ship_to_address": request.ship_to_address if request.ship_to_different else None,
+            "dispatched_by": user["username"]
+        }
+        db.update(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id}, update_values={"dispatch": dispatch_info})
+        logging.info(f"spare part allocation {allocation_id} dispatch confirmed")
+        return {"message": "dispatch confirmed", "allocation_id": allocation_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("spare part dispatch confirmation failed")
+        raise HTTPException(status_code=500, detail="dispatch could not be confirmed")
 
 
 @app.get("/service/")
@@ -946,6 +1040,11 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
             contractor_email=request.contractor_email,
         )
         new_customer.add(collection_name=CUSTOMER_COLLECTION)
+
+        customer_db = customer_manager()
+        customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
+                                 update_values={"credit_limit": request.credit_limit, "credit_used": 0})
+
         logging.info("customer created successfully")
         return {
             "message": "customer created successfully",
@@ -958,6 +1057,8 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
                 "contractor_person": new_customer.contractor_person,
                 "contractor_number": new_customer.contractor_number,
                 "contractor_email": new_customer.contractor_email,
+                "credit_limit": request.credit_limit,
+                "credit_used": 0,
             }
         }
     except Exception as e:
@@ -1320,8 +1421,27 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and service status updated", "service_id": details.get("service_id")}
 
-        # spare_part requests: approving just acknowledges it — admin/employee still
-        # issues the actual part from the Allocated page (Spare Part to Service flow)
+        # spare_part requests: approving now also issues the part — creates a
+        # spare-part allocation automatically so it shows up on the Dispatch page
+        if req["request_type"] == "spare_part":
+            details = req["details"]
+            alloc = allocation_manager(
+                sales_person={},
+                items=[],
+                spare_part={
+                    "service_id": details.get("service_id"),
+                    "part_name": details.get("note", "Spare part"),
+                    "quantity": 1
+                },
+                company_name="",
+                address=""
+            )
+            alloc.add(collection_name=ALLOCATION_COLLECTION)
+
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "request approved and spare part issued", "allocation_id": alloc.allocation_id}
+
         db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                        status="approved", resolved_by=user["username"])
         return {"message": "request approved"}
@@ -1329,8 +1449,8 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("approving request failed!")
-        raise HTTPException(status_code=500, detail="request could not be approved")
+        logging.error(f"approving request failed! {e}")
+        raise HTTPException(status_code=500, detail=f"request could not be approved: {e}")
 
 
 @app.post("/request/reject/{request_id}")

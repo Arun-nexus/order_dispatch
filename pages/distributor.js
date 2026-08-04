@@ -1,4 +1,23 @@
 const spState = { allocations: [], products: [], myRequests: [] };
+let spPage = 1;
+const SP_PAGE_SIZE = 7;
+
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   loadMyAllocations();
@@ -38,6 +57,7 @@ async function loadMyAllocations() {
     });
 
     spState.allocations = merged;
+    spPage = 1;
     renderWelcome();
     renderCards();
     renderTable(spState.allocations);
@@ -96,10 +116,18 @@ function renderCards() {
 }
 
 function renderTable(allocations) {
+  const sorted = [...allocations].sort((a, b) =>
+    new Date(b.allotment_date || b.created_at || 0) - new Date(a.allotment_date || a.created_at || 0));
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / SP_PAGE_SIZE));
+  spPage = Math.min(Math.max(1, spPage), totalPages);
+  const start = (spPage - 1) * SP_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + SP_PAGE_SIZE);
+
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
 
-  allocations.forEach(a => {
+  pageRows.forEach(a => {
     const meta = returnMeta(a);
     const productLabel = (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
     const tr = document.createElement('tr');
@@ -122,6 +150,11 @@ function renderTable(allocations) {
 
   tbody.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', e => openViewModal(rowAllocation(e))));
   tbody.querySelectorAll('.return-btn').forEach(b => b.addEventListener('click', e => markReturned(rowAllocation(e))));
+
+  renderTablePagination(document.querySelector('.pagination'), spPage, totalPages, p => {
+    spPage = p;
+    renderTable(allocations);
+  });
 }
 
 function rowAllocation(e) {
@@ -166,6 +199,7 @@ function wireFilter() {
   document.querySelector('.filter-btn').addEventListener('click', () => {
     const status = document.getElementById('statusFilter').value;
     const filtered = allocations_filtered(status);
+    spPage = 1;
     renderTable(filtered);
   });
 }

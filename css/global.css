@@ -45,7 +45,17 @@ body{
     background:var(--bg-main);
     color:var(--text-secondary);
     overflow-x:hidden;
-    min-width:1200px;
+    width:100%;
+}
+
+/* Only enforce a desktop-style minimum width on screens that actually have
+   room for it — never on tablets/phones, where it was forcing the whole
+   page (sidebar, main, modals) to lay out at 1200px and then get visually
+   squeezed/scaled by the mobile browser. */
+@media (min-width: 1201px) {
+  body {
+    min-width: 1200px;
+  }
 }
 
 a {
@@ -1228,9 +1238,15 @@ form .save-btn {
     overflow-x: auto;
   }
   
+  .modal {
+    padding: 12px;
+  }
+
   .modal-content {
-    width: 95%;
+    width: 95% !important;
+    max-width: 95vw !important;
     padding: 20px;
+    box-sizing: border-box;
   }
   
   .top-actions {
@@ -1337,6 +1353,16 @@ form .save-btn {
   header h1,
   .topbar h1 {
     font-size: 22px;
+  }
+
+  .modal {
+    padding: 8px;
+  }
+
+  .modal-content {
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding: 16px;
   }
 }
 
@@ -1812,4 +1838,3 @@ form .save-btn {
     font-weight:600;
 
 }
-

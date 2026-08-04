@@ -1,45 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Inventory | Acer Biomedical</title>
-  
+
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
+
 <body>
   <div class="container">
-    
+
     <!-- ===== SIDEBAR ===== -->
-<aside class="sidebar">
-  <div class="logo">
-    <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
-  </div>
-  
-  <ul>
-    <li ><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
-    <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
-    <li class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-    <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
-    <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
-    <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
-    <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
-<li>
-    <a href="#" onclick="openLogoutModal(event)">
-        <i class="fa-solid fa-arrow-right-from-bracket"></i>
-        <span>Logout</span>
-    </a>
-</li>  </ul>
-  
-  <div class="sidebar-profile">
-    <img src="../images/admin.jpg" alt="Admin">
-    <div>
-      <h4 id="sidebarUserName">Admin</h4>
-      <p id="sidebarUserRole">Super Admin</p>
-    </div>
-  </div>
-</aside>
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+
+      <ul>
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
+        </li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
+
+        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Admin">
+        <div>
+          <h4 id="sidebarUserName">Admin</h4>
+          <p id="sidebarUserRole">Super Admin</p>
+        </div>
+      </div>
+    </aside>
 
     <!-- ===== MAIN ===== -->
     <main>
@@ -170,60 +176,76 @@
         <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
       </div>
     </main>
-    
+
   </div>
   <!-- Logout Modal -->
-<div id="logoutModal" class="logout-modal">
+  <div id="logoutModal" class="logout-modal">
     <div class="logout-box">
 
-        <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
 
-        <h2>Logout?</h2>
+      <h2>Logout?</h2>
 
-        <p>
-            Are you sure you want to logout from your account?
-        </p>
+      <p>
+        Are you sure you want to logout from your account?
+      </p>
 
-        <div class="logout-actions">
+      <div class="logout-actions">
 
-            <button class="cancel-btn"
-                onclick="closeLogoutModal()">
-                Cancel
-            </button>
+        <button class="cancel-btn" onclick="closeLogoutModal()">
+          Cancel
+        </button>
 
-            <button class="confirm-btn"
-                onclick="logoutNow()">
-                Logout
-            </button>
+        <button class="confirm-btn" onclick="logoutNow()">
+          Logout
+        </button>
 
-        </div>
+      </div>
 
     </div>
-</div>
+  </div>
 
   <!-- common_auth.js MUST load first: enforces login + role-based page access -->
   <script src="../common_auth.js"></script>
 
   <!-- View Product Modal -->
-  <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="viewModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Product Details</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <div class="detail"><small>Product Name</small><p></p></div>
-      <div class="detail"><small>Product ID</small><p></p></div>
-      <div class="detail"><small>Lot No.</small><p></p></div>
-      <div class="detail"><small>Supplier</small><p></p></div>
-      <div class="detail"><small>Purchase Date</small><p></p></div>
-      <div class="detail"><small>Quantity</small><p></p></div>
-      <div class="detail"><small>Price</small><p></p></div>
-      <div class="detail"><small>Tax</small><p></p></div>
+      <div class="detail"><small>Product Name</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Product ID</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Lot No.</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Supplier</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Purchase Date</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Quantity</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Price</small>
+        <p></p>
+      </div>
+      <div class="detail"><small>Tax</small>
+        <p></p>
+      </div>
     </div>
   </div>
 
   <!-- Add Product Modal -->
-  <div id="addModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="addModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Add Product</h3>
@@ -239,15 +261,18 @@
         <input placeholder="Price" required>
         <input type="number" placeholder="Tax Rate (%)" required>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Add</button>
+          <button type="button" class="cancel-btn"
+            style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit"
+            style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Add</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- Edit Product Modal -->
-  <div id="editModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="editModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Edit Product</h3>
@@ -271,40 +296,46 @@
         </div>
 
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+          <button type="button" class="cancel-btn"
+            style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit"
+            style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- Delete Product Modal -->
-  <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="deleteModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
       <h3 style="margin-bottom:10px;">Delete Product?</h3>
       <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
       <div style="display:flex;justify-content:center;gap:10px;">
-        <button class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button class="delete-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
+        <button class="cancel-btn"
+          style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button class="delete-btn"
+          style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
       </div>
     </div>
   </div>
   <script>
-    function openLogoutModal(e){
-        e.preventDefault();
-        document.getElementById("logoutModal").classList.add("active");
+    function openLogoutModal(e) {
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
     }
-    function closeLogoutModal(){
-        document.getElementById("logoutModal").classList.remove("active");
+    function closeLogoutModal() {
+      document.getElementById("logoutModal").classList.remove("active");
     }
     document.addEventListener('DOMContentLoaded', () => {
       const role = getRole() || '';
       const uname = getUsername() || 'User';
       const label = role.charAt(0).toUpperCase() + role.slice(1);
-      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
-      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
   <script src="inventory.js"></script>
 </body>
+
 </html>

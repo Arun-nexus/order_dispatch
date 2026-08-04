@@ -1,5 +1,24 @@
 const orderState = { orders: [], activeOrderId: null };
 const invLookup = { products: [] };
+let ordersPage = 1;
+const ORDERS_PAGE_SIZE = 7;
+
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   injectCreateModal();
@@ -33,6 +52,7 @@ async function loadOrders() {
     if (!res.ok) throw new Error('failed to fetch orders');
     const data = await res.json();
     orderState.orders = data.dataset || [];
+    ordersPage = 1;
     renderOrdersTable(orderState.orders);
     updateCards(orderState.orders);
   } catch (err) {
@@ -68,13 +88,21 @@ function orderCreatorLabel(o) {
 }
 
 function renderOrdersTable(orders) {
+  const sorted = [...orders].sort((a, b) =>
+    new Date(b.order_date || b.created_at || 0) - new Date(a.order_date || a.created_at || 0));
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / ORDERS_PAGE_SIZE));
+  ordersPage = Math.min(Math.max(1, ordersPage), totalPages);
+  const start = (ordersPage - 1) * ORDERS_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + ORDERS_PAGE_SIZE);
+
   const tbody = document.querySelector('table tbody');
   tbody.innerHTML = '';
 
   const role = getRole();
   const canManage = role === 'admin' || role === 'employee';
 
-  orders.forEach(o => {
+  pageRows.forEach(o => {
     const tr = document.createElement('tr');
     tr.dataset.orderId = o.order_id;
     const items = o.items || [];
@@ -108,6 +136,11 @@ function renderOrdersTable(orders) {
 
   tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewOrderModal(rowOrder(e))));
   tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openOrderActionMenu(rowOrder(e), e)));
+
+  renderTablePagination(document.querySelector('.pagination'), ordersPage, totalPages, p => {
+    ordersPage = p;
+    renderOrdersTable(orders);
+  });
 }
 
 function rowOrder(e) {
@@ -120,12 +153,15 @@ function openOrderActionMenu(o, evt) {
   if (!o) return;
   closeOrderActionMenu();
 
+  const btn = evt.target.closest('button');
+  const rect = btn.getBoundingClientRect();
+
   const menu = document.createElement('div');
   menu.id = 'orderActionMenu';
-  menu.style.cssText = 'position:absolute;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:160px;';
-  const rect = evt.target.closest('button').getBoundingClientRect();
-  menu.style.top = `${rect.bottom + 6}px`;
-  menu.style.left = `${Math.max(10, rect.left - 120)}px`;
+  // position:fixed (not absolute) — getBoundingClientRect() is viewport-relative,
+  // so the menu must use the same coordinate system, otherwise it drifts away
+  // from the button as soon as the page is scrolled.
+  menu.style.cssText = 'position:fixed;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:160px;';
 
   const items = [
     { label: 'Edit', action: () => openEditOrderModal(o) },
@@ -133,23 +169,41 @@ function openOrderActionMenu(o, evt) {
   ];
 
   items.forEach(item => {
-    const btn = document.createElement('button');
-    btn.textContent = item.label;
-    btn.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border:none;background:none;border-radius:6px;cursor:pointer;font-size:14px;';
-    btn.onmouseenter = () => btn.style.background = '#f1f5f9';
-    btn.onmouseleave = () => btn.style.background = 'none';
-    btn.addEventListener('click', () => { closeOrderActionMenu(); item.action(); });
-    menu.appendChild(btn);
+    const b = document.createElement('button');
+    b.textContent = item.label;
+    b.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border:none;background:none;border-radius:6px;cursor:pointer;font-size:14px;';
+    b.onmouseenter = () => b.style.background = '#f1f5f9';
+    b.onmouseleave = () => b.style.background = 'none';
+    b.addEventListener('click', () => { closeOrderActionMenu(); item.action(); });
+    menu.appendChild(b);
   });
 
   document.body.appendChild(menu);
-  setTimeout(() => document.addEventListener('click', closeOrderActionMenuOnClickAway), 0);
+
+  // Estimate menu size (it's off-DOM-flow so offsetHeight is only accurate
+  // once appended) and flip/clamp so it always stays anchored to the button
+  // and never runs off the edge of the screen.
+  const menuRect = menu.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openUpwards = spaceBelow < menuRect.height + 10 && rect.top > menuRect.height + 10;
+
+  menu.style.top = openUpwards ? `${rect.top - menuRect.height - 6}px` : `${rect.bottom + 6}px`;
+  const left = Math.min(Math.max(10, rect.left - 120), window.innerWidth - menuRect.width - 10);
+  menu.style.left = `${left}px`;
+
+  setTimeout(() => {
+    document.addEventListener('click', closeOrderActionMenuOnClickAway);
+    window.addEventListener('scroll', closeOrderActionMenu, { capture: true, once: true });
+    window.addEventListener('resize', closeOrderActionMenu, { once: true });
+  }, 0);
 }
 
 function closeOrderActionMenu() {
   const existing = document.getElementById('orderActionMenu');
   if (existing) existing.remove();
   document.removeEventListener('click', closeOrderActionMenuOnClickAway);
+  window.removeEventListener('scroll', closeOrderActionMenu, { capture: true });
+  window.removeEventListener('resize', closeOrderActionMenu);
 }
 
 function closeOrderActionMenuOnClickAway(e) {
@@ -203,6 +257,7 @@ function wireHeaderButtons() {
         (o.items || []).some(it => (it.product_name || '').toLowerCase().includes(term)) ||
         (o.customer?.company_name || o.company_name || '').toLowerCase().includes(term)
       );
+      ordersPage = 1;
       renderOrdersTable(filtered);
     });
   }
@@ -231,6 +286,7 @@ function wireFilter() {
       return statusOk && paymentOk && dateOk;
     });
 
+    ordersPage = 1;
     renderOrdersTable(filtered);
   });
 }
@@ -574,6 +630,8 @@ function renderNewCustomerStep() {
       <input name="contractor_person" placeholder="Contact Person" required>
       <input name="contractor_number" placeholder="Contact Number" required>
       <input name="contractor_email" type="email" placeholder="Contact Email" required>
+      <div style = padding-left:5px;><small><p>Credit Limit</p></small></div>
+      <input name="credit_limit" type="number" min="0" step="0.01" placeholder="Credit Limit (₹)" value="0">
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
         <button type="button" id="backBtn2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
@@ -590,6 +648,7 @@ function renderNewCustomerStep() {
       contractor_person: fd.get('contractor_person'),
       contractor_number: fd.get('contractor_number'),
       contractor_email: fd.get('contractor_email'),
+      credit_limit: Number(fd.get('credit_limit')) || 0,
     };
     try {
       const res = await apiFetch('/customer/create', {

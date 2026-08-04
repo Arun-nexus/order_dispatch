@@ -162,7 +162,7 @@ function openActionMenu(s, evt) {
 
   const menu = document.createElement('div');
   menu.id = 'svcActionMenu';
-  menu.style.cssText = 'position:absolute;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:200px;';
+  menu.style.cssText = 'position:fixed;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:200px;';
   const rect = evt.target.closest('button').getBoundingClientRect();
   menu.style.top = `${rect.bottom + 6}px`;
   menu.style.left = `${Math.max(10, rect.left - 150)}px`;

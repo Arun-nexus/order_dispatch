@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Demo Units | Acer Biomedical</title>
+  <title>Dispatch | Acer Biomedical</title>
 
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -19,13 +19,14 @@
       </div>
 
       <ul>
-        <li class="active"><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo
-              Units</span></a></li>
-        <li><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My Orders</span></a></li>
-        <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
-        <li><a href="technician_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
-        <li><a href="distributor_team.html"><i class="fa-solid fa-people-group"></i><span>Team</span></a></li>
-
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li class="active"><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
+        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
         <li>
           <a href="#" onclick="openLogoutModal(event)">
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
@@ -35,10 +36,10 @@
       </ul>
 
       <div class="sidebar-profile">
-        <img src="../images/admin.jpg" alt="Sales Person">
+        <img src="../images/admin.jpg" alt="Admin">
         <div>
-          <h4 id="sidebarUserName">Sales Person</h4>
-          <p id="sidebarUserRole">Sales Person</p>
+          <h4 id="sidebarUserName">Admin</h4>
+          <p id="sidebarUserRole">Super Admin</p>
         </div>
       </div>
     </aside>
@@ -46,109 +47,103 @@
     <main>
       <header>
         <div>
-          <h1>My Demo Units</h1>
-          <p>Alloted demo units and Returns.</p>
+          <h1>Dispatch</h1>
+          <p>Orders in processing and issued spare parts waiting to be dispatched</p>
         </div>
         <div class="right-header">
           <div class="search">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search customer or product...">
+            <input type="text" placeholder="Search docket, invoice, product...">
           </div>
-          <button><i class="fa-regular fa-bell"></i></button>
+          <div style="position:relative;">
+            <button id="notifBell"><i class="fa-regular fa-bell"></i></button>
+            <span id="notifBadge"
+              style="display:none;position:absolute;top:2px;right:2px;background:#d62828;color:#fff;font-size:10px;border-radius:999px;padding:1px 5px;">0</span>
+          </div>
           <div class="profile">
-            <img src="../images/admin.jpg" alt="Sales Person">
+            <img src="../images/admin.jpg" alt="Admin">
             <div>
-              <h4 id="headerUserName">Sales Person</h4>
-              <p id="headerUserRole">Sales Person</p>
+              <h4 id="headerUserName">Admin</h4>
+              <p id="headerUserRole">Super Admin</p>
             </div>
           </div>
         </div>
       </header>
 
-      <!-- WELCOME -->
-      <section class="welcome-section">
-        <div class="welcome-left">
-          <h2 id="welcomeText">Welcome Back</h2>
-          <p>Here's an overview of your demo unit allotments.</p>
-        </div>
-        <div class="date-box">
-          <i class="fa-regular fa-calendar"></i>
-          <span id="todayDate"></span>
-        </div>
-      </section>
-
-      <!-- DEMO UNIT CARDS -->
       <section class="cards">
         <div class="card">
-          <div><span>Total Allotted</span>
-            <h2 id="cardTotal">0</h2>
-            <p>All demo units you've given out</p>
+          <div><span>Total Pending</span>
+            <h2 id="cardTotalPending">0</h2>
+            <p>Awaiting dispatch</p>
           </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
         <div class="card">
-          <div><span>Not Returned</span>
-            <h2 id="cardNotReturned">0</h2>
-            <p>Currently with customers</p>
+          <div><span>Orders Pending</span>
+            <h2 id="cardOrdersPending">0</h2>
+            <p>Status: Processing</p>
           </div>
-          <i class="fa-solid fa-box-open"></i>
+          <i class="fa-solid fa-cart-shopping"></i>
         </div>
         <div class="card">
-          <div><span>Return Overdue</span>
-            <h2 id="cardOverdue">0</h2>
-            <p>Past 7-day return window</p>
+          <div><span>Spare Parts Pending</span>
+            <h2 id="cardSparePending">0</h2>
+            <p>Issued to services</p>
           </div>
-          <i class="fa-solid fa-triangle-exclamation"></i>
+          <i class="fa-solid fa-gears"></i>
         </div>
         <div class="card">
-          <div><span>Pending Requests</span>
-            <h2 id="cardPendingRequests">0</h2>
-            <p>Awaiting admin/employee approval</p>
+          <div><span>Dispatched Today</span>
+            <h2 id="cardDispatchedToday">0</h2>
+            <p>Confirmed today</p>
           </div>
-          <i class="fa-solid fa-hourglass-half"></i>
+          <i class="fa-solid fa-truck"></i>
         </div>
         <div class="card">
-          <div><span>Rejected Requests</span>
-            <h2 id="cardRejectedRequests">0</h2>
-            <p>Declined by admin/employee</p>
+          <div><span>Total Dispatched</span>
+            <h2 id="cardTotalDispatched">0</h2>
+            <p>All time</p>
           </div>
-          <i class="fa-solid fa-circle-xmark"></i>
+          <i class="fa-solid fa-circle-check"></i>
         </div>
       </section>
-
-      <div class="top-actions">
-        <button class="add-product"><i class="fa-solid fa-plus"></i> Request Demo Unit</button>
-      </div>
 
       <section class="filter-section">
         <div class="filter-box">
           <i class="fa-solid fa-filter"></i>
-          <select id="statusFilter">
-            <option>All Status</option>
-            <option value="pending">With Customer</option>
-            <option value="overdue">Overdue</option>
-            <option value="returned">Returned</option>
+          <select id="typeFilter">
+            <option value="">All Types</option>
+            <option value="order">Orders</option>
+            <option value="spare_part">Spare Parts</option>
           </select>
         </div>
-        <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
+        <div class="filter-box">
+          <i class="fa-solid fa-circle-half-stroke"></i>
+          <select id="statusFilter">
+            <option value="">All Status</option>
+            <option value="pending">Pending Dispatch</option>
+            <option value="dispatched">Dispatched</option>
+          </select>
+        </div>
+        <button class="filter-btn"><i class="fa-solid fa-magnifying-glass"></i> Apply Filter</button>
       </section>
 
       <div class="table-container">
         <table>
           <thead>
             <tr>
-              <th>Creator</th>
-              <th>Category</th>
-              <th>Customer</th>
-              <th>Product(s)</th>
-              <th>Allotment Date</th>
-              <th>Return Due</th>
+              <th>Type</th>
+              <th>Reference</th>
+              <th>Product</th>
+              <th>Bill To / Service</th>
+              <th>Docket No.</th>
+              <th>Invoice No.</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            <!-- rows rendered dynamically by distributor.js -->
+            <!-- rows rendered dynamically by dispatch.js -->
           </tbody>
         </table>
       </div>
@@ -157,6 +152,7 @@
         <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
         <button class="page active-page">1</button>
         <button class="page">2</button>
+        <button class="page">3</button>
         <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
       </div>
     </main>
@@ -179,17 +175,10 @@
   <!-- common_auth.js MUST load first: enforces login + role-based page access -->
   <script src="../common_auth.js"></script>
 
-  <!-- View Allocation Modal -->
-  <div id="viewAllocationModal" class="modal"
+  <!-- Confirm Dispatch Modal (built dynamically by dispatch.js) -->
+  <div id="dispatchModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;"></div>
-  </div>
-
-  <!-- Allot Demo Unit Modal (wizard built dynamically) -->
-  <div id="allotModal" class="modal"
-    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content"
-      style="background:#fff;border-radius:14px;padding:24px;width:460px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
   <script>
@@ -208,7 +197,7 @@
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
-  <script src="distributor.js"></script>
+  <script src="dispatch.js"></script>
 </body>
 
 </html>

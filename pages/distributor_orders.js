@@ -1,4 +1,23 @@
 const ordState = { orders: [], products: [] };
+let distOrdPage = 1;
+const DIST_ORD_PAGE_SIZE = 7;
+
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   loadOrdersPage();
@@ -35,6 +54,7 @@ async function loadOrdersPage() {
     ordState.orders = (data.dataset || []).filter(o =>
       o.creator?.raised_by === uname || o.creator?.created_by === uname
     );
+    distOrdPage = 1;
     renderOrderCards();
     renderOrdersTable(ordState.orders);
   } catch (err) {
@@ -74,7 +94,12 @@ function renderOrdersTable(orders) {
 
   const sorted = [...orders].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-  sorted.forEach(o => {
+  const totalPages = Math.max(1, Math.ceil(sorted.length / DIST_ORD_PAGE_SIZE));
+  distOrdPage = Math.min(Math.max(1, distOrdPage), totalPages);
+  const start = (distOrdPage - 1) * DIST_ORD_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + DIST_ORD_PAGE_SIZE);
+
+  pageRows.forEach(o => {
     const meta = orderStatusMeta(o);
     const productLabel = (o.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
     const tr = document.createElement('tr');
@@ -100,6 +125,11 @@ function renderOrdersTable(orders) {
     const o = ordState.orders.find(x => x.order_id === tr.dataset.id);
     openViewOrderModal(o);
   }));
+
+  renderTablePagination(document.querySelector('.pagination'), distOrdPage, totalPages, p => {
+    distOrdPage = p;
+    renderOrdersTable(orders);
+  });
 }
 
 function openViewOrderModal(o) {
@@ -132,6 +162,7 @@ function wireOrderFilter() {
     let filtered = ordState.orders;
     if (status === 'delivered') filtered = ordState.orders.filter(o => o.status === 'delivered');
     if (status === 'pending') filtered = ordState.orders.filter(o => o.status !== 'delivered');
+    distOrdPage = 1;
     renderOrdersTable(filtered);
   });
 }

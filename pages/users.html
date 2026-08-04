@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
+
 <body>
   <div class="container">
 
@@ -22,6 +24,8 @@
         <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
+
         <li class="active"><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
         <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
         <li>
@@ -66,23 +70,38 @@
 
       <section class="cards">
         <div class="card">
-          <div><span>Total Users</span><h2 id="cardTotal">0</h2><p>All accounts</p></div>
+          <div><span>Total Users</span>
+            <h2 id="cardTotal">0</h2>
+            <p>All accounts</p>
+          </div>
           <i class="fa-solid fa-users"></i>
         </div>
         <div class="card">
-          <div><span>Admins</span><h2 id="cardAdmins">0</h2><p>Full access</p></div>
+          <div><span>Admins</span>
+            <h2 id="cardAdmins">0</h2>
+            <p>Full access</p>
+          </div>
           <i class="fa-solid fa-user-shield"></i>
         </div>
         <div class="card">
-          <div><span>Employees</span><h2 id="cardEmployees">0</h2><p>Orders, inventory, service</p></div>
+          <div><span>Employees</span>
+            <h2 id="cardEmployees">0</h2>
+            <p>Orders, inventory, service</p>
+          </div>
           <i class="fa-solid fa-user-tie"></i>
         </div>
         <div class="card">
-          <div><span>Technicians</span><h2 id="cardTechnicians">0</h2><p>Field service</p></div>
+          <div><span>Technicians</span>
+            <h2 id="cardTechnicians">0</h2>
+            <p>Field service</p>
+          </div>
           <i class="fa-solid fa-user-gear"></i>
         </div>
         <div class="card">
-          <div><span>Distributors</span><h2 id="cardDistributors">0</h2><p>Sales &amp; demo units</p></div>
+          <div><span>Distributors</span>
+            <h2 id="cardDistributors">0</h2>
+            <p>Sales &amp; demo units</p>
+          </div>
           <i class="fa-solid fa-handshake"></i>
         </div>
       </section>
@@ -151,38 +170,44 @@
   <script src="../common_auth.js"></script>
 
   <!-- Add/Edit User Modal (built dynamically) -->
-  <div id="userModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
+  <div id="userModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
   <!-- Delete Confirm Modal -->
-  <div id="deleteModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="deleteModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
       <h3 style="margin-bottom:10px;">Delete User?</h3>
       <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
       <div style="display:flex;justify-content:center;gap:10px;">
-        <button class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button class="delete-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
+        <button class="cancel-btn"
+          style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button class="delete-btn"
+          style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
       </div>
     </div>
   </div>
 
   <script>
-    function openLogoutModal(e){
+    function openLogoutModal(e) {
       e.preventDefault();
       document.getElementById("logoutModal").classList.add("active");
     }
-    function closeLogoutModal(){
+    function closeLogoutModal() {
       document.getElementById("logoutModal").classList.remove("active");
     }
     document.addEventListener('DOMContentLoaded', () => {
       const role = getRole() || '';
       const uname = getUsername() || 'User';
       const label = role.charAt(0).toUpperCase() + role.slice(1);
-      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
-      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
   <script src="users.js"></script>
 </body>
+
 </html>

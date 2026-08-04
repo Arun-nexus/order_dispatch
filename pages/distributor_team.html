@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
+
 <body>
   <div class="container">
 
@@ -20,8 +22,9 @@
         <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo Units</span></a></li>
         <li><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My Orders</span></a></li>
         <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
-        
-        <li class="active"><a href="distributor_team.html"><i class="fa-solid fa-people-group"></i><span>Team</span></a></li>
+
+        <li class="active"><a href="distributor_team.html"><i class="fa-solid fa-people-group"></i><span>Team</span></a>
+        </li>
 
         <li>
           <a href="#" onclick="openLogoutModal(event)">
@@ -61,23 +64,38 @@
       <!-- TEAM CARDS -->
       <section class="cards">
         <div class="card">
-          <div><span>Team Members</span><h2 id="cardTeamCount">0</h2><p>Distributors reporting to you</p></div>
+          <div><span>Team Members</span>
+            <h2 id="cardTeamCount">0</h2>
+            <p>Distributors reporting to you</p>
+          </div>
           <i class="fa-solid fa-people-group"></i>
         </div>
         <div class="card">
-          <div><span>Team Demo Units</span><h2 id="cardTeamAllotted">0</h2><p>Allotted by your team</p></div>
+          <div><span>Team Demo Units</span>
+            <h2 id="cardTeamAllotted">0</h2>
+            <p>Allotted by your team</p>
+          </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
         <div class="card">
-          <div><span>With Customers</span><h2 id="cardTeamHeld">0</h2><p>Not yet returned</p></div>
+          <div><span>With Customers</span>
+            <h2 id="cardTeamHeld">0</h2>
+            <p>Not yet returned</p>
+          </div>
           <i class="fa-solid fa-box-open"></i>
         </div>
         <div class="card">
-          <div><span>Highest Order (This Month)</span><h2 id="cardHighestOrderAmount">₹0</h2><p id="cardHighestOrderName">No orders yet</p></div>
+          <div><span>Highest Order (This Month)</span>
+            <h2 id="cardHighestOrderAmount">₹0</h2>
+            <p id="cardHighestOrderName">No orders yet</p>
+          </div>
           <i class="fa-solid fa-arrow-trend-up"></i>
         </div>
         <div class="card">
-          <div><span>Lowest Order (This Month)</span><h2 id="cardLowestOrderAmount">₹0</h2><p id="cardLowestOrderName">No orders yet</p></div>
+          <div><span>Lowest Order (This Month)</span>
+            <h2 id="cardLowestOrderAmount">₹0</h2>
+            <p id="cardLowestOrderName">No orders yet</p>
+          </div>
           <i class="fa-solid fa-arrow-trend-down"></i>
         </div>
       </section>
@@ -121,21 +139,22 @@
   <script src="../common_auth.js"></script>
 
   <script>
-    function openLogoutModal(e){
+    function openLogoutModal(e) {
       e.preventDefault();
       document.getElementById("logoutModal").classList.add("active");
     }
-    function closeLogoutModal(){
+    function closeLogoutModal() {
       document.getElementById("logoutModal").classList.remove("active");
     }
     document.addEventListener('DOMContentLoaded', () => {
       const role = getRole() || '';
       const uname = getUsername() || 'User';
       const label = role.charAt(0).toUpperCase() + role.slice(1);
-      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
-      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
   <script src="distributor_team.js"></script>
 </body>
+
 </html>

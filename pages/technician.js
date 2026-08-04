@@ -1,4 +1,23 @@
 const techState = { services: [], allocations: [] };
+let techPage = 1;
+const TECH_PAGE_SIZE = 7;
+
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   loadMyServices();
@@ -62,6 +81,7 @@ async function loadMyServices() {
     techState.services = svcData.dataset || [];
     techState.allocations = allocData.dataset || [];
 
+    techPage = 1;
     renderCards();
     renderTable(techState.services);
   } catch (err) {
@@ -113,10 +133,22 @@ function statusBadgeClass(status) {
 }
 
 function renderTable(services) {
+  // Newest services first; fall back to reversing the raw (ascending) API
+  // order if no date field is present.
+  const hasDates = services.some(s => s.purchase_date || s.created_at);
+  const sorted = hasDates
+    ? [...services].sort((a, b) => new Date(b.purchase_date || b.created_at || 0) - new Date(a.purchase_date || a.created_at || 0))
+    : [...services].reverse();
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / TECH_PAGE_SIZE));
+  techPage = Math.min(Math.max(1, techPage), totalPages);
+  const start = (techPage - 1) * TECH_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + TECH_PAGE_SIZE);
+
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
 
-  services.forEach(s => {
+  pageRows.forEach(s => {
     const tr = document.createElement('tr');
     tr.dataset.id = s.service_id;
     tr.innerHTML = `
@@ -143,6 +175,11 @@ function renderTable(services) {
   tbody.querySelectorAll('.vid-btn').forEach(b => b.addEventListener('click', e => openUploadModal(rowService(e), 'video')));
   tbody.querySelectorAll('.spare-btn').forEach(b => b.addEventListener('click', e => openSparePartModal(rowService(e))));
   tbody.querySelectorAll('.status-btn').forEach(b => b.addEventListener('click', e => openStatusModal(rowService(e))));
+
+  renderTablePagination(document.querySelector('.pagination'), techPage, totalPages, p => {
+    techPage = p;
+    renderTable(services);
+  });
 }
 
 function rowService(e) {
@@ -156,6 +193,7 @@ function wireFilter() {
     const filtered = status && status !== 'All Status'
       ? techState.services.filter(s => s.status === status)
       : techState.services;
+    techPage = 1;
     renderTable(filtered);
   });
 }

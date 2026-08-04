@@ -1,4 +1,25 @@
 const allocState = { allocations: [], products: [], requests: [] };
+let allocPage = 1;
+const ALLOC_PAGE_SIZE = 7;
+
+// Generic pagination control renderer — rebuilds the .pagination buttons based
+// on however many pages the current row count needs, and wires them up.
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   loadAllocations();
@@ -138,6 +159,7 @@ async function loadAllocations() {
     if (!res.ok) throw new Error('failed to fetch allocations');
     const data = await res.json();
     allocState.allocations = data.dataset || [];
+    allocPage = 1;
     renderAllocationsTable(allocState.allocations);
     updateAllocationCards(allocState.allocations);
   } catch (err) {
@@ -180,10 +202,19 @@ function updateAllocationCards(allocations) {
 }
 
 function renderAllocationsTable(allocations) {
+  // Newest allotments first instead of the raw (ascending) API order.
+  const sorted = [...allocations].sort((a, b) =>
+    new Date(b.allotment_date || b.created_at || 0) - new Date(a.allotment_date || a.created_at || 0));
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / ALLOC_PAGE_SIZE));
+  allocPage = Math.min(Math.max(1, allocPage), totalPages);
+  const start = (allocPage - 1) * ALLOC_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + ALLOC_PAGE_SIZE);
+
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
 
-  allocations.forEach(a => {
+  pageRows.forEach(a => {
     const meta = returnMeta(a);
     const isSpare = a.allocation_type === 'spare_part';
     const productLabel = isSpare
@@ -212,6 +243,11 @@ function renderAllocationsTable(allocations) {
 
   tbody.querySelectorAll('.view-alloc-btn').forEach(btn => btn.addEventListener('click', e => openViewAllocationModal(rowAllocation(e))));
   tbody.querySelectorAll('.return-alloc-btn').forEach(btn => btn.addEventListener('click', e => markReturned(rowAllocation(e))));
+
+  renderTablePagination(document.querySelector('.pagination'), allocPage, totalPages, p => {
+    allocPage = p;
+    renderAllocationsTable(allocations);
+  });
 }
 
 function rowAllocation(e) {
@@ -307,6 +343,7 @@ function wireFilter() {
       const dateOk = !date || (a.allotment_date || '').startsWith(date);
       return statusOk && dateOk;
     });
+    allocPage = 1;
     renderAllocationsTable(filtered);
   });
 }

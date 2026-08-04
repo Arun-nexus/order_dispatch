@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -17,7 +18,8 @@
       </div>
 
       <ul>
-        <li class="active"><a href="technician_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li class="active"><a href="technician_dashboard.html"><i
+              class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
         <li>
           <a href="#" onclick="openLogoutModal(event)">
@@ -69,46 +71,76 @@
 
       <section class="cards">
         <div class="card">
-          <div><span>Total Services (This Month)</span><h2 id="cardTotalMonth">0</h2><p>All services this month</p></div>
+          <div><span>Total Services (This Month)</span>
+            <h2 id="cardTotalMonth">0</h2>
+            <p>All services this month</p>
+          </div>
           <i class="fa-solid fa-layer-group card-icon-blue"></i>
         </div>
         <div class="card">
-          <div><span>Completed</span><h2 id="cardCompleted">0</h2><p>Successfully closed</p></div>
+          <div><span>Completed</span>
+            <h2 id="cardCompleted">0</h2>
+            <p>Successfully closed</p>
+          </div>
           <i class="fa-solid fa-circle-check card-icon-green"></i>
         </div>
         <div class="card">
-          <div><span>Pending</span><h2 id="cardPending">0</h2><p>Active + In Progress</p></div>
+          <div><span>Pending</span>
+            <h2 id="cardPending">0</h2>
+            <p>Active + In Progress</p>
+          </div>
           <i class="fa-regular fa-clock card-icon-orange"></i>
         </div>
         <div class="card">
-          <div><span>Rejected</span><h2 id="cardRejected">0</h2><p>Not accepted</p></div>
+          <div><span>Rejected</span>
+            <h2 id="cardRejected">0</h2>
+            <p>Not accepted</p>
+          </div>
           <i class="fa-solid fa-circle-xmark card-icon-purple"></i>
         </div>
         <div class="card">
-          <div><span>Service Cost</span><h2 id="cardRevenue">₹0</h2><p>From completed services</p></div>
+          <div><span>Service Cost</span>
+            <h2 id="cardRevenue">₹0</h2>
+            <p>From completed services</p>
+          </div>
           <i class="fa-solid fa-indian-rupee-sign card-icon-orange"></i>
         </div>
       </section>
 
       <section class="cards">
         <div class="card">
-          <div><span>Spare Parts Used</span><h2 id="cardPartsUsed">0</h2><p>Used in your services</p></div>
+          <div><span>Spare Parts Used</span>
+            <h2 id="cardPartsUsed">0</h2>
+            <p>Used in your services</p>
+          </div>
           <i class="fa-solid fa-gears card-icon-blue"></i>
         </div>
         <div class="card">
-          <div><span>Spare Parts Held</span><h2 id="cardPartsHeld">0</h2><p>Currently with you</p></div>
+          <div><span>Spare Parts Held</span>
+            <h2 id="cardPartsHeld">0</h2>
+            <p>Currently with you</p>
+          </div>
           <i class="fa-solid fa-box-open card-icon-blue"></i>
         </div>
         <div class="card">
-          <div><span>Spare Parts Return Alert</span><h2 id="cardPartsOverdue">0</h2><p>Overdue for return</p></div>
+          <div><span>Spare Parts Return Alert</span>
+            <h2 id="cardPartsOverdue">0</h2>
+            <p>Overdue for return</p>
+          </div>
           <i class="fa-solid fa-triangle-exclamation card-icon-purple"></i>
         </div>
         <div class="card">
-          <div><span>Pending Request</span><h2 id="cardRequestsPending">0</h2><p>Spare part requests awaiting approval</p></div>
+          <div><span>Pending Request</span>
+            <h2 id="cardRequestsPending">0</h2>
+            <p>Spare part requests awaiting approval</p>
+          </div>
           <i class="fa-regular fa-clock card-icon-orange"></i>
         </div>
         <div class="card">
-          <div><span>Rejected Request</span><h2 id="cardRequestsRejected">0</h2><p>Spare part requests declined</p></div>
+          <div><span>Rejected Request</span>
+            <h2 id="cardRequestsRejected">0</h2>
+            <p>Spare part requests declined</p>
+          </div>
           <i class="fa-solid fa-circle-xmark card-icon-purple"></i>
         </div>
       </section>
@@ -133,7 +165,9 @@
                   <div><i class="fa-solid fa-circle-check text-success"></i> Completed</div>
                   <strong>0</strong>
                 </div>
-                <div class="progress-bar"><div class="progress-fill green" style="width: 0%"></div></div>
+                <div class="progress-bar">
+                  <div class="progress-fill green" style="width: 0%"></div>
+                </div>
                 <small>0%</small>
               </div>
               <div class="inventory-item">
@@ -141,7 +175,9 @@
                   <div><i class="fa-solid fa-triangle-exclamation text-warning"></i> Pending</div>
                   <strong>0</strong>
                 </div>
-                <div class="progress-bar"><div class="progress-fill orange" style="width: 0%"></div></div>
+                <div class="progress-bar">
+                  <div class="progress-fill orange" style="width: 0%"></div>
+                </div>
                 <small>0%</small>
               </div>
               <div class="inventory-item">
@@ -149,7 +185,9 @@
                   <div><i class="fa-solid fa-circle-xmark text-danger"></i> Rejected</div>
                   <strong>0</strong>
                 </div>
-                <div class="progress-bar"><div class="progress-fill red" style="width: 0%"></div></div>
+                <div class="progress-bar">
+                  <div class="progress-fill red" style="width: 0%"></div>
+                </div>
                 <small>0%</small>
               </div>
             </div>
@@ -198,4 +236,5 @@
   </script>
   <script src="technician_dashboard.js"></script>
 </body>
+
 </html>

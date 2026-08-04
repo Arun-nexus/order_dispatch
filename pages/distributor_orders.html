@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
+
 <body>
   <div class="container">
 
@@ -18,9 +20,10 @@
 
       <ul>
         <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo Units</span></a></li>
-        <li class="active"><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My Orders</span></a></li>
+        <li class="active"><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My
+              Orders</span></a></li>
         <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
-        
+
         <li><a href="distributor_team.html"><i class="fa-solid fa-people-group"></i><span>Team</span></a></li>
 
         <li>
@@ -65,23 +68,38 @@
       <!-- ORDER CARDS -->
       <section class="cards">
         <div class="card">
-          <div><span>Total Orders</span><h2 id="cardTotalOrders">0</h2><p>Orders placed for your customers</p></div>
+          <div><span>Total Orders</span>
+            <h2 id="cardTotalOrders">0</h2>
+            <p>Orders placed for your customers</p>
+          </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
         <div class="card">
-          <div><span>Today's Order Amount</span><h2 id="cardTodayAmount">₹0</h2><p>Orders placed today</p></div>
+          <div><span>Today's Order Amount</span>
+            <h2 id="cardTodayAmount">₹0</h2>
+            <p>Orders placed today</p>
+          </div>
           <i class="fa-solid fa-indian-rupee-sign"></i>
         </div>
         <div class="card">
-          <div><span>Today's Orders</span><h2 id="cardTodayOrders">0</h2><p>Orders placed today</p></div>
+          <div><span>Today's Orders</span>
+            <h2 id="cardTodayOrders">0</h2>
+            <p>Orders placed today</p>
+          </div>
           <i class="fa-regular fa-calendar-check"></i>
         </div>
         <div class="card">
-          <div><span>Delivered</span><h2 id="cardDelivered">0</h2><p>Confirmed delivered to customer</p></div>
+          <div><span>Delivered</span>
+            <h2 id="cardDelivered">0</h2>
+            <p>Confirmed delivered to customer</p>
+          </div>
           <i class="fa-solid fa-truck"></i>
         </div>
         <div class="card">
-          <div><span>Pending</span><h2 id="cardPendingOrders">0</h2><p>Not yet delivered</p></div>
+          <div><span>Pending</span>
+            <h2 id="cardPendingOrders">0</h2>
+            <p>Not yet delivered</p>
+          </div>
           <i class="fa-solid fa-hourglass-half"></i>
         </div>
       </section>
@@ -121,6 +139,12 @@
           </tbody>
         </table>
       </div>
+
+      <div class="pagination">
+        <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
+        <button class="page active-page">1</button>
+        <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
+      </div>
     </main>
 
   </div>
@@ -142,31 +166,36 @@
   <script src="../common_auth.js"></script>
 
   <!-- View Order Modal -->
-  <div id="viewOrderModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
+  <div id="viewOrderModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
   <!-- Create Order Modal (wizard built dynamically) -->
-  <div id="orderModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:14px;padding:24px;width:460px;max-height:86vh;overflow-y:auto;"></div>
+  <div id="orderModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:14px;padding:24px;width:460px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
   <script>
-    function openLogoutModal(e){
+    function openLogoutModal(e) {
       e.preventDefault();
       document.getElementById("logoutModal").classList.add("active");
     }
-    function closeLogoutModal(){
+    function closeLogoutModal() {
       document.getElementById("logoutModal").classList.remove("active");
     }
     document.addEventListener('DOMContentLoaded', () => {
       const role = getRole() || '';
       const uname = getUsername() || 'User';
       const label = role.charAt(0).toUpperCase() + role.slice(1);
-      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
-      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
   <script src="distributor_orders.js"></script>
 </body>
+
 </html>

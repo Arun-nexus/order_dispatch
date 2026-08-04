@@ -1,4 +1,23 @@
 const invState = { products: [], activeProductId: null, editSerials: [], editRemovedSerials: [] };
+let invPage = 1;
+const INV_PAGE_SIZE = 7;
+
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   loadInventory();
@@ -28,6 +47,7 @@ async function loadInventory() {
     if (!res.ok) throw new Error('failed to fetch inventory');
     const data = await res.json();
     invState.products = data.dataset || [];
+    invPage = 1;
     renderInventoryTable(invState.products);
     updateInventoryCards(invState.products);
   } catch (err) {
@@ -61,13 +81,22 @@ function stockClass(qty) {
 }
 
 function renderInventoryTable(products) {
+  // API returns products in insertion (ascending) order — reverse so the
+  // most recently added product shows at the top instead of the bottom.
+  const sorted = [...products].reverse();
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / INV_PAGE_SIZE));
+  invPage = Math.min(Math.max(1, invPage), totalPages);
+  const start = (invPage - 1) * INV_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + INV_PAGE_SIZE);
+
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
 
   const canManage = window.__invCanManage;
   const canDelete = window.__invCanDelete;
 
-  products.forEach(p => {
+  pageRows.forEach(p => {
     const tr = document.createElement('tr');
     tr.dataset.productId = p.product_id;
     tr.innerHTML = `
@@ -91,6 +120,11 @@ function renderInventoryTable(products) {
   tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewModal(rowProduct(e))));
   tbody.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', e => openEditModal(rowProduct(e))));
   tbody.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', e => openDeleteModal(rowProduct(e))));
+
+  renderTablePagination(document.querySelector('.pagination'), invPage, totalPages, p => {
+    invPage = p;
+    renderInventoryTable(products);
+  });
 }
 
 function rowProduct(e) {
@@ -132,6 +166,7 @@ function wireFilter() {
       (!supplier || (p.supplier || '').toLowerCase().includes(supplier)) &&
       (!date || p.purchase_date === date)
     );
+    invPage = 1;
     renderInventoryTable(filtered);
   });
 }

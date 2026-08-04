@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
+
 <body>
   <div class="container">
 
@@ -17,11 +19,16 @@
       </div>
 
       <ul>
-        <li class="active"><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
-        
-        <li ><a href="distributor_team.html"><i class="fa-solid fa-people-group"></i><span>Team</span></a></li>
-          <li>
-            <a href="#" onclick="openLogoutModal(event)">
+        <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo Units</span></a></li>
+        <li><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My Orders</span></a></li>
+        <li><a href="technician_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+
+        <li class="active"><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a>
+        </li>
+
+        <li><a href="distributor_team.html"><i class="fa-solid fa-people-group"></i><span>Team</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
             <i class="fa-solid fa-arrow-right-from-bracket"></i>
             <span>Logout</span>
           </a>
@@ -62,23 +69,38 @@
       <!-- SERVICE STATUS CARDS -->
       <section class="cards">
         <div class="card">
-          <div><span>Total Allotted</span><h2 id="cardTotal">0</h2><p>All services assigned to you</p></div>
+          <div><span>Total Allotted</span>
+            <h2 id="cardTotal">0</h2>
+            <p>All services assigned to you</p>
+          </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
         <div class="card">
-          <div><span>Active</span><h2 id="cardActive">0</h2><p>Not started yet</p></div>
+          <div><span>Active</span>
+            <h2 id="cardActive">0</h2>
+            <p>Not started yet</p>
+          </div>
           <i class="fa-solid fa-circle-check"></i>
         </div>
         <div class="card">
-          <div><span>Completed</span><h2 id="cardCompleted">0</h2><p>Closed successfully</p></div>
+          <div><span>Completed</span>
+            <h2 id="cardCompleted">0</h2>
+            <p>Closed successfully</p>
+          </div>
           <i class="fa-solid fa-check-double"></i>
         </div>
         <div class="card">
-          <div><span>Rejected</span><h2 id="cardRejected">0</h2><p>Could not be completed</p></div>
+          <div><span>Rejected</span>
+            <h2 id="cardRejected">0</h2>
+            <p>Could not be completed</p>
+          </div>
           <i class="fa-solid fa-circle-xmark"></i>
         </div>
         <div class="card">
-          <div><span>Service Cost</span><h2 id="cardServiceCost">₹0</h2><p>Total earned from completed services</p></div>
+          <div><span>Service Cost</span>
+            <h2 id="cardServiceCost">₹0</h2>
+            <p>Total earned from completed services</p>
+          </div>
           <i class="fa-solid fa-indian-rupee-sign"></i>
         </div>
       </section>
@@ -158,12 +180,14 @@
   <script src="../common_auth.js"></script>
 
   <!-- View Service Modal -->
-  <div id="viewModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="viewModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;"></div>
   </div>
 
   <!-- Image / Video Modal -->
-  <div id="mediaModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="mediaModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:480px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Service Proof</h3>
@@ -175,26 +199,28 @@
   </div>
 
   <!-- Action Modal (upload / spare part / status update, built dynamically) -->
-  <div id="actionModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+  <div id="actionModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;"></div>
   </div>
 
   <script>
-    function openLogoutModal(e){
+    function openLogoutModal(e) {
       e.preventDefault();
       document.getElementById("logoutModal").classList.add("active");
     }
-    function closeLogoutModal(){
+    function closeLogoutModal() {
       document.getElementById("logoutModal").classList.remove("active");
     }
     document.addEventListener('DOMContentLoaded', () => {
       const role = getRole() || '';
       const uname = getUsername() || 'User';
       const label = role.charAt(0).toUpperCase() + role.slice(1);
-      ['sidebarUserName','headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
-      ['sidebarUserRole','headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
   <script src="technician.js"></script>
 </body>
+
 </html>
