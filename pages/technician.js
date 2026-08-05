@@ -78,7 +78,7 @@ async function loadMyServices() {
     const allocData = await allocRes.json();
     if (!svcRes.ok) throw new Error('failed to fetch services');
 
-    techState.services = svcData.dataset || [];
+    techState.services = (svcData.dataset || []).slice().reverse();
     techState.allocations = allocData.dataset || [];
 
     techPage = 1;

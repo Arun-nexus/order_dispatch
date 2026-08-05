@@ -56,7 +56,7 @@ async function loadMyAllocations() {
       if (!seen.has(a.allocation_id)) { merged.push(a); seen.add(a.allocation_id); }
     });
 
-    spState.allocations = merged;
+    spState.allocations = merged.slice().reverse();
     spPage = 1;
     renderWelcome();
     renderCards();

@@ -51,7 +51,7 @@ async function loadOrders() {
     const res = await apiFetch('/order/');
     if (!res.ok) throw new Error('failed to fetch orders');
     const data = await res.json();
-    orderState.orders = data.dataset || [];
+    orderState.orders = (data.dataset || []).slice().reverse();
     ordersPage = 1;
     renderOrdersTable(orderState.orders);
     updateCards(orderState.orders);
@@ -292,21 +292,98 @@ function wireFilter() {
 }
 
 function exportOrdersCSV() {
-  const header = ['Order ID', 'Products', 'Company', 'Payment Mode', 'Status', 'Total'];
-  const rows = orderState.orders.map(o => [
-    o.order_id,
-    (o.items || []).map(it => `${it.product_name} x${it.quantity}`).join(' | '),
-    o.customer?.company_name ?? o.company_name ?? '',
-    o.payment_mode,
-    o.status,
-    o.total_mrp
-  ]);
+  openExportWizard({
+    title: 'Export Orders',
+    statusOptions: ['placed', 'processing', 'delivered', 'cancelled'],
+    dateField: 'order_date',
+    dateLabel: 'Order Date',
+    getRows: () => orderState.orders,
+    onConfirm: (rows) => {
+      const header = ['Order ID', 'Products', 'Company', 'Payment Mode', 'Status', 'Total'];
+      const csvRows = rows.map(o => [
+        o.order_id,
+        (o.items || []).map(it => `${it.product_name} x${it.quantity}`).join(' | '),
+        o.customer?.company_name ?? o.company_name ?? '',
+        o.payment_mode,
+        o.status,
+        o.total_mrp
+      ]);
+      downloadCSV(header, csvRows, 'orders.csv');
+    }
+  });
+}
+
+// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
+function downloadCSV(header, rows, filename) {
   const csv = [header, ...rows].map(r => r.join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'orders.csv';
+  a.download = filename;
   a.click();
+}
+
+function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows, onConfirm }) {
+  let modal = document.getElementById('exportWizardModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'exportWizardModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:1200;';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:26px;width:360px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>${title}</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
+        ${statusOptions ? `
+        <label style="font-size:13px;color:#64748b;">Status</label>
+        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="">All Statuses</option>
+          ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
+        </select>` : ''}
+        ${dateField ? `
+        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <input type="date" name="dateFrom">
+        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <input type="date" name="dateTo">` : ''}
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+        </div>
+      </form>
+    </div>`;
+
+  modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  modal.querySelector('#exportWizardForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const status = fd.get('status');
+    const dateFrom = fd.get('dateFrom');
+    const dateTo = fd.get('dateTo');
+
+    const filtered = getRows().filter(row => {
+      if (status && row.status !== status) return false;
+      if (dateField && (dateFrom || dateTo)) {
+        const rowDate = row[dateField] ? new Date(row[dateField]) : null;
+        if (!rowDate) return false;
+        if (dateFrom && rowDate < new Date(dateFrom)) return false;
+        if (dateTo && rowDate > new Date(dateTo + 'T23:59:59')) return false;
+      }
+      return true;
+    });
+
+    modal.style.display = 'none';
+    onConfirm(filtered);
+  });
+
+  modal.style.display = 'flex';
 }
 
 // ---------- View / Track / Deliver overlay modals ----------

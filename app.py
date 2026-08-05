@@ -481,6 +481,10 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
             contractor_email=customer_snapshot.get("contractor_email"),
         )
         new_customer.add(collection_name=CUSTOMER_COLLECTION)
+        creator_username = (creator or {}).get("raised_by") or (creator or {}).get("username")
+        if creator_username:
+            customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
+                                     update_values={"created_by": creator_username})
         customer_snapshot = {
             "customer_id": new_customer.customer_id,
             "company_name": new_customer.company_name,
@@ -489,6 +493,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
             "contractor_person": new_customer.contractor_person,
             "contractor_number": new_customer.contractor_number,
             "contractor_email": new_customer.contractor_email,
+            "created_by": creator_username,
         }
 
     inventory_db = inventory_manager()
@@ -693,7 +698,7 @@ async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfi
             "ship_to_address": request.ship_to_address if request.ship_to_different else None,
             "dispatched_by": user["username"]
         }
-        db.update(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id}, update_values={"dispatch": dispatch_info})
+        db.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id}, update_values={"dispatch": dispatch_info})
         logging.info(f"spare part allocation {allocation_id} dispatch confirmed")
         return {"message": "dispatch confirmed", "allocation_id": allocation_id}
     except HTTPException:
@@ -1009,7 +1014,15 @@ async def delete_product(product_id: str, user: dict = Depends(require_role("adm
 async def customers(user: dict = Depends(get_current_user)):
     try:
         db = customer_manager()
-        dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
+        if user["role"] in ("admin", "employee"):
+            dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
+        elif user["role"] == "distributor":
+            acc_db = login()
+            team = acc_db.get_data(ACCOUNTS_COLLECTION, query={"role": "distributor", "manager": user["username"]})
+            visible_usernames = [user["username"]] + [m["username"] for m in team]
+            dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={"created_by": {"$in": visible_usernames}})
+        else:
+            dataset = []
         logging.info("customer dataset was fetched successfully")
         return {"message": "customer dataset", "dataset": dataset}
     except Exception as e:
@@ -1022,6 +1035,11 @@ async def search_customer(term: str = "", user: dict = Depends(get_current_user)
     try:
         db = customer_manager()
         dataset = db.search(collection_name=CUSTOMER_COLLECTION, term=term) if term else db.get_data(CUSTOMER_COLLECTION, query={})
+        if user["role"] == "distributor":
+            acc_db = login()
+            team = acc_db.get_data(ACCOUNTS_COLLECTION, query={"role": "distributor", "manager": user["username"]})
+            visible_usernames = {user["username"]} | {m["username"] for m in team}
+            dataset = [c for c in dataset if c.get("created_by") in visible_usernames]
         return {"message": "customer search results", "dataset": dataset}
     except Exception as e:
         logging.error("customer search failed")
@@ -1043,7 +1061,7 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
 
         customer_db = customer_manager()
         customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
-                                 update_values={"credit_limit": request.credit_limit, "credit_used": 0})
+                                 update_values={"credit_limit": request.credit_limit, "credit_used": 0, "created_by": user["username"]})
 
         logging.info("customer created successfully")
         return {
@@ -1059,6 +1077,7 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
                 "contractor_email": new_customer.contractor_email,
                 "credit_limit": request.credit_limit,
                 "credit_used": 0,
+                "created_by": user["username"],
             }
         }
     except Exception as e:
@@ -1197,6 +1216,8 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
             contractor_email=customer_snapshot.get("contractor_email"),
         )
         new_customer.add(collection_name=CUSTOMER_COLLECTION)
+        customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
+                                 update_values={"created_by": allocated_by})
         customer_snapshot = {
             "customer_id": new_customer.customer_id,
             "company_name": new_customer.company_name,
@@ -1205,6 +1226,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
             "contractor_person": new_customer.contractor_person,
             "contractor_number": new_customer.contractor_number,
             "contractor_email": new_customer.contractor_email,
+            "created_by": allocated_by,
         }
 
     inventory_db = inventory_manager()

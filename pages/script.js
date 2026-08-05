@@ -26,7 +26,7 @@ async function loadServices() {
     const svcData = await svcRes.json();
     const orderData = orderRes.ok ? await orderRes.json() : { dataset: [] };
 
-    svcState.services = svcData.dataset || [];
+    svcState.services = (svcData.dataset || []).slice().reverse();
     svcState.orders = orderData.dataset || [];
     renderServiceTable(svcState.services);
     updateCards(svcState.services);
@@ -162,10 +162,8 @@ function openActionMenu(s, evt) {
 
   const menu = document.createElement('div');
   menu.id = 'svcActionMenu';
-  menu.style.cssText = 'position:fixed;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:200px;';
+  menu.style.cssText = 'position:fixed;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:200px;visibility:hidden;';
   const rect = evt.target.closest('button').getBoundingClientRect();
-  menu.style.top = `${rect.bottom + 6}px`;
-  menu.style.left = `${Math.max(10, rect.left - 150)}px`;
 
   const items = [
     { label: 'View Details', action: () => openViewModal(s) },
@@ -187,6 +185,16 @@ function openActionMenu(s, evt) {
   });
 
   document.body.appendChild(menu);
+
+  // now that it's in the DOM we know its real size — clamp/flip so it never
+  // opens off the edge of the screen, and matches where the button actually is
+  const menuRect = menu.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openUpwards = spaceBelow < menuRect.height + 10 && rect.top > menuRect.height + 10;
+  menu.style.top = openUpwards ? `${rect.top - menuRect.height - 6}px` : `${rect.bottom + 6}px`;
+  menu.style.left = `${Math.min(Math.max(10, rect.left - 150), window.innerWidth - menuRect.width - 10)}px`;
+  menu.style.visibility = 'visible';
+
   setTimeout(() => document.addEventListener('click', closeActionMenuOnClickAway), 0);
 }
 
@@ -283,14 +291,91 @@ function wireTopActions() {
 }
 
 function exportServicesCSV() {
-  const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Location', 'Status'];
-  const rows = svcState.services.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.location, s.status]);
+  openExportWizard({
+    title: 'Export Services',
+    statusOptions: ['active', 'in_progress', 'completed', 'rejected'],
+    dateField: 'purchase_date',
+    dateLabel: 'Purchase Date',
+    getRows: () => svcState.services,
+    onConfirm: (rows) => {
+      const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Location', 'Status'];
+      const csvRows = rows.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.location, s.status]);
+      downloadCSV(header, csvRows, 'services.csv');
+    }
+  });
+}
+
+// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
+function downloadCSV(header, rows, filename) {
   const csv = [header, ...rows].map(r => r.join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'services.csv';
+  a.download = filename;
   a.click();
+}
+
+function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows, onConfirm }) {
+  let modal = document.getElementById('exportWizardModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'exportWizardModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:1200;';
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:26px;width:360px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>${title}</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
+        ${statusOptions ? `
+        <label style="font-size:13px;color:#64748b;">Status</label>
+        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="">All Statuses</option>
+          ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
+        </select>` : ''}
+        ${dateField ? `
+        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <input type="date" name="dateFrom">
+        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <input type="date" name="dateTo">` : ''}
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+        </div>
+      </form>
+    </div>`;
+
+  modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  modal.querySelector('#exportWizardForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const status = fd.get('status');
+    const dateFrom = fd.get('dateFrom');
+    const dateTo = fd.get('dateTo');
+
+    const filtered = getRows().filter(row => {
+      if (status && row.status !== status) return false;
+      if (dateField && (dateFrom || dateTo)) {
+        const rowDate = row[dateField] ? new Date(row[dateField]) : null;
+        if (!rowDate) return false;
+        if (dateFrom && rowDate < new Date(dateFrom)) return false;
+        if (dateTo && rowDate > new Date(dateTo + 'T23:59:59')) return false;
+      }
+      return true;
+    });
+
+    modal.style.display = 'none';
+    onConfirm(filtered);
+  });
+
+  modal.style.display = 'flex';
 }
 
 function wireFilters() {

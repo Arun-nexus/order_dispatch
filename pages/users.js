@@ -12,7 +12,7 @@ async function loadUsers() {
     const res = await apiFetch('/account/');
     if (!res.ok) throw new Error('failed to fetch users');
     const data = await res.json();
-    userState.users = data.dataset || [];
+    userState.users = (data.dataset || []).slice().reverse();
     renderCards();
     renderTable(userState.users);
   } catch (err) {
