@@ -1280,6 +1280,88 @@ form .save-btn {
     font-size: 28px;
   }
 }
+
+/* Small phones (~360-480px): cards were still full-height with desktop-sized
+   text, and table cells kept their desktop padding/font so columns overflowed
+   and got cut off, forcing an awkward horizontal squeeze instead of a clean
+   scroll. Shrink both explicitly at this width. */
+@media (max-width: 480px) {
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .card {
+    padding: 14px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .card span {
+    font-size: 12px;
+  }
+
+  .card h2 {
+    font-size: 20px;
+    margin: 4px 0;
+  }
+
+  .card p {
+    font-size: 11px;
+  }
+
+  .card i {
+    width: 42px;
+    height: 42px;
+    font-size: 18px;
+    border-radius: 12px;
+  }
+
+  .welcome-section {
+    padding: 18px;
+  }
+
+  .welcome-left h2 {
+    font-size: 19px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+
+  /* Table: keep it horizontally scrollable (don't force columns to squeeze),
+     but shrink text/padding so more of each row is visible before scrolling,
+     and enable smooth touch-scrolling on iOS/Android. */
+  .table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    min-width: 640px; /* scrolls horizontally instead of crushing columns */
+  }
+
+  thead th {
+    padding: 10px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 10px 12px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .stock,
+  .status,
+  .role-badge {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+}
+
 @media(max-width:1200px){
   .login-left{
     margin:auto;
@@ -1318,6 +1400,17 @@ form .save-btn {
   .sidebar {
     width: 50px;
     padding: 8px;
+  }
+  .sidebar ul li a{ margin-left:-1px;
+  padding-left: 0px;}
+  .sidebar ul li.active a{
+  background:var(--primary-gradient);
+  color:#fff;
+  box-shadow:0 15px 28px rgba(22,101,255,.28);
+  width: 30px;
+  height :30px;
+  padding:2px 2px 2px 2px;
+  border-radius:50%
   }
   
   .sidebar .logo img {
@@ -1491,6 +1584,7 @@ form .save-btn {
   padding: 16px 0;
   border-bottom: 1px solid #edf1f7;
 }
+
 
 .order-item:last-child {
   border-bottom: none;
