@@ -89,11 +89,20 @@ class OrderItem(BaseModel):
     tax_rate: float = 0
 
 
+class SparePartItem(BaseModel):
+    """Free-text spare part line added alongside an order — not tied to
+    inventory stock, purely informational (name/price/quantity)."""
+    name: str
+    price: float = 0
+    quantity: int = 1
+
+
 class CreateOrderRequest(BaseModel):
     customer_id: str = ""          # set when an existing customer was picked
     customer: dict = {}            # denormalized snapshot: company_name, company_address,
                                     # gst_number, contractor_person, contractor_number, contractor_email
     items: list[OrderItem]
+    spare_parts: list[SparePartItem] = []   # optional
     payment_mode: str
     payment_details: dict = {}     # credit_days / cheque_number+cheque_date / dd_number+dd_date etc.
     discount: float = 0
@@ -427,12 +436,14 @@ def _raise_media_review_request(service_id: str, raised_by: str):
         logging.error("could not raise media review notification")
 
 
-def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None):
+def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None, spare_parts: list = None):
     """Validates payment details, resolves/creates the customer, deducts stock + serials,
     and creates the order record. Shared by the direct /order/create_order/ endpoint and by
     /request/approve/{request_id} when a distributor's order request is approved."""
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product to the order")
+
+    spare_parts = spare_parts or []
 
     if payment_mode not in VALID_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail="invalid payment mode")
@@ -524,6 +535,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
         payment_mode=payment_mode,
         payment_details=payment_details,
         discount=discount,
+        spare_parts=spare_parts,
         creator=creator or {}
     )
     order.add(collection_name=ORDERS_COLLECTION)
@@ -542,6 +554,7 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(require
             payment_mode=request.payment_mode,
             payment_details=request.payment_details,
             discount=request.discount,
+            spare_parts=[sp.dict() for sp in request.spare_parts],
             creator={"type": "direct", "created_by": user["username"]}
         )
         return {"message": "order created successfully", "order_id": order_id}

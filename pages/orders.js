@@ -432,6 +432,16 @@ function openViewOrderModal(o) {
       </tr></thead>
       <tbody>${itemsRows}</tbody>
     </table>
+    ${(o.spare_parts || []).length ? `
+    <div class="detail"><small>Spare Parts</small></div>
+    <table style="width:100%;font-size:13px;margin:0 0 10px;border-collapse:collapse;">
+      <thead><tr style="text-align:left;color:#fff;">
+        <th>Name</th><th>Qty</th><th>Price</th>
+      </tr></thead>
+      <tbody>${o.spare_parts.map(sp => `<tr>
+        <td>${sp.name ?? ''}</td><td>${sp.quantity ?? 0}</td><td>₹${sp.price ?? 0}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : ''}
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
     <div class="detail"><small>Status</small><p>${o.status ?? ''}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
@@ -524,6 +534,7 @@ const wiz = {
   customerId: '',      // set when existing customer picked
   customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
   cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
+  sparePartsCart: [],   // optional: [{name, price, quantity}] — free-text, not tied to inventory
   paymentMode: '',
   discount: 0
 };
@@ -541,6 +552,7 @@ function resetWizard() {
   wiz.customerId = '';
   wiz.customer = null;
   wiz.cart = {};
+  wiz.sparePartsCart = [];
   wiz.paymentMode = '';
   wiz.discount = 0;
 }
@@ -758,12 +770,25 @@ function renderProductsStep() {
         <tbody id="prodRows"></tbody>
       </table>
     </div>
+    <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <label style="font-size:13px;font-weight:600;color:#334155;">Spare Parts <span style="font-weight:400;color:#94a3b8;">(optional)</span></label>
+        <button type="button" id="addSparePartBtn" style="padding:4px 10px;border:none;border-radius:6px;background:#eef2ff;color:#2563eb;cursor:pointer;font-size:12px;">+ Add Spare Part</button>
+      </div>
+      <div id="sparePartsRows" style="display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
       <button type="button" id="backBtn3" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
       <button type="button" id="toPaymentBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Create Order</button>
     </div>`;
 
   document.getElementById('backBtn3').addEventListener('click', () => wiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
+
+  document.getElementById('addSparePartBtn').addEventListener('click', () => {
+    wiz.sparePartsCart.push({ name: '', price: 0, quantity: 1 });
+    renderSparePartsRows();
+  });
+  renderSparePartsRows();
 
   const rowsBox = document.getElementById('prodRows');
   const renderRows = (list) => {
@@ -797,6 +822,41 @@ function renderProductsStep() {
     if (!Object.keys(wiz.cart).length) { alert('Add quantity for at least one product.'); return; }
     renderPaymentStep();
   });
+}
+
+// Optional spare-parts rows on the products step — free-text name/price/qty,
+// not tied to inventory stock. Renders whatever is currently in wiz.sparePartsCart.
+function renderSparePartsRows() {
+  const box = document.getElementById('sparePartsRows');
+  if (!box) return;
+
+  if (!wiz.sparePartsCart.length) {
+    box.innerHTML = '<p style="font-size:12px;color:#94a3b8;margin:0;">No spare parts added.</p>';
+    return;
+  }
+
+  box.innerHTML = wiz.sparePartsCart.map((sp, idx) => `
+    <div style="display:flex;gap:6px;align-items:center;">
+      <input type="text" placeholder="Spare part name" value="${sp.name ?? ''}" data-idx="${idx}" data-field="name"
+             style="flex:2;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
+      <input type="number" min="0" step="0.01" placeholder="Price" value="${sp.price || ''}" data-idx="${idx}" data-field="price"
+             style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
+      <input type="number" min="1" placeholder="Qty" value="${sp.quantity ?? ''}" data-idx="${idx}" data-field="quantity"
+             style="width:64px;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
+      <button type="button" class="spRemoveBtn" data-idx="${idx}" title="Remove"
+              style="border:none;background:none;color:#d62828;cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+    </div>`).join('');
+
+  box.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+    const idx = Number(inp.dataset.idx);
+    const field = inp.dataset.field;
+    wiz.sparePartsCart[idx][field] = field === 'name' ? inp.value : (Number(inp.value) || 0);
+  }));
+
+  box.querySelectorAll('.spRemoveBtn').forEach(btn => btn.addEventListener('click', () => {
+    wiz.sparePartsCart.splice(Number(btn.dataset.idx), 1);
+    renderSparePartsRows();
+  }));
 }
 
 // Step 4: payment mode + conditional fields + discount
@@ -936,6 +996,10 @@ async function submitOrder(modeSelect, extraBox) {
       product_id: i.product_id, product_name: i.product_name,
       quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
     })),
+    // Optional — only rows with a name and a positive quantity are sent.
+    spare_parts: wiz.sparePartsCart
+      .filter(sp => (sp.name || '').trim() && Number(sp.quantity) > 0)
+      .map(sp => ({ name: sp.name.trim(), price: Number(sp.price) || 0, quantity: Number(sp.quantity) })),
     payment_mode: mode,
     payment_details,
     discount: wiz.discount || 0
