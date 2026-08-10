@@ -210,7 +210,7 @@ class service_detail(mongodbclient):
                 image_val = doc.get("image") or ""
                 if image_val.startswith("data:"):
                     try:
-                        link = upload_base64_to_drive(image_val, filename_prefix=f"{service_id}_image")
+                        link = upload_base64_to_drive(image_val, filename=f"{service_id}_image")
                         update_values["image"] = GDRIVE_PLACEHOLDER
                         update_values["image_drive_link"] = link
                     except Exception as media_err:
@@ -219,7 +219,7 @@ class service_detail(mongodbclient):
                 video_val = doc.get("video") or ""
                 if video_val.startswith("data:"):
                     try:
-                        link = upload_base64_to_drive(video_val, filename_prefix=f"{service_id}_video")
+                        link = upload_base64_to_drive(video_val, filename=f"{service_id}_video")
                         update_values["video"] = GDRIVE_PLACEHOLDER
                         update_values["video_drive_link"] = link
                     except Exception as media_err:

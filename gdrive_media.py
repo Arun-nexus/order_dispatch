@@ -15,7 +15,6 @@ import os
 import re
 import io
 import base64
-import uuid
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -58,10 +57,12 @@ def _extension_for_mime(mime: str) -> str:
     return mapping.get(mime, mime.split("/")[-1] if "/" in mime else "bin")
 
 
-def upload_base64_to_drive(data_uri: str, filename_prefix: str = "media") -> str:
+def upload_base64_to_drive(data_uri: str, filename: str) -> str:
     """
     Takes a base64 data URI (e.g. "data:image/png;base64,....") and uploads it
-    to the configured Google Drive folder. Returns a shareable "view" link.
+    to the configured Google Drive folder using the exact `filename` given
+    (extension is appended automatically based on the media type) - no random
+    suffix, so files are easy to find by service ID on Drive.
     """
     match = _DATA_URI_RE.match(data_uri or "")
     if not match:
@@ -72,10 +73,10 @@ def upload_base64_to_drive(data_uri: str, filename_prefix: str = "media") -> str
     file_bytes = base64.b64decode(raw_b64)
 
     ext = _extension_for_mime(mime)
-    filename = f"{filename_prefix}_{uuid.uuid4().hex[:8]}.{ext}"
+    full_filename = f"{filename}.{ext}"
 
     folder_id = os.getenv("GDRIVE_FOLDER_ID")
-    file_metadata = {"name": filename}
+    file_metadata = {"name": full_filename}
     if folder_id:
         file_metadata["parents"] = [folder_id]
 
