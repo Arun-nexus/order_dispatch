@@ -89,20 +89,11 @@ class OrderItem(BaseModel):
     tax_rate: float = 0
 
 
-class SparePartItem(BaseModel):
-    """Free-text spare part line added alongside an order — not tied to
-    inventory stock, purely informational (name/price/quantity)."""
-    name: str
-    price: float = 0
-    quantity: int = 1
-
-
 class CreateOrderRequest(BaseModel):
     customer_id: str = ""          # set when an existing customer was picked
     customer: dict = {}            # denormalized snapshot: company_name, company_address,
                                     # gst_number, contractor_person, contractor_number, contractor_email
     items: list[OrderItem]
-    spare_parts: list[SparePartItem] = []   # optional
     payment_mode: str
     payment_details: dict = {}     # credit_days / cheque_number+cheque_date / dd_number+dd_date etc.
     discount: float = 0
@@ -436,14 +427,12 @@ def _raise_media_review_request(service_id: str, raised_by: str):
         logging.error("could not raise media review notification")
 
 
-def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None, spare_parts: list = None):
+def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None):
     """Validates payment details, resolves/creates the customer, deducts stock + serials,
     and creates the order record. Shared by the direct /order/create_order/ endpoint and by
     /request/approve/{request_id} when a distributor's order request is approved."""
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product to the order")
-
-    spare_parts = spare_parts or []
 
     if payment_mode not in VALID_PAYMENT_MODES:
         raise HTTPException(status_code=400, detail="invalid payment mode")
@@ -535,7 +524,6 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
         payment_mode=payment_mode,
         payment_details=payment_details,
         discount=discount,
-        spare_parts=spare_parts,
         creator=creator or {}
     )
     order.add(collection_name=ORDERS_COLLECTION)
@@ -554,7 +542,6 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(require
             payment_mode=request.payment_mode,
             payment_details=request.payment_details,
             discount=request.discount,
-            spare_parts=[sp.dict() for sp in request.spare_parts],
             creator={"type": "direct", "created_by": user["username"]}
         )
         return {"message": "order created successfully", "order_id": order_id}
@@ -620,10 +607,64 @@ async def delete_order(order_id: str, user: dict = Depends(require_role("admin")
 async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = order_manager()
-        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},update_values=updated_value.updated_order_value)
+        updated = dict(updated_value.updated_order_value)
+
+        existing = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no order found with this order_id")
+        order = existing[0]
+
+        # These fields actually live inside order["items"][0], not at the
+        # top level of the order document — editing them has to go through
+        # the item, or they silently land as an unused stray field and the
+        # UI never reflects the change.
+        item_field_keys = {"product_name", "serial_no", "quantity", "price", "tax_rate"}
+        touched_item_fields = item_field_keys & updated.keys()
+        if touched_item_fields:
+            items = order.get("items", [])
+            if not items:
+                raise HTTPException(status_code=400, detail="order has no items to edit")
+            item = dict(items[0])
+            for key in touched_item_fields:
+                item[key] = updated.pop(key)
+
+            quantity = item.get("quantity", 0)
+            price = item.get("price", 0)
+            tax_rate = item.get("tax_rate", 0)
+            line_amount = price * quantity
+            line_tax = line_amount * tax_rate / 100
+            item["line_amount"] = line_amount
+            item["line_tax"] = line_tax
+            item["line_total"] = line_amount + line_tax
+
+            items = [item] + items[1:]
+            updated["items"] = items
+
+            # Recompute order-level totals from the items instead of trusting
+            # whatever total_mrp the client sent — the client can't see other
+            # items or the discount reliably, so it drifts out of sync.
+            discount = updated.get("discount", order.get("discount", 0))
+            subtotal = sum(i.get("line_amount", 0) for i in items)
+            tax_total = sum(i.get("line_tax", 0) for i in items)
+            updated["subtotal"] = subtotal
+            updated["tax_total"] = tax_total
+            updated["total_mrp"] = subtotal + tax_total - discount
+
+        # company_name / gst_number live under order["customer"], not at the
+        # top level either.
+        customer_field_keys = {"company_name", "gst_number"}
+        touched_customer_fields = customer_field_keys & updated.keys()
+        if touched_customer_fields:
+            customer = dict(order.get("customer", {}))
+            for key in touched_customer_fields:
+                customer[key] = updated.pop(key)
+            updated["customer"] = customer
+
+        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values=updated)
         logging.info("order value was updated successfully.")
-        return {"message": "order value was updated", "order_id": order_id,
-                "updated_value": updated_value.updated_order_value}
+        return {"message": "order value was updated", "order_id": order_id, "updated_value": updated}
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error("order cannot be updated")
         raise HTTPException(status_code=500, detail="order value cannot be updated")
@@ -1290,6 +1331,17 @@ class DemoUnitRequestModel(BaseModel):
     items: list[AllocationItem]
 
 
+class ServiceRequestModel(BaseModel):
+    product_id: str
+    serial_no: str
+    purchase_date: str
+    issue: str
+    image: str = ""
+    video: str = ""
+    location: str = "indoor"
+    spare_parts: str = ""
+
+
 class SparePartRequestFlagModel(BaseModel):
     service_id: str
     note: str
@@ -1365,6 +1417,32 @@ async def raise_order_request(request: OrderRequestModel, user: dict = Depends(r
         raise HTTPException(status_code=500, detail="request could not be raised")
 
 
+@app.post("/request/service")
+async def raise_service_request(request: ServiceRequestModel, user: dict = Depends(require_role("technician", "distributor"))):
+    try:
+        req = request_manager(
+            request_type="service",
+            raised_by=user["username"],
+            details={
+                "product_id": request.product_id,
+                "serial_no": request.serial_no,
+                "purchase_date": request.purchase_date,
+                "issue": request.issue,
+                "image": request.image,
+                "video": request.video,
+                "location": request.location,
+                "spare_parts": request.spare_parts
+            }
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+        return {"message": "service request sent, waiting for admin/employee approval", "request_id": req.request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("raising service request failed!")
+        raise HTTPException(status_code=500, detail="request could not be raised")
+
+
 @app.get("/request/")
 async def all_requests(user: dict = Depends(require_role("admin", "employee"))):
     try:
@@ -1424,6 +1502,28 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and order created", "order_id": order_id}
+
+        # service: technician/distributor asked for a new service ticket to be
+        # opened — approving creates the real service record and assigns it
+        # back to whoever raised the request.
+        if req["request_type"] == "service":
+            details = req["details"]
+            service = service_detail(product_id=details.get("product_id"), serial_no=details.get("serial_no"))
+            service.add_service(
+                collection_name=SERVICE_COLLECTION,
+                purchase_date=details.get("purchase_date"),
+                issue=details.get("issue"),
+                image=details.get("image", ""),
+                video=details.get("video", ""),
+                technician_id=req["raised_by"],
+                location=details.get("location", "indoor"),
+                spare_parts=details.get("spare_parts", "")
+            )
+            if details.get("video"):
+                _raise_media_review_request(service.service_id, user["username"])
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "request approved and service created", "service_id": service.service_id}
 
         # media_review: approving means admin/employee confirmed they downloaded the
         # video — it's cleared from the database afterwards to free up storage.

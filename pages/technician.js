@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadMyRequests();
   wireFilter();
   wireStaticModals();
+  wireRequestServiceButton();
 });
 
 window.refreshCurrentPageData = () => { loadMyServices(); loadMyRequests(); };
@@ -33,7 +34,7 @@ async function loadMyRequests() {
     const res = await apiFetch('/request/mine');
     if (!res.ok) throw new Error('failed to fetch requests');
     const data = await res.json();
-    renderMyRequests((data.dataset || []).filter(r => r.request_type === 'spare_part' || r.request_type === 'status_update'));
+    renderMyRequests((data.dataset || []).filter(r => r.request_type === 'spare_part' || r.request_type === 'status_update' || r.request_type === 'service_creation'));
   } catch (err) {
     console.error(err);
   }
@@ -51,15 +52,18 @@ function renderMyRequests(requests) {
   const sorted = [...requests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   box.innerHTML = sorted.length ? sorted.map(r => {
     const isStatusReq = r.request_type === 'status_update';
-    const label = isStatusReq
-      ? `Change status to "${(r.details?.service_status || '').replace('_', ' ')}"`
-      : (r.details?.note ?? '');
+    const isCreationReq = r.request_type === 'service_creation';
+    const label = isCreationReq
+      ? `New service request — ${r.details?.product_id || ''} (${r.details?.issue || ''})`
+      : isStatusReq
+        ? `Change status to "${(r.details?.service_status || '').replace('_', ' ')}"`
+        : (r.details?.note ?? '');
     return `
     <div class="order-item">
       <div class="order-left">
         <div class="order-icon"><i class="fa-solid fa-gears"></i></div>
         <div>
-          <h4>Service #${(r.details?.service_id || '').slice(0, 8)}</h4>
+          <h4>${isCreationReq ? 'New Service' : `Service #${(r.details?.service_id || '').slice(0, 8)}`}</h4>
           <p>${label}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
         </div>
       </div>
@@ -396,5 +400,115 @@ function openStatusModal(s) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
+  modal.style.display = 'flex';
+}
+// ---------- Request New Service modal (creates an approval request, not a live service) ----------
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('could not read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function wireRequestServiceButton() {
+  const btn = document.getElementById('requestServiceBtn');
+  if (btn) btn.addEventListener('click', openRequestServiceModal);
+}
+
+function openRequestServiceModal() {
+  const modal = document.getElementById('actionModal');
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Request New Service</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <p style="color:#64748b;font-size:13px;margin-bottom:10px;">This will be sent to admin/employee for approval. It will not appear in your active services until approved.</p>
+    <form id="requestServiceForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="product_id" placeholder="Product" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
+      <select name="location" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
+        <option value="indoor">Inhouse</option>
+        <option value="outdoor">Field</option>
+      </select>
+      <input name="serial_no" placeholder="Serial No" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
+      <input name="purchase_date" type="date" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
+      <textarea name="issue" placeholder="Issue description" style="min-height:70px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required></textarea>
+      <textarea name="spare_parts" placeholder="Spare parts needed (optional)" style="min-height:50px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;"></textarea>
+      <label style="font-size:12px;color:#64748b;">Image proof (optional, max 2MB)</label>
+      <input type="file" name="image_file" accept="image/*">
+      <label style="font-size:12px;color:#64748b;">Video proof (optional, max 20MB)</label>
+      <input type="file" name="video_file" accept="video/*">
+      <p id="requestServiceMediaError" style="color:#d62828;font-size:12px;display:none;"></p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Send Request</button>
+      </div>
+    </form>`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+
+  content.querySelector('#requestServiceForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    const errorBox = document.getElementById('requestServiceMediaError');
+    errorBox.style.display = 'none';
+
+    const imageFile = form.querySelector('[name="image_file"]').files[0];
+    const videoFile = form.querySelector('[name="video_file"]').files[0];
+
+    const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+    const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
+
+    if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
+      errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`;
+      errorBox.style.display = 'block';
+      return;
+    }
+    if (videoFile && videoFile.size > MAX_VIDEO_BYTES) {
+      errorBox.textContent = `Video is ${(videoFile.size / 1024 / 1024).toFixed(1)}MB — must be 20MB or under.`;
+      errorBox.style.display = 'block';
+      return;
+    }
+
+    const payload = {
+      product_id: fd.get('product_id'),
+      location: fd.get('location'),
+      serial_no: fd.get('serial_no'),
+      purchase_date: fd.get('purchase_date'),
+      issue: fd.get('issue'),
+      spare_parts: fd.get('spare_parts') || ''
+    };
+
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending...';
+
+    try {
+      payload.image = imageFile ? await readFileAsBase64(imageFile) : '';
+      payload.video = videoFile ? await readFileAsBase64(videoFile) : '';
+
+      const res = await apiFetch('/request/service', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'request failed');
+      modal.style.display = 'none';
+      form.reset();
+      showResponseModal('Request sent', 'Your service request has been sent to admin/employee for approval.', true);
+      await loadMyRequests();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send Request';
+    }
+  });
+
   modal.style.display = 'flex';
 }

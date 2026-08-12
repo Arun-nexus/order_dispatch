@@ -1,6 +1,15 @@
-const spState = { allocations: [], products: [], myRequests: [] };
-let spPage = 1;
-const SP_PAGE_SIZE = 7;
+const doState = { orders: [], products: [] };
+let doPage = 1;
+const DO_PAGE_SIZE = 7;
+
+const PAYMENT_MODES = [
+  { value: 'Credit', label: 'Credit' },
+  { value: 'NetBanking', label: 'Net Banking' },
+  { value: 'UPI', label: 'UPI' },
+  { value: 'Cheque', label: 'Cheque' },
+  { value: 'DemandDraft', label: 'Demand Draft' },
+  { value: 'Cash', label: 'Cash' },
+];
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
@@ -20,265 +29,271 @@ function renderTablePagination(container, page, totalPages, onChange) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadMyAllocations();
-  loadMyRequests();
-  loadInventoryForDemo();
+  loadOrders();
+  loadInventoryForOrders();
+  wireHeaderButtons();
   wireFilter();
-  injectAllotModal();
+  injectOrderModal();
+  wireViewModalClose();
 });
 
-async function loadMyAllocations() {
+window.refreshCurrentPageData = () => { loadOrders(); };
+
+// ---------- Load / render ----------
+async function loadOrders() {
   try {
-    const res = await apiFetch('/allocation/mine');
-    if (!res.ok) throw new Error('failed to fetch allocations');
+    const res = await apiFetch('/order/');
+    if (!res.ok) throw new Error('failed to fetch orders');
     const data = await res.json();
-    const mine = data.dataset || [];
-
-    let team = [];
-    let teamAllocations = [];
-    try {
-      const [teamRes, teamAllocRes] = await Promise.all([
-        apiFetch('/account/my_team'),
-        apiFetch('/allocation/team')
-      ]);
-      if (teamRes.ok) team = (await teamRes.json()).dataset || [];
-      if (teamAllocRes.ok) teamAllocations = (await teamAllocRes.json()).dataset || [];
-    } catch (teamErr) {
-      console.error('could not fetch team allocations', teamErr);
-    }
-
-    spState.teamMemberMap = {};
-    team.forEach(m => { spState.teamMemberMap[m.username] = m; });
-
-    const seen = new Set(mine.map(a => a.allocation_id));
-    const merged = [...mine];
-    teamAllocations.forEach(a => {
-      if (!seen.has(a.allocation_id)) { merged.push(a); seen.add(a.allocation_id); }
-    });
-
-    spState.allocations = merged.slice().reverse();
-    spPage = 1;
-    renderWelcome();
-    renderCards();
-    renderTable(spState.allocations);
+    const uname = getUsername();
+    // Distributors only ever get orders into the system via an approved
+    // /request/order — those come back with creator.type === "request" and
+    // creator.raised_by set to whoever raised it. Filter to just this user's.
+    const mine = (data.dataset || []).filter(o => o.creator?.raised_by === uname);
+    doState.orders = mine.slice().reverse();
+    doPage = 1;
+    renderCards(doState.orders);
+    renderTable(doState.orders);
   } catch (err) {
     console.error(err);
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load your demo units.');
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      alert('Could not load your orders.');
+    }
   }
 }
 
-function creatorLabel(username) {
-  if (!username) return '-';
-  if (username === getUsername()) return `${username} (You)`;
-  const member = spState.teamMemberMap && spState.teamMemberMap[username];
-  return member ? `${member.name ?? username}` : username;
-}
-
-function renderWelcome() {
-  const uname = getUsername() || 'Sales Person';
-  const welcomeEl = document.getElementById('welcomeText');
-  if (welcomeEl) welcomeEl.textContent = `Welcome Back, ${uname}`;
-  const dateEl = document.getElementById('todayDate');
-  if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-function statusPillClass(a) {
-  const meta = returnMeta(a);
-  if (a.return_status === 'returned') return 'delivered';
-  if (meta.overdue) return 'cancelled';
-  return 'pending';
-}
-
-async function loadInventoryForDemo() {
+async function loadInventoryForOrders() {
   try {
     const res = await apiFetch('/inventory/');
-    if (!res.ok) throw new Error('failed to fetch inventory');
+    if (!res.ok) return;
     const data = await res.json();
-    spState.products = data.dataset || [];
+    doState.products = data.dataset || [];
   } catch (err) {
     console.error(err);
   }
 }
 
-function returnMeta(a) {
-  if (a.return_status === 'returned') return { label: 'Returned', cls: 'high', overdue: false };
-  const msLeft = new Date(a.return_due_date) - new Date();
-  if (msLeft <= 0) return { label: 'Overdue', cls: 'low', overdue: true };
-  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-  return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false };
+function renderCards(orders) {
+  const today = new Date().toDateString();
+  const todaysOrders = orders.filter(o => o.order_date && new Date(o.order_date).toDateString() === today);
+  const todaysAmount = todaysOrders.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
+
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('cardTotalOrders', orders.length);
+  set('cardTodayAmount', `₹${todaysAmount.toFixed(2)}`);
+  set('cardTodayOrders', todaysOrders.length);
+  set('cardDelivered', orders.filter(o => o.status === 'delivered').length);
+  set('cardPendingOrders', orders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled').length);
 }
 
-function renderCards() {
-  const allocations = spState.allocations;
-  document.getElementById('cardTotal').textContent = allocations.length;
-  document.getElementById('cardNotReturned').textContent = allocations.filter(a => a.return_status !== 'returned').length;
-  document.getElementById('cardOverdue').textContent = allocations.filter(a => returnMeta(a).overdue).length;
+function statusClass(status) {
+  const map = { placed: 'pending', processing: 'pending', delivered: 'delivered', cancelled: 'cancel' };
+  return map[status] || 'pending';
 }
 
-function renderTable(allocations) {
-  const sorted = [...allocations].sort((a, b) =>
-    new Date(b.allotment_date || b.created_at || 0) - new Date(a.allotment_date || a.created_at || 0));
+function renderTable(orders) {
+  const sorted = [...orders].sort((a, b) =>
+    new Date(b.order_date || b.created_at || 0) - new Date(a.order_date || a.created_at || 0));
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / SP_PAGE_SIZE));
-  spPage = Math.min(Math.max(1, spPage), totalPages);
-  const start = (spPage - 1) * SP_PAGE_SIZE;
-  const pageRows = sorted.slice(start, start + SP_PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / DO_PAGE_SIZE));
+  doPage = Math.min(Math.max(1, doPage), totalPages);
+  const start = (doPage - 1) * DO_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + DO_PAGE_SIZE);
 
-  const tbody = document.querySelector('.table-container tbody');
+  const tbody = document.getElementById('ordersTbody');
+  if (!tbody) return;
   tbody.innerHTML = '';
 
-  pageRows.forEach(a => {
-    const meta = returnMeta(a);
-    const productLabel = (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+  if (!pageRows.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8;">No orders yet.</td></tr>`;
+  }
+
+  pageRows.forEach(o => {
+    const items = o.items || [];
+    const productLabel = items.length
+      ? `${items[0].product_name ?? ''}${items.length > 1 ? ` +${items.length - 1} more` : ''}`
+      : '-';
+    const companyName = o.customer?.company_name ?? '';
     const tr = document.createElement('tr');
-    tr.dataset.id = a.allocation_id;
-    const category = a.allocation_type === 'demo_unit' ? 'Demo' : (a.allocation_type ? 'Order' : '-');
+    tr.dataset.orderId = o.order_id;
     tr.innerHTML = `
-      <td>${creatorLabel(a.allocated_by)}</td>
-      <td>${category}</td>
-      <td>${a.customer?.company_name ?? ''}</td>
+      <td>${o.order_id ? o.order_id.slice(0, 8) : '-'}</td>
+      <td>${companyName}</td>
       <td>${productLabel}</td>
-      <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td>${a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="stock ${meta.cls}">${meta.label}</span></td>
-      <td>
-        <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
-        ${a.return_status !== 'returned' ? '<button class="icon-btn return-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
-      </td>`;
+      <td>${o.payment_mode ?? ''}</td>
+      <td>₹${o.total_mrp ?? 0}</td>
+      <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td><span class="${statusClass(o.status)}">${o.status ?? ''}</span></td>
+      <td><button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button></td>`;
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', e => openViewModal(rowAllocation(e))));
-  tbody.querySelectorAll('.return-btn').forEach(b => b.addEventListener('click', e => markReturned(rowAllocation(e))));
+  tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewOrderModal(rowOrder(e))));
 
-  renderTablePagination(document.querySelector('.pagination'), spPage, totalPages, p => {
-    spPage = p;
-    renderTable(allocations);
+  renderTablePagination(document.querySelector('.pagination'), doPage, totalPages, p => {
+    doPage = p;
+    renderTable(orders);
   });
 }
 
-function rowAllocation(e) {
+function rowOrder(e) {
   const tr = e.target.closest('tr');
-  return spState.allocations.find(a => a.allocation_id === tr.dataset.id);
+  return doState.orders.find(o => o.order_id === tr.dataset.orderId);
 }
 
-async function markReturned(a) {
-  if (!a) return;
-  if (!confirm('Mark this demo unit as returned by the customer?')) return;
-  try {
-    const res = await apiFetch(`/allocation/return/${a.allocation_id}`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'update failed');
-    await loadMyAllocations();
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+// ---------- Header search + filter ----------
+function wireHeaderButtons() {
+  const searchInput = document.querySelector('header input');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const term = searchInput.value.trim().toLowerCase();
+      const filtered = doState.orders.filter(o =>
+        (o.order_id || '').toLowerCase().includes(term) ||
+        (o.items || []).some(it => (it.product_name || '').toLowerCase().includes(term)) ||
+        (o.customer?.company_name || '').toLowerCase().includes(term)
+      );
+      doPage = 1;
+      renderTable(filtered);
+    });
   }
 }
 
-function openViewModal(a) {
-  if (!a) return;
-  const modal = document.getElementById('viewAllocationModal');
-  const content = modal.querySelector('.modal-content');
-  const meta = returnMeta(a);
-  content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>Demo Unit Details</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-    </div>
-    <div class="detail"><small>Allocation ID</small><p>${a.allocation_id ?? ''}</p></div>
-    <div class="detail"><small>Customer</small><p>${a.customer?.company_name ?? ''} — ${a.customer?.contractor_person ?? ''} (${a.customer?.contractor_number ?? ''})</p></div>
-    <div class="detail"><small>Products</small><p>${(a.items || []).map(i => `${i.product_name} x${i.quantity}${i.serial_numbers?.length ? ' (' + i.serial_numbers.join(', ') + ')' : ''}`).join('<br>')}</p></div>
-    <div class="detail"><small>Allotment Date</small><p>${a.allotment_date ? new Date(a.allotment_date).toLocaleString() : '-'}</p></div>
-    <div class="detail"><small>Return Due</small><p>${a.return_due_date ? new Date(a.return_due_date).toLocaleString() : '-'}</p></div>
-    <div class="detail"><small>Status</small><p>${meta.label}</p></div>`;
-  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
-  modal.style.display = 'flex';
-}
-
 function wireFilter() {
-  document.querySelector('.filter-btn').addEventListener('click', () => {
-    const status = document.getElementById('statusFilter').value;
-    const filtered = allocations_filtered(status);
-    spPage = 1;
+  const filterBtn = document.getElementById('applyOrderFilter');
+  if (!filterBtn) return;
+  filterBtn.addEventListener('click', () => {
+    const statusVal = document.getElementById('statusFilter')?.value || '';
+    const wantedStatus = statusVal === 'delivered' ? 'delivered' : (statusVal === 'pending' ? null : null);
+    const filtered = doState.orders.filter(o => {
+      if (statusVal === 'delivered') return o.status === 'delivered';
+      if (statusVal === 'pending') return o.status !== 'delivered' && o.status !== 'cancelled';
+      return true;
+    });
+    doPage = 1;
     renderTable(filtered);
   });
 }
 
-function allocations_filtered(status) {
-  if (!status || status === 'All Status') return spState.allocations;
-  return spState.allocations.filter(a => {
-    const meta = returnMeta(a);
-    if (status === 'pending') return a.return_status !== 'returned' && !meta.overdue;
-    if (status === 'overdue') return meta.overdue && a.return_status !== 'returned';
-    if (status === 'returned') return a.return_status === 'returned';
-    return true;
-  });
+// ---------- View Order modal ----------
+function paymentDetailsLabel(o) {
+  const mode = o.payment_mode;
+  const d = o.payment_details || {};
+  if (mode === 'Credit') return `Credit — ${d.credit_days ?? '-'} days`;
+  if (mode === 'Cheque') return `Cheque #${d.cheque_number ?? '-'} (${d.cheque_date ?? '-'})${d.bank_name ? ', ' + d.bank_name : ''}`;
+  if (mode === 'DemandDraft') return `DD #${d.dd_number ?? '-'} (${d.dd_date ?? '-'})${d.bank_name ? ', ' + d.bank_name : ''}`;
+  if (mode === 'UPI') return `UPI — ${d.upi_id ?? '-'}`;
+  if (mode === 'NetBanking') return `Net Banking — ${d.bank_name ?? '-'}, A/C ${d.account_number ?? '-'}, IFSC ${d.ifsc_code ?? '-'}`;
+  if (mode === 'Cash') return `Cash — received by ${d.received_by ?? '-'}`;
+  return mode || '-';
 }
 
-// ---------- Allot Demo Unit wizard ----------
-const spWiz = { customerId: '', customer: null, cart: {} };
-
-function resetSpWiz() {
-  spWiz.customerId = '';
-  spWiz.customer = null;
-  spWiz.cart = {};
-}
-
-function injectAllotModal() {
-  const modal = document.getElementById('allotModal');
-  const btn = document.querySelector('.top-actions .add-product');
-  if (btn) btn.addEventListener('click', () => {
-    resetSpWiz();
-    modal.style.display = 'flex';
-    renderCustomerTypeStep();
-  });
-  modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
-}
-
-function wizBody() {
-  const modal = document.getElementById('allotModal');
+function openViewOrderModal(o) {
+  if (!o) return;
+  const modal = document.getElementById('viewOrderModal');
   const content = modal.querySelector('.modal-content');
+  const items = o.items || [];
+  const customer = o.customer || {};
+
+  const itemsRows = items.length
+    ? items.map(it => `<tr>
+        <td>${it.product_name ?? ''}</td>
+        <td>${it.quantity ?? 0}</td>
+        <td>₹${it.price ?? 0}</td>
+        <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="4" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 id="wizTitle">Request Demo Unit</h3>
-      <button type="button" id="wizClose" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      <h3>Order Details</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div id="wizStepBody"></div>`;
-  content.querySelector('#wizClose').addEventListener('click', () => modal.style.display = 'none');
-  return document.getElementById('wizStepBody');
-}
-function wizTitle(t) { document.getElementById('wizTitle').textContent = t; }
+    <div class="detail"><small>Order ID</small><p>${o.order_id ?? ''}</p></div>
+    <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
+    <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
+      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Qty</th><th>Price</th><th>Line Total</th></tr></thead>
+      <tbody>${itemsRows}</tbody>
+    </table>
+    <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
+    <div class="detail"><small>Status</small><p>${o.status ?? ''}</p></div>
+    <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
+    <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
 
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
+
+function wireViewModalClose() {
+  const modal = document.getElementById('viewOrderModal');
+  if (modal) modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+}
+
+// ---------- Create Order wizard (raises an approval request — distributors
+// can't create orders directly, only admin/employee can) ----------
+const orderWiz = { customerId: '', customer: null, cart: {}, discount: 0 };
+
+function resetOrderWiz() {
+  orderWiz.customerId = '';
+  orderWiz.customer = null;
+  orderWiz.cart = {};
+  orderWiz.discount = 0;
+}
+
+function injectOrderModal() {
+  const modal = document.getElementById('orderModal');
+  if (!modal) return;
+  modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  const btn = document.getElementById('createOrderBtn');
+  if (btn) btn.addEventListener('click', () => { resetOrderWiz(); modal.style.display = 'flex'; renderCustomerTypeStep(); });
+}
+
+function wizBody() { return document.querySelector('#orderModal .modal-content'); }
+
+function wizHeader(title) {
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>${title}</h3>
+      <button type="button" class="wizClose" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>`;
+}
+
+function wireWizClose() {
+  wizBody().querySelector('.wizClose')?.addEventListener('click', () => {
+    document.getElementById('orderModal').style.display = 'none';
+  });
+}
+
+// Step 1: existing vs new customer
 function renderCustomerTypeStep() {
-  const body = wizBody();
-  wizTitle('Customer');
-  body.innerHTML = `
-    <p style="color:#64748b;margin-bottom:14px;">Existing customer or a new one?</p>
+  wizBody().innerHTML = wizHeader('New Order — Customer') + `
+    <p style="color:#64748b;margin-bottom:14px;">Is this order for an existing customer or a new one?</p>
     <div style="display:flex;gap:10px;">
       <button id="btnExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-address-book"></i><br>Existing
+        <i class="fa-solid fa-address-book"></i><br>Existing Customer
       </button>
       <button id="btnNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-user-plus"></i><br>New
+        <i class="fa-solid fa-user-plus"></i><br>New Customer
       </button>
     </div>`;
+  wireWizClose();
   document.getElementById('btnExisting').addEventListener('click', renderExistingCustomerStep);
   document.getElementById('btnNew').addEventListener('click', renderNewCustomerStep);
 }
 
+// Step 2a: search + pick existing customer
 function renderExistingCustomerStep() {
-  const body = wizBody();
-  wizTitle('Select Customer');
-  body.innerHTML = `
+  wizBody().innerHTML = wizHeader('New Order — Select Customer') + `
     <input id="custSearch" placeholder="Search company, GST or contact person" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div id="custResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
-    <div style="margin-top:14px;">
+    <div style="display:flex;justify-content:flex-start;margin-top:14px;">
       <button type="button" id="backBtn1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
     </div>`;
+  wireWizClose();
   document.getElementById('backBtn1').addEventListener('click', renderCustomerTypeStep);
 
   const searchInput = document.getElementById('custSearch');
   const resultsBox = document.getElementById('custResults');
+
   const runSearch = async () => {
     resultsBox.innerHTML = '<small style="color:#94a3b8;">Searching...</small>';
     try {
@@ -294,8 +309,8 @@ function renderExistingCustomerStep() {
         </div>`).join('');
       resultsBox.querySelectorAll('.cust-row').forEach(row => row.addEventListener('click', () => {
         const c = list.find(x => x.customer_id === row.dataset.id);
-        spWiz.customerId = c.customer_id;
-        spWiz.customer = c;
+        orderWiz.customerId = c.customer_id;
+        orderWiz.customer = c;
         renderProductsStep();
       }));
     } catch (err) {
@@ -307,14 +322,13 @@ function renderExistingCustomerStep() {
   runSearch();
 }
 
+// Step 2b: new customer form
 function renderNewCustomerStep() {
-  const body = wizBody();
-  wizTitle('New Customer');
-  body.innerHTML = `
+  wizBody().innerHTML = wizHeader('New Order — New Customer') + `
     <form id="newCustForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="company_name" placeholder="Company Name" required>
-      <input name="company_address" placeholder="Company Address" required>
-      <input name="gst_number" placeholder="GST Number" required>
+      <input name="company_name" placeholder="Customer Name" required>
+      <input name="company_address" placeholder="Customer Address" required>
+      <input name="gst_number" placeholder="GST Number (if applicable)">
       <input name="contractor_person" placeholder="Contact Person" required>
       <input name="contractor_number" placeholder="Contact Number" required>
       <input name="contractor_email" type="email" placeholder="Contact Email">
@@ -323,14 +337,18 @@ function renderNewCustomerStep() {
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
       </div>
     </form>`;
+  wireWizClose();
   document.getElementById('backBtn2').addEventListener('click', renderCustomerTypeStep);
   document.getElementById('newCustForm').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const payload = {
-      company_name: fd.get('company_name'), company_address: fd.get('company_address'),
-      gst_number: fd.get('gst_number'), contractor_person: fd.get('contractor_person'),
-      contractor_number: fd.get('contractor_number'), contractor_email: fd.get('contractor_email') || ''
+      company_name: fd.get('company_name'),
+      company_address: fd.get('company_address'),
+      gst_number: fd.get('gst_number') || '',
+      contractor_person: fd.get('contractor_person'),
+      contractor_number: fd.get('contractor_number'),
+      contractor_email: fd.get('contractor_email') || '',
     };
     try {
       const res = await apiFetch('/customer/create', {
@@ -338,8 +356,8 @@ function renderNewCustomerStep() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'customer creation failed');
-      spWiz.customerId = data.customer_id;
-      spWiz.customer = data.customer || payload;
+      orderWiz.customerId = data.customer_id;
+      orderWiz.customer = data.customer || payload;
       renderProductsStep();
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
@@ -347,117 +365,266 @@ function renderNewCustomerStep() {
   });
 }
 
+// Step 3: product picker with quantity per row
 function renderProductsStep() {
-  const body = wizBody();
-  wizTitle(`Demo Units for ${spWiz.customer?.company_name ?? ''}`);
-  const products = spState.products;
-  body.innerHTML = `
+  const products = doState.products || [];
+  wizBody().innerHTML = wizHeader(`New Order — ${orderWiz.customer?.company_name ?? 'Products'}`) + `
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Stock</th><th style="width:70px;">Qty</th></tr></thead>
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Stock</th><th>Price</th><th style="width:70px;">Qty</th></tr></thead>
         <tbody id="prodRows"></tbody>
       </table>
     </div>
-    <p style="font-size:12px;color:#94a3b8;margin-top:8px;">Return window: 7 days from allotment date.</p>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
-      <button type="button" id="backCart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-      <button type="button" id="allotBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
+      <button type="button" id="backBtn3" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="toPaymentBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
     </div>`;
-  document.getElementById('backCart').addEventListener('click', () => spWiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
+  wireWizClose();
+  document.getElementById('backBtn3').addEventListener('click', () => orderWiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
 
   const rowsBox = document.getElementById('prodRows');
-  const renderRows = (list) => {
-    rowsBox.innerHTML = list.map(p => `
+
+  function productRowHtml(p) {
+    const qtyInCart = orderWiz.cart[p.product_id]?.quantity ?? '';
+    return `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
         <td>${p.quantity ?? 0}</td>
-        <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${spWiz.cart[p.product_id]?.quantity ?? 0}"
-              data-id="${p.product_id}" class="qtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
-      </tr>`).join('');
-    rowsBox.querySelectorAll('.qtyInput').forEach(inp => inp.addEventListener('input', () => {
-      const p = list.find(x => x.product_id === inp.dataset.id);
-      const qty = Math.max(0, Math.min(Number(inp.value) || 0, Number(p.quantity) || 0));
-      inp.value = qty;
-      if (qty > 0) spWiz.cart[p.product_id] = { product_id: p.product_id, product_name: p.product_name, quantity: qty };
-      else delete spWiz.cart[p.product_id];
-    }));
-  };
+        <td>₹${p.price ?? 0}</td>
+        <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
+              placeholder="0" data-product-id="${p.product_id}" class="qtyInput"
+              style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+      </tr>`;
+  }
+
+  function renderRows(list) { rowsBox.innerHTML = list.map(productRowHtml).join(''); }
+
+  function computeTypedQty(inp) {
+    if (inp.value.trim() === '') return null;
+    let qty = Math.floor(Math.max(0, Number(inp.value)));
+    if (!Number.isFinite(qty)) qty = 0;
+    return qty;
+  }
+
+  function applyQtyToCart(productId, p, qty) {
+    if (qty === null || qty <= 0) { delete orderWiz.cart[productId]; return; }
+    orderWiz.cart[productId] = {
+      product_id: p.product_id,
+      product_name: p.product_name,
+      price: Number(p.price) || 0,
+      tax_rate: Number(p.tax_rate) || 0,
+      quantity: qty
+    };
+  }
+
+  // Same fix as the admin Orders page: don't rewrite the field mid-keystroke
+  // (it yanks the caret to the end and breaks multi-digit entry on mobile).
+  // Only clamp to stock once the user leaves the field.
+  rowsBox.addEventListener('input', (e) => {
+    const inp = e.target.closest('.qtyInput');
+    if (!inp) return;
+    const productId = inp.dataset.productId;
+    const p = products.find(x => x.product_id === productId);
+    if (!p) return;
+    applyQtyToCart(productId, p, computeTypedQty(inp));
+  });
+
+  rowsBox.addEventListener('blur', (e) => {
+    const inp = e.target.closest('.qtyInput');
+    if (!inp) return;
+    const productId = inp.dataset.productId;
+    const p = products.find(x => x.product_id === productId);
+    if (!p) return;
+
+    let qty = computeTypedQty(inp);
+    if (qty === null) return;
+
+    const hasKnownStock = p.quantity !== undefined && p.quantity !== null && Number.isFinite(Number(p.quantity));
+    if (hasKnownStock) {
+      const stock = Number(p.quantity);
+      if (qty > stock) {
+        qty = stock;
+        inp.value = qty || '';
+        alert(stock > 0
+          ? `Only ${stock} unit(s) of ${p.product_name} are in stock — quantity adjusted.`
+          : `${p.product_name} is out of stock.`);
+      }
+    }
+    applyQtyToCart(productId, p, qty);
+  }, true);
+
   renderRows(products);
+  if (!products.length) {
+    rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:#94a3b8;">
+      No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
+    </td></tr>`;
+    document.getElementById('retryInvBtn')?.addEventListener('click', async () => {
+      await loadInventoryForOrders();
+      renderProductsStep();
+    });
+  }
+
   document.getElementById('prodFilter').addEventListener('input', e => {
     const term = e.target.value.trim().toLowerCase();
     renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term)));
   });
 
-  document.getElementById('allotBtn').addEventListener('click', async () => {
-    if (!Object.keys(spWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
-    const payload = {
-      customer_id: spWiz.customerId || '',
-      customer: spWiz.customer || {},
-      items: Object.values(spWiz.cart)
-    };
-    try {
-      const res = await apiFetch('/request/demo_unit', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'request failed');
-      document.getElementById('allotModal').style.display = 'none';
-      resetSpWiz();
-      alert('Request sent — admin/employee will review and approve it.');
-      await loadMyRequests();
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-    }
+  document.getElementById('toPaymentBtn').addEventListener('click', () => {
+    if (!Object.keys(orderWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
+    renderPaymentStep();
   });
 }
 
-// ---------- My Requests panel ----------
-async function loadMyRequests() {
-  try {
-    const res = await apiFetch('/request/mine');
-    if (!res.ok) throw new Error('failed to fetch requests');
-    const data = await res.json();
-    spState.myRequests = (data.dataset || []).filter(r => r.request_type === 'demo_unit' || r.request_type === 'order');
-    renderMyRequests(spState.myRequests);
-    renderPendingRequestsCard();
-  } catch (err) {
-    console.error(err);
+// Step 4: payment mode + conditional fields + discount, then send for approval
+function renderPaymentStep() {
+  const cartItems = Object.values(orderWiz.cart);
+  const subtotal = cartItems.reduce((s, i) => s + i.price * i.quantity, 0);
+
+  wizBody().innerHTML = wizHeader('New Order — Payment') + `
+    <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
+      ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br>')}
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;">
+      Subtotal: ₹${subtotal.toFixed(2)}
+    </div>
+    <select id="paymentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+      <option value="">Select Payment Mode</option>
+      ${PAYMENT_MODES.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
+    </select>
+    <div id="paymentExtra"></div>
+    <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
+    <div style="display:flex;justify-content:space-between;margin-top:10px;">
+      <button type="button" id="backBtn4" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="sendRequestBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
+    </div>`;
+  wireWizClose();
+  document.getElementById('backBtn4').addEventListener('click', renderProductsStep);
+
+  const modeSelect = document.getElementById('paymentMode');
+  const extraBox = document.getElementById('paymentExtra');
+  modeSelect.addEventListener('change', () => renderPaymentExtra(modeSelect.value, extraBox));
+
+  document.getElementById('discountInput').addEventListener('input', e => orderWiz.discount = Number(e.target.value) || 0);
+
+  document.getElementById('sendRequestBtn').addEventListener('click', () => submitOrderRequest(modeSelect, extraBox));
+}
+
+function renderPaymentExtra(mode, extraBox) {
+  if (mode === 'Credit') {
+    extraBox.innerHTML = `
+      <label style="font-size:13px;color:#64748b;">Credit Period</label>
+      <select id="creditDaysSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+        <option value="15">15 days</option><option value="30">30 days</option>
+        <option value="45">45 days</option><option value="60">60 days</option>
+        <option value="manual">Other (enter days)</option>
+      </select>
+      <input id="creditDaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+    const sel = document.getElementById('creditDaysSelect');
+    const manual = document.getElementById('creditDaysManual');
+    sel.addEventListener('change', () => manual.style.display = sel.value === 'manual' ? 'block' : 'none');
+  } else if (mode === 'Cheque') {
+    extraBox.innerHTML = `
+      <input id="chequeNumber" placeholder="Cheque Number" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <input id="chequeDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <input id="chequeBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+  } else if (mode === 'DemandDraft') {
+    extraBox.innerHTML = `
+      <input id="ddNumber" placeholder="Demand Draft Number" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <input id="ddDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <input id="ddBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+  } else if (mode === 'UPI') {
+    extraBox.innerHTML = `<input id="upiId" placeholder="UPI ID (e.g. name@bank)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">`;
+  } else if (mode === 'NetBanking') {
+    extraBox.innerHTML = `
+      <input id="nbBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <input id="nbAccount" placeholder="Account Number" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <input id="nbIfsc" placeholder="IFSC Code" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+  } else if (mode === 'Cash') {
+    extraBox.innerHTML = `<input id="cashReceivedBy" placeholder="Received By (Person Name)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">`;
+  } else {
+    extraBox.innerHTML = '';
   }
 }
 
-function renderPendingRequestsCard() {
-  const card = document.getElementById('cardPendingRequests');
-  if (card) card.textContent = spState.myRequests.filter(r => r.status === 'pending' && r.request_type === 'demo_unit').length;
-
-  const rejectedCard = document.getElementById('cardRejectedRequests');
-  if (rejectedCard) rejectedCard.textContent = spState.myRequests.filter(r => r.status === 'rejected' && r.request_type === 'demo_unit').length;
+function buildPaymentDetails(mode) {
+  if (mode === 'Credit') {
+    const sel = document.getElementById('creditDaysSelect');
+    const manual = document.getElementById('creditDaysManual');
+    const days = sel.value === 'manual' ? Number(manual.value) : Number(sel.value);
+    if (!days || days < 1 || days > 60) throw new Error('Credit days must be between 1 and 60.');
+    return { credit_days: days };
+  }
+  if (mode === 'Cheque') {
+    const cheque_number = document.getElementById('chequeNumber').value.trim();
+    const cheque_date = document.getElementById('chequeDate').value;
+    const bank_name = document.getElementById('chequeBank').value.trim();
+    if (!cheque_number || !cheque_date) throw new Error('Cheque number and date are required.');
+    return { cheque_number, cheque_date, bank_name };
+  }
+  if (mode === 'DemandDraft') {
+    const dd_number = document.getElementById('ddNumber').value.trim();
+    const dd_date = document.getElementById('ddDate').value;
+    const bank_name = document.getElementById('ddBank').value.trim();
+    if (!dd_number || !dd_date) throw new Error('Demand draft number and date are required.');
+    return { dd_number, dd_date, bank_name };
+  }
+  if (mode === 'UPI') {
+    const upi_id = document.getElementById('upiId').value.trim();
+    if (!upi_id) throw new Error('UPI ID is required.');
+    return { upi_id };
+  }
+  if (mode === 'NetBanking') {
+    const bank_name = document.getElementById('nbBank').value.trim();
+    const account_number = document.getElementById('nbAccount').value.trim();
+    const ifsc_code = document.getElementById('nbIfsc').value.trim();
+    if (!bank_name || !account_number || !ifsc_code) throw new Error('Bank name, account number and IFSC code are required.');
+    return { bank_name, account_number, ifsc_code };
+  }
+  if (mode === 'Cash') {
+    const received_by = document.getElementById('cashReceivedBy').value.trim();
+    if (!received_by) throw new Error('Received-by person name is required.');
+    return { received_by };
+  }
+  return {};
 }
 
-function requestStatusClass(status) {
-  if (status === 'approved') return 'delivered';
-  if (status === 'rejected') return 'cancelled';
-  return 'pending';
-}
+async function submitOrderRequest(modeSelect, extraBox) {
+  const mode = modeSelect.value;
+  if (!mode) { alert('Please select a payment mode.'); return; }
 
-function renderMyRequests(requests) {
-  const box = document.getElementById('myRequestsList');
-  if (!box) return;
-  const sorted = [...requests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  box.innerHTML = sorted.length ? sorted.map(r => {
-    const isOrder = r.request_type === 'order';
-    const productLabel = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
-    const customerLabel = r.details?.customer?.company_name || 'New customer';
-    return `
-      <div class="order-item">
-        <div class="order-left">
-          <div class="order-icon"><i class="fa-solid ${isOrder ? 'fa-cart-shopping' : 'fa-paper-plane'}"></i></div>
-          <div>
-            <h4>${customerLabel} · ${isOrder ? 'Order' : 'Demo Unit'}</h4>
-            <p>${productLabel}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
-          </div>
-        </div>
-        <span class="status ${requestStatusClass(r.status)}">${r.status}</span>
-      </div>`;
-  }).join('') : '<p style="color:#94a3b8;padding:10px;">No requests raised yet.</p>';
+  let payment_details;
+  try {
+    payment_details = buildPaymentDetails(mode);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+
+  const payload = {
+    customer_id: orderWiz.customerId || '',
+    customer: orderWiz.customer || {},
+    items: Object.values(orderWiz.cart).map(i => ({
+      product_id: i.product_id, product_name: i.product_name,
+      quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
+    })),
+    payment_mode: mode,
+    payment_details,
+    discount: orderWiz.discount || 0
+  };
+
+  try {
+    const res = await apiFetch('/request/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'request failed');
+    document.getElementById('orderModal').style.display = 'none';
+    resetOrderWiz();
+    alert('Order request sent — admin/employee will review and approve it.');
+    await loadOrders();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }

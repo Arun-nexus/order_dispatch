@@ -469,15 +469,6 @@ async function openCreateModal() {
         spare_parts: fd.get('spare_parts') || ''
       };
 
-      // outdoor services must reference a serial number that actually exists in Orders
-      if (payload.location === 'outdoor') {
-        const matchInOrders = svcState.orders.some(o => (o.items || []).some(it => (it.serial_numbers || []).includes(payload.serial_no)));
-        if (!matchInOrders) {
-          alert('This Serial No. was not found in Orders. Outdoor services must match an existing order.');
-          return;
-        }
-      }
-
       const submitBtn = form.querySelector('button[type="submit"]');
       submitBtn.disabled = true;
       submitBtn.textContent = 'Uploading...';

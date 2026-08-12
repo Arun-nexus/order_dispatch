@@ -235,7 +235,7 @@ function ensureBellUI() {
 }
 
 function notifItemHtml(r, canAct) {
-  const typeLabels = { demo_unit: 'Demo Unit', order: 'Order', spare_part: 'Spare Part', media_review: 'Service Media', status_update: 'Service Status Update' };
+  const typeLabels = { demo_unit: 'Demo Unit', order: 'Order', spare_part: 'Spare Part', media_review: 'Service Media', status_update: 'Service Status Update', service: 'New Service' };
   const label = typeLabels[r.request_type] || r.request_type;
   const who = r.raised_by ? `by ${r.raised_by}` : '';
   let sub = '';
@@ -243,6 +243,8 @@ function notifItemHtml(r, canAct) {
     sub = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
   } else if (r.request_type === 'spare_part') {
     sub = r.details?.note || '';
+  } else if (r.request_type === 'service') {
+    sub = `${r.details?.product_id || ''} — ${r.details?.issue || ''}`;
   } else if (r.request_type === 'media_review') {
     sub = `Service #${(r.details?.service_id || '').slice(0, 8)} uploaded media`;
   } else if (r.request_type === 'status_update') {

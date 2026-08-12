@@ -219,12 +219,13 @@ function openEditOrderModal(o) {
   const select = modal.querySelector('select');
   inputs[0].value = o.product_name ?? '';
   inputs[1].value = o.product_id ?? '';
-  inputs[2].value = o.serial_no ?? '';
-  inputs[3].value = o.company_name ?? '';
-  inputs[4].value = o.gst_number ?? '';
-  inputs[5].value = o.price ?? '';
-  inputs[6].value = o.tax_rate ?? '';
-  inputs[7].value = o.discount ?? 0;
+  inputs[2].value = o.quantity ?? (o.items?.[0]?.quantity ?? 1);
+  inputs[3].value = o.serial_no ?? '';
+  inputs[4].value = o.company_name ?? '';
+  inputs[5].value = o.gst_number ?? '';
+  inputs[6].value = o.price ?? '';
+  inputs[7].value = o.tax_rate ?? '';
+  inputs[8].value = o.discount ?? 0;
   if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.payment_mode);
   modal.style.display = 'flex';
 }
@@ -462,18 +463,19 @@ function wireDetailModals() {
       e.preventDefault();
       const inputs = editForm.querySelectorAll('input');
       const select = editForm.querySelector('select');
-      const price = Number(inputs[5].value);
-      const tax_rate = Number(inputs[6].value);
-      const discount = Number(inputs[7].value || 0);
+      const quantity = Math.max(1, Math.floor(Number(inputs[2].value)) || 1);
+      const price = Number(inputs[6].value);
+      const tax_rate = Number(inputs[7].value);
+      const discount = Number(inputs[8].value || 0);
       const updated_order_value = {
         product_name: inputs[0].value,
-        serial_no: inputs[2].value,
-        company_name: inputs[3].value,
-        gst_number: inputs[4].value,
+        quantity,
+        serial_no: inputs[3].value,
+        company_name: inputs[4].value,
+        gst_number: inputs[5].value,
         price,
         tax_rate,
         discount,
-        total_mrp: price + (tax_rate * price / 100) - discount,
         payment_mode: select ? select.value : undefined
       };
       try {
@@ -759,7 +761,8 @@ function renderNewCustomerStep() {
 // Step 3: product picker with quantity per row
 function renderProductsStep() {
   wizardTitle(`New Order — ${wiz.customer?.company_name ?? 'Products'}`);
-  const products = invLookup.products;
+  const products = invLookup.products || [];
+
   wizardBody().innerHTML = `
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:320px;overflow-y:auto;">
@@ -791,27 +794,107 @@ function renderProductsStep() {
   renderSparePartsRows();
 
   const rowsBox = document.getElementById('prodRows');
-  const renderRows = (list) => {
-    rowsBox.innerHTML = list.map(p => `
+
+  function productRowHtml(p) {
+    const qtyInCart = wiz.cart[p.product_id]?.quantity ?? '';
+    return `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
         <td>${p.quantity ?? 0}</td>
         <td>₹${p.price ?? 0}</td>
-        <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${wiz.cart[p.product_id]?.quantity ?? 0}"
-              data-id="${p.product_id}" class="qtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
-      </tr>`).join('');
-    rowsBox.querySelectorAll('.qtyInput').forEach(inp => inp.addEventListener('input', () => {
-      const p = products.find(x => x.product_id === inp.dataset.id);
-      const qty = Math.max(0, Math.min(Number(inp.value) || 0, Number(p.quantity) || 0));
-      inp.value = qty;
-      if (qty > 0) {
-        wiz.cart[p.product_id] = { product_id: p.product_id, product_name: p.product_name, price: Number(p.price) || 0, tax_rate: Number(p.tax_rate) || 0, quantity: qty };
-      } else {
-        delete wiz.cart[p.product_id];
+        <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
+              placeholder="0" data-product-id="${p.product_id}" class="qtyInput"
+              style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+      </tr>`;
+  }
+
+  function renderRows(list) {
+    rowsBox.innerHTML = list.map(productRowHtml).join('');
+  }
+
+  function computeTypedQty(inp) {
+    if (inp.value.trim() === '') return null;
+    let qty = Math.floor(Math.max(0, Number(inp.value)));
+    if (!Number.isFinite(qty)) qty = 0;
+    return qty;
+  }
+
+  function applyQtyToCart(productId, p, qty) {
+    if (qty === null || qty <= 0) {
+      delete wiz.cart[productId];
+      return;
+    }
+    wiz.cart[productId] = {
+      product_id: p.product_id,
+      product_name: p.product_name,
+      price: Number(p.price) || 0,
+      tax_rate: Number(p.tax_rate) || 0,
+      quantity: qty
+    };
+  }
+
+  // One delegated listener on the container, attached ONCE — survives every
+  // re-render from the filter box, so there's no risk of listeners not being
+  // (re)attached to freshly created rows.
+  //
+  // IMPORTANT: this only reads the field and updates the cart — it never
+  // rewrites inp.value while the user is mid-keystroke. Doing that used to
+  // move the caret to the end of the field on every digit typed, which on
+  // mobile keyboards made it impossible to type more than one digit (each
+  // new digit landed in the wrong place or got wiped by the cap). The stock
+  // cap is enforced separately, only once the user leaves the field.
+  rowsBox.addEventListener('input', (e) => {
+    const inp = e.target.closest('.qtyInput');
+    if (!inp) return;
+
+    const productId = inp.dataset.productId;
+    const p = products.find(x => x.product_id === productId);
+    if (!p) return;
+
+    applyQtyToCart(productId, p, computeTypedQty(inp));
+  });
+
+  // Enforce the stock cap once the user is done typing (blur doesn't bubble,
+  // so this needs capture:true to work through delegation).
+  rowsBox.addEventListener('blur', (e) => {
+    const inp = e.target.closest('.qtyInput');
+    if (!inp) return;
+
+    const productId = inp.dataset.productId;
+    const p = products.find(x => x.product_id === productId);
+    if (!p) return;
+
+    let qty = computeTypedQty(inp);
+    if (qty === null) return;
+
+    // only enforce a cap when we actually have a real stock number for this
+    // product — missing/undefined stock data should never silently zero out
+    // what the user is typing
+    const hasKnownStock = p.quantity !== undefined && p.quantity !== null && Number.isFinite(Number(p.quantity));
+    if (hasKnownStock) {
+      const stock = Number(p.quantity);
+      if (qty > stock) {
+        qty = stock;
+        inp.value = qty || '';
+        alert(stock > 0
+          ? `Only ${stock} unit(s) of ${p.product_name} are in stock — quantity adjusted.`
+          : `${p.product_name} is out of stock.`);
       }
-    }));
-  };
+    }
+
+    applyQtyToCart(productId, p, qty);
+  }, true);
+
   renderRows(products);
+  if (!products.length) {
+    rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:#94a3b8;">
+      No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
+    </td></tr>`;
+    document.getElementById('retryInvBtn')?.addEventListener('click', async () => {
+      await loadInventoryForOrders();
+      renderProductsStep();
+    });
+  }
 
   document.getElementById('prodFilter').addEventListener('input', e => {
     const term = e.target.value.trim().toLowerCase();
