@@ -256,12 +256,53 @@ function wireHeaderButtons() {
       const filtered = orderState.orders.filter(o =>
         (o.order_id || '').toLowerCase().includes(term) ||
         (o.items || []).some(it => (it.product_name || '').toLowerCase().includes(term)) ||
+        (o.items || []).some(it => (it.serial_numbers || []).some(sn => (sn || '').toLowerCase().includes(term))) ||
         (o.customer?.company_name || o.company_name || '').toLowerCase().includes(term)
       );
+      orderState.currentBase = filtered;
       ordersPage = 1;
-      renderOrdersTable(filtered);
+      renderOrdersTable(applySort(filtered));
     });
   }
+
+  wireSortBy();
+}
+
+function applySort(list) {
+  const sortBy = document.getElementById('orderSortBy')?.value || 'newest';
+  const sorted = [...list];
+  switch (sortBy) {
+    case 'oldest': sorted.sort((a, b) => new Date(a.order_date || 0) - new Date(b.order_date || 0)); break;
+    case 'amount_high': sorted.sort((a, b) => (Number(b.total_mrp) || 0) - (Number(a.total_mrp) || 0)); break;
+    case 'amount_low': sorted.sort((a, b) => (Number(a.total_mrp) || 0) - (Number(b.total_mrp) || 0)); break;
+    case 'order_id': sorted.sort((a, b) => (a.order_id || '').localeCompare(b.order_id || '')); break;
+    default: sorted.sort((a, b) => new Date(b.order_date || 0) - new Date(a.order_date || 0));
+  }
+  return sorted;
+}
+
+function wireSortBy() {
+  const filterSection = document.querySelector('.filter-section');
+  if (!filterSection || document.getElementById('orderSortBy')) return;
+  const box = document.createElement('div');
+  box.className = 'filter-box';
+  box.innerHTML = `
+    <i class="fa-solid fa-arrow-down-wide-short"></i>
+    <select id="orderSortBy">
+      <option value="newest">Newest First</option>
+      <option value="oldest">Oldest First</option>
+      <option value="amount_high">Amount: High to Low</option>
+      <option value="amount_low">Amount: Low to High</option>
+      <option value="order_id">Order ID</option>
+    </select>`;
+  const filterBtn = filterSection.querySelector('.filter-btn');
+  filterSection.insertBefore(box, filterBtn);
+
+  document.getElementById('orderSortBy').addEventListener('change', () => {
+    const base = orderState.currentBase || orderState.orders;
+    ordersPage = 1;
+    renderOrdersTable(applySort(base));
+  });
 }
 
 // ---------- Apply Filter (Status / Payment Mode / Date) ----------
@@ -287,8 +328,9 @@ function wireFilter() {
       return statusOk && paymentOk && dateOk;
     });
 
+    orderState.currentBase = filtered;
     ordersPage = 1;
-    renderOrdersTable(filtered);
+    renderOrdersTable(applySort(filtered));
   });
 }
 
@@ -446,6 +488,7 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
     <div class="detail"><small>Status</small><p>${o.status ?? ''}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
+    <div class="detail"><small>Warranty</small><p>${(o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +₹${o.warranty_charge ?? 0})` : 'Standard (1 Year)'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
 
@@ -470,7 +513,7 @@ function wireDetailModals() {
       const updated_order_value = {
         product_name: inputs[0].value,
         quantity,
-        serial_no: inputs[3].value,
+        serial_no: inputs[3].value.trim().toLowerCase(),
         company_name: inputs[4].value,
         gst_number: inputs[5].value,
         price,
@@ -536,9 +579,10 @@ const wiz = {
   customerId: '',      // set when existing customer picked
   customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
   cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
-  sparePartsCart: [],   // optional: [{name, price, quantity}] — free-text, not tied to inventory
   paymentMode: '',
-  discount: 0
+  discount: 0,
+  warrantyYears: 1,
+  warrantyCharge: 0
 };
 
 const PAYMENT_MODES = [
@@ -554,9 +598,10 @@ function resetWizard() {
   wiz.customerId = '';
   wiz.customer = null;
   wiz.cart = {};
-  wiz.sparePartsCart = [];
   wiz.paymentMode = '';
   wiz.discount = 0;
+  wiz.warrantyYears = 1;
+  wiz.warrantyCharge = 0;
 }
 
 function injectCreateModal() {
@@ -764,21 +809,15 @@ function renderProductsStep() {
   const products = invLookup.products || [];
 
   wizardBody().innerHTML = `
+    <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
-    <div style="max-height:320px;overflow-y:auto;">
+    <div style="margin-top:14px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         <thead><tr style="text-align:left;color:#fff;">
           <th>Product</th><th>Stock</th><th>Price</th><th style="width:70px;">Qty</th>
         </tr></thead>
         <tbody id="prodRows"></tbody>
       </table>
-    </div>
-    <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <label style="font-size:13px;font-weight:600;color:#334155;">Spare Parts <span style="font-weight:400;color:#94a3b8;">(optional)</span></label>
-        <button type="button" id="addSparePartBtn" style="padding:4px 10px;border:none;border-radius:6px;background:#eef2ff;color:#2563eb;cursor:pointer;font-size:12px;">+ Add Spare Part</button>
-      </div>
-      <div id="sparePartsRows" style="display:flex;flex-direction:column;gap:6px;"></div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
       <button type="button" id="backBtn3" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
@@ -787,11 +826,36 @@ function renderProductsStep() {
 
   document.getElementById('backBtn3').addEventListener('click', () => wiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
 
-  document.getElementById('addSparePartBtn').addEventListener('click', () => {
-    wiz.sparePartsCart.push({ name: '', price: 0, quantity: 1 });
-    renderSparePartsRows();
+  // ---------- Category tabs: Products / Accessories / Spare Parts ----------
+  // Filters the same product table by product_type, same pattern as the
+  // category tabs on the Inventory page.
+  const catTabsBox = document.getElementById('prodCatTabs');
+  const categories = [
+    { type: 'product', label: 'Products' },
+    { type: 'accessories', label: 'Accessories' },
+    { type: 'spare_parts', label: 'Spare Parts' }
+  ];
+  let activeCategory = 'product';
+
+  function paintCatTab(btn, active) {
+    btn.style.border = active ? '1px solid #1665ff' : '1px solid #e2e8f0';
+    btn.style.background = active ? '#eaf1ff' : '#f8fafc';
+    btn.style.color = active ? '#1665ff' : '#334155';
+    btn.style.borderRadius = '8px';
+    btn.style.padding = '8px 14px';
+    btn.style.cursor = 'pointer';
+    btn.style.fontSize = '13px';
+  }
+
+  catTabsBox.innerHTML = categories.map(c => `<button type="button" class="prod-cat-btn" data-type="${c.type}">${c.label}</button>`).join('');
+  catTabsBox.querySelectorAll('.prod-cat-btn').forEach(btn => {
+    paintCatTab(btn, btn.dataset.type === activeCategory);
+    btn.addEventListener('click', () => {
+      activeCategory = btn.dataset.type;
+      catTabsBox.querySelectorAll('.prod-cat-btn').forEach(b => paintCatTab(b, b.dataset.type === activeCategory));
+      applyFilters();
+    });
   });
-  renderSparePartsRows();
 
   const rowsBox = document.getElementById('prodRows');
 
@@ -885,7 +949,20 @@ function renderProductsStep() {
     applyQtyToCart(productId, p, qty);
   }, true);
 
-  renderRows(products);
+  function currentCategoryProducts() {
+    return products.filter(p => (p.product_type || 'product') === activeCategory);
+  }
+
+  function applyFilters() {
+    const term = document.getElementById('prodFilter').value.trim().toLowerCase();
+    const base = currentCategoryProducts();
+    const filtered = term
+      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term))
+      : base;
+    renderRows(filtered);
+  }
+
+  applyFilters();
   if (!products.length) {
     rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:#94a3b8;">
       No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
@@ -896,50 +973,12 @@ function renderProductsStep() {
     });
   }
 
-  document.getElementById('prodFilter').addEventListener('input', e => {
-    const term = e.target.value.trim().toLowerCase();
-    renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term)));
-  });
+  document.getElementById('prodFilter').addEventListener('input', applyFilters);
 
   document.getElementById('toPaymentBtn').addEventListener('click', () => {
-    if (!Object.keys(wiz.cart).length) { alert('Add quantity for at least one product.'); return; }
+    if (!Object.keys(wiz.cart).length) { alert('Add quantity for at least one item — a product, accessory or spare part.'); return; }
     renderPaymentStep();
   });
-}
-
-// Optional spare-parts rows on the products step — free-text name/price/qty,
-// not tied to inventory stock. Renders whatever is currently in wiz.sparePartsCart.
-function renderSparePartsRows() {
-  const box = document.getElementById('sparePartsRows');
-  if (!box) return;
-
-  if (!wiz.sparePartsCart.length) {
-    box.innerHTML = '<p style="font-size:12px;color:#94a3b8;margin:0;">No spare parts added.</p>';
-    return;
-  }
-
-  box.innerHTML = wiz.sparePartsCart.map((sp, idx) => `
-    <div style="display:flex;gap:6px;align-items:center;">
-      <input type="text" placeholder="Spare part name" value="${sp.name ?? ''}" data-idx="${idx}" data-field="name"
-             style="flex:2;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
-      <input type="number" min="0" step="0.01" placeholder="Price" value="${sp.price || ''}" data-idx="${idx}" data-field="price"
-             style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
-      <input type="number" min="1" placeholder="Qty" value="${sp.quantity ?? ''}" data-idx="${idx}" data-field="quantity"
-             style="width:64px;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;">
-      <button type="button" class="spRemoveBtn" data-idx="${idx}" title="Remove"
-              style="border:none;background:none;color:#d62828;cursor:pointer;font-size:18px;line-height:1;">&times;</button>
-    </div>`).join('');
-
-  box.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
-    const idx = Number(inp.dataset.idx);
-    const field = inp.dataset.field;
-    wiz.sparePartsCart[idx][field] = field === 'name' ? inp.value : (Number(inp.value) || 0);
-  }));
-
-  box.querySelectorAll('.spRemoveBtn').forEach(btn => btn.addEventListener('click', () => {
-    wiz.sparePartsCart.splice(Number(btn.dataset.idx), 1);
-    renderSparePartsRows();
-  }));
 }
 
 // Step 4: payment mode + conditional fields + discount
@@ -947,12 +986,30 @@ function renderPaymentStep() {
   wizardTitle('New Order — Payment');
   const cartItems = Object.values(wiz.cart);
   const subtotal = cartItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  if (wiz.warrantyYears === undefined) wiz.warrantyYears = 1;
+  if (wiz.warrantyCharge === undefined) wiz.warrantyCharge = 0;
 
   wizardBody().innerHTML = `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
       ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br>')}
       <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;">
       Subtotal: ₹${subtotal.toFixed(2)}
+    </div>
+    <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:12px;">
+      <label style="font-size:13px;font-weight:600;color:#334155;">Warranty</label>
+      <div style="display:flex;gap:14px;margin:8px 0;font-size:13px;">
+        <label><input type="radio" name="warrantyChoice" value="standard" ${wiz.warrantyYears <= 1 ? 'checked' : ''}> Standard (1 Year)</label>
+        <label><input type="radio" name="warrantyChoice" value="extend" ${wiz.warrantyYears > 1 ? 'checked' : ''}> Extend Warranty</label>
+      </div>
+      <div id="extendWarrantyBox" style="display:${wiz.warrantyYears > 1 ? 'flex' : 'none'};gap:10px;">
+        <select id="warrantyYearsSelect" style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="2" ${wiz.warrantyYears === 2 ? 'selected' : ''}>2 Years</option>
+          <option value="3" ${wiz.warrantyYears === 3 ? 'selected' : ''}>3 Years</option>
+          <option value="4" ${wiz.warrantyYears === 4 ? 'selected' : ''}>4 Years</option>
+          <option value="5" ${wiz.warrantyYears === 5 ? 'selected' : ''}>5 Years</option>
+        </select>
+        <input id="warrantyChargeInput" type="number" min="0" placeholder="Additional Charge (₹)" value="${wiz.warrantyCharge || ''}" style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+      </div>
     </div>
     <select id="paymentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
       <option value="">Select Payment Mode</option>
@@ -961,6 +1018,7 @@ function renderPaymentStep() {
     <div id="paymentExtra"></div>
     <div style = "padding-left:8px" ><small><p>Discount<p><small></div>
     <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
+    <div id="grandTotalBox" style="font-size:13px;color:#334155;margin-bottom:10px;"></div>
     <div style="display:flex;justify-content:space-between;margin-top:10px;">
       <button type="button" id="backBtn4" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
       <button type="button" id="placeOrderBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Place Order</button>
@@ -972,8 +1030,33 @@ function renderPaymentStep() {
   const extraBox = document.getElementById('paymentExtra');
   modeSelect.addEventListener('change', () => renderPaymentExtra(modeSelect.value, extraBox));
 
-  document.getElementById('discountInput').addEventListener('input', e => wiz.discount = Number(e.target.value) || 0);
+  const discountInput = document.getElementById('discountInput');
+  const warrantyChargeInput = document.getElementById('warrantyChargeInput');
+  const warrantyYearsSelect = document.getElementById('warrantyYearsSelect');
+  const extendBox = document.getElementById('extendWarrantyBox');
 
+  function refreshGrandTotal() {
+    const total = subtotal - (wiz.discount || 0) + (wiz.warrantyCharge || 0);
+    document.getElementById('grandTotalBox').textContent = `Grand Total (excl. tax): ₹${total.toFixed(2)}`;
+  }
+
+  discountInput.addEventListener('input', e => { wiz.discount = Number(e.target.value) || 0; refreshGrandTotal(); });
+
+  document.querySelectorAll('[name="warrantyChoice"]').forEach(r => r.addEventListener('change', () => {
+    if (r.value === 'extend' && r.checked) {
+      wiz.warrantyYears = Number(warrantyYearsSelect?.value) || 2;
+      extendBox.style.display = 'flex';
+    } else if (r.value === 'standard' && r.checked) {
+      wiz.warrantyYears = 1;
+      wiz.warrantyCharge = 0;
+      extendBox.style.display = 'none';
+    }
+    refreshGrandTotal();
+  }));
+  if (warrantyYearsSelect) warrantyYearsSelect.addEventListener('change', () => { wiz.warrantyYears = Number(warrantyYearsSelect.value) || 2; });
+  if (warrantyChargeInput) warrantyChargeInput.addEventListener('input', e => { wiz.warrantyCharge = Number(e.target.value) || 0; refreshGrandTotal(); });
+
+  refreshGrandTotal();
   document.getElementById('placeOrderBtn').addEventListener('click', () => submitOrder(modeSelect, extraBox));
 }
 
@@ -1064,6 +1147,11 @@ async function submitOrder(modeSelect, extraBox) {
   const mode = modeSelect.value;
   if (!mode) { alert('Please select a payment mode.'); return; }
 
+  if (wiz.warrantyYears > 1 && (!wiz.warrantyCharge || wiz.warrantyCharge <= 0)) {
+    alert('Please enter the additional charge for the extended warranty.');
+    return;
+  }
+
   let payment_details;
   try {
     payment_details = buildPaymentDetails(mode);
@@ -1079,13 +1167,11 @@ async function submitOrder(modeSelect, extraBox) {
       product_id: i.product_id, product_name: i.product_name,
       quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
     })),
-    // Optional — only rows with a name and a positive quantity are sent.
-    spare_parts: wiz.sparePartsCart
-      .filter(sp => (sp.name || '').trim() && Number(sp.quantity) > 0)
-      .map(sp => ({ name: sp.name.trim(), price: Number(sp.price) || 0, quantity: Number(sp.quantity) })),
     payment_mode: mode,
     payment_details,
-    discount: wiz.discount || 0
+    discount: wiz.discount || 0,
+    warranty_years: wiz.warrantyYears || 1,
+    warranty_charge: wiz.warrantyYears > 1 ? (wiz.warrantyCharge || 0) : 0
   };
 
   try {

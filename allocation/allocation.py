@@ -13,7 +13,11 @@ class allocation_manager(mongodbclient):
         """
         sales_person: dict snapshot -> {sales_person_id, name, company_name, address, contact_number, email}
                        (used for allocation_type='product': admin/employee allotting stock to a sales person)
-        items: list of dicts -> {product_id, product_name, quantity, serial_numbers}
+        items: list of dicts -> {product_id, product_name, quantity, serial_numbers}. For allocation_type='product'
+               each allocation document now represents exactly ONE allocated unit (quantity=1, a single serial
+               number) — the caller is responsible for creating one allocation per unit instead of batching
+               several units with quantity>1 into one document. This removes the need for partial returns:
+               an allocation is either returned or it isn't.
         spare_part: dict -> {service_id, part_name, quantity} (allocation_type='spare_part')
         customer: dict snapshot -> {customer_id, company_name, ...} (allocation_type='demo_unit': a
                   distributor allotting a demo unit to a customer)

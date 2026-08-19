@@ -155,7 +155,7 @@ function openUserModal(existingUser) {
     if (isEdit) {
       const updated_values = {
         name: fd.get('name'),
-        email_id: fd.get('email_id'),
+        email_id: fd.get('email_id').trim().toLowerCase(),
         mobile_no: fd.get('mobile_no'),
         company_name: fd.get('company_name'),
         gst_number: fd.get('gst_number'),
@@ -175,11 +175,11 @@ function openUserModal(existingUser) {
     } else {
       if (fd.get('password') !== fd.get('confirm_password')) { alert('Passwords do not match.'); return; }
       const payload = {
-        username: fd.get('username'),
+        username: fd.get('username').trim().toLowerCase(),
         password: fd.get('password'),
         confirm_password: fd.get('confirm_password'),
         name: fd.get('name'),
-        email_id: fd.get('email_id'),
+        email_id: fd.get('email_id').trim().toLowerCase(),
         mobile_no: fd.get('mobile_no'),
         company_name: fd.get('company_name'),
         gst_number: fd.get('gst_number'),

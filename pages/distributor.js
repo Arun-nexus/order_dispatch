@@ -143,13 +143,11 @@ function renderTable(allocations) {
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
-        ${a.return_status !== 'returned' ? '<button class="icon-btn return-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
       </td>`;
     tbody.appendChild(tr);
   });
 
   tbody.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', e => openViewModal(rowAllocation(e))));
-  tbody.querySelectorAll('.return-btn').forEach(b => b.addEventListener('click', e => markReturned(rowAllocation(e))));
 
   renderTablePagination(document.querySelector('.pagination'), spPage, totalPages, p => {
     spPage = p;

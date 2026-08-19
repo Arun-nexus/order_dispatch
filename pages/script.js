@@ -14,7 +14,45 @@ document.addEventListener('DOMContentLoaded', () => {
   wireTopActions();
   wireFilters();
   wireModals();
+  wireHeaderSearch();
+  populateTechnicianFilter();
 });
+
+function wireHeaderSearch() {
+  const input = document.querySelector('.search input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { renderServiceTable(svcState.services); return; }
+    const filtered = svcState.services.filter(s =>
+      (s.serial_no || '').toLowerCase().includes(q) ||
+      (s.product_id || '').toLowerCase().includes(q) ||
+      (s.product_name || '').toLowerCase().includes(q) ||
+      (s.service_id || '').toLowerCase().includes(q)
+    );
+    renderServiceTable(filtered);
+  });
+}
+
+async function populateTechnicianFilter() {
+  const select = document.querySelectorAll('.filter-box select')[1];
+  if (!select) return;
+  const { technicians, distributors } = await loadTechnicians();
+  const current = select.value;
+  let html = '<option value="">Technician</option>';
+  if (technicians.length) {
+    html += '<optgroup label="Technicians">' +
+      technicians.map(t => `<option value="${t.username}">${t.username}${t.name ? ' — ' + t.name : ''}</option>`).join('') +
+      '</optgroup>';
+  }
+  if (distributors.length) {
+    html += '<optgroup label="Distributors">' +
+      distributors.map(d => `<option value="${d.username}">${d.username}${d.name ? ' — ' + d.name : ''}</option>`).join('') +
+      '</optgroup>';
+  }
+  select.innerHTML = html;
+  if (current && [...select.options].some(o => o.value === current)) select.value = current;
+}
 
 async function loadServices() {
   try {
@@ -462,7 +500,7 @@ async function openCreateModal() {
       const payload = {
         product_id: fd.get('product_id'),
         location: fd.get('location'),
-        serial_no: fd.get('serial_no'),
+        serial_no: (fd.get('serial_no') || '').trim().toLowerCase(),
         technician_id: fd.get('technician_id'),
         purchase_date: fd.get('purchase_date'),
         issue: fd.get('issue'),

@@ -6,3 +6,4 @@ __pycache__/
 .git
 *.pyc
 notrace/credentials.json
+data_push.py

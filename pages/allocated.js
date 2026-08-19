@@ -113,12 +113,70 @@ function renderPendingRequests() {
             <p>${subtitle} • raised by ${r.raised_by}</p>
           </div>
         </div>
-        ${actions}
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="req-view-btn" title="View details" style="border:none;background:none;color:#1665ff;font-size:16px;cursor:pointer;"><i class="fa-solid fa-circle-info"></i></button>
+          ${actions}
+        </div>
       </div>`;
   }).join('');
 
   box.querySelectorAll('.req-approve-btn').forEach(btn => btn.addEventListener('click', e => approveRequest(rowRequestId(e))));
   box.querySelectorAll('.req-reject-btn').forEach(btn => btn.addEventListener('click', e => rejectRequest(rowRequestId(e))));
+  box.querySelectorAll('.req-view-btn').forEach(btn => btn.addEventListener('click', e => openRequestDetailsModal(rowRequest(e))));
+}
+
+function rowRequest(e) {
+  const id = e.target.closest('.order-item').dataset.id;
+  return allocState.requests.find(r => r.request_id === id);
+}
+
+// Shows type-specific details for a pending request: product name/qty/price for
+// demo unit & order requests, spare part note/technician/service id for spare
+// part requests. Reuses the existing viewAllocationModal markup.
+function openRequestDetailsModal(r) {
+  if (!r) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+  const d = r.details || {};
+
+  let heading, body;
+
+  if (r.request_type === 'demo_unit' || r.request_type === 'order') {
+    heading = r.request_type === 'demo_unit' ? 'Demo Unit Request' : 'Order Request';
+    const itemsRows = (d.items || []).map(i => `
+      <div class="detail"><small>Product</small><p>${i.product_name ?? ''} — Qty: ${i.quantity ?? ''}, Price: ₹${i.price ?? '-'}</p></div>`).join('');
+    body = `
+      ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
+      <div class="detail"><small>Customer</small><p>${d.customer?.company_name ?? '-'}</p></div>
+      <div class="detail"><small>Address</small><p>${d.customer?.company_address ?? '-'}</p></div>`;
+  } else if (r.request_type === 'spare_part') {
+    heading = 'Spare Part Request';
+    body = `
+      <div class="detail"><small>Spare Part</small><p>${d.note || '-'}</p></div>
+      <div class="detail"><small>Technician</small><p>${r.raised_by ?? '-'}</p></div>
+      <div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>`;
+  } else if (r.request_type === 'status_update') {
+    heading = 'Status Change Request';
+    body = `
+      <div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>
+      <div class="detail"><small>Requested Status</small><p>${(d.service_status || '').replace('_', ' ')}</p></div>
+      <div class="detail"><small>Reason</small><p>${d.reason || '-'}</p></div>
+      <div class="detail"><small>Requested By</small><p>${r.raised_by ?? '-'}</p></div>`;
+  } else {
+    heading = 'Request Details';
+    body = `<div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>
+      <div class="detail"><small>Requested By</small><p>${r.raised_by ?? '-'}</p></div>`;
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>${heading}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${body}`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
 }
 
 function rowRequestId(e) {
@@ -180,25 +238,37 @@ async function loadInventoryForAllocation() {
 }
 
 function returnMeta(a) {
-  if (a.return_status === 'returned') return { label: 'Returned', cls: 'high', overdue: false };
+  if (a.return_status === 'returned') return { label: 'Returned', cls: 'high', overdue: false, complete: true };
   const due = new Date(a.return_due_date);
   const now = new Date();
   const msLeft = due - now;
-  if (msLeft <= 0) return { label: 'Overdue', cls: 'low', overdue: true };
+  if (msLeft <= 0) return { label: 'Overdue', cls: 'low', overdue: true, complete: false };
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
-  return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false };
+  return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false, complete: false };
 }
 
 function updateAllocationCards(allocations) {
   const values = document.querySelectorAll('.cards .card h2');
   if (!values.length) return;
-  const pending = allocations.filter(a => a.return_status !== 'returned' && !returnMeta(a).overdue).length;
-  const overdue = allocations.filter(a => a.return_status !== 'returned' && returnMeta(a).overdue).length;
-  const returned = allocations.filter(a => a.return_status === 'returned').length;
+  const pending = allocations.filter(a => !returnMeta(a).complete && !returnMeta(a).overdue).length;
+  const overdue = allocations.filter(a => !returnMeta(a).complete && returnMeta(a).overdue).length;
+  const returned = allocations.filter(a => returnMeta(a).complete).length;
   values[0].textContent = allocations.length;
   if (values[1]) values[1].textContent = pending;
   if (values[2]) values[2].textContent = overdue;
   if (values[3]) values[3].textContent = returned;
+}
+
+// Label for one allocated item — new rows always carry quantity 1 and their
+// own serial number (partial returns are gone), but older rows created
+// before this change may still hold quantity>1 with several serials, so
+// both are shown correctly here.
+function itemLabel(i) {
+  const qtyPart = (i.quantity || 1) > 1 ? ` x${i.quantity}` : '';
+  return `${i.product_name}${qtyPart}`;
+}
+function itemSerials(i) {
+  return (i.serial_numbers || []).join(', ');
 }
 
 function renderAllocationsTable(allocations) {
@@ -219,30 +289,42 @@ function renderAllocationsTable(allocations) {
     const isSpare = a.allocation_type === 'spare_part';
     const productLabel = isSpare
       ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
-      : (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+      : (a.items || []).map(itemLabel).join(', ');
+    const serialLabel = isSpare
+      ? '-'
+      : ((a.items || []).map(itemSerials).filter(Boolean).join(', ') || '-');
     const whoLabel = isSpare
       ? `Service #${(a.spare_part?.service_id || '').slice(0, 8)}`
       : (a.sales_person?.name ?? '');
+    const addressLabel = isSpare
+      ? (a.spare_part?.service_id || '').slice(0, 8) || '-'
+      : (a.address ?? '-');
 
     const tr = document.createElement('tr');
     tr.dataset.id = a.allocation_id;
     tr.innerHTML = `
-      <td>${a.allocation_id?.slice(0, 8) ?? ''}</td>
       <td>${isSpare ? 'Spare Part' : 'Product'}</td>
       <td>${productLabel}</td>
+      <td>${serialLabel}</td>
       <td>${whoLabel}</td>
+      <td>${addressLabel}</td>
       <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
       <td>${a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
-        ${a.return_status !== 'returned' ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
+        ${!meta.complete ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
+        ${a.damage_report?.reported
+          ? '<button class="icon-btn damage-view-btn" title="Damage reported" style="color:#d62828;"><i class="fa-solid fa-triangle-exclamation"></i></button>'
+          : '<button class="icon-btn damage-report-btn" title="Report damaged product"><i class="fa-regular fa-triangle-exclamation"></i></button>'}
       </td>`;
     tbody.appendChild(tr);
   });
 
   tbody.querySelectorAll('.view-alloc-btn').forEach(btn => btn.addEventListener('click', e => openViewAllocationModal(rowAllocation(e))));
-  tbody.querySelectorAll('.return-alloc-btn').forEach(btn => btn.addEventListener('click', e => markReturned(rowAllocation(e))));
+  tbody.querySelectorAll('.return-alloc-btn').forEach(btn => btn.addEventListener('click', e => openReturnModal(rowAllocation(e))));
+  tbody.querySelectorAll('.damage-report-btn').forEach(btn => btn.addEventListener('click', e => openDamageReportModal(rowAllocation(e))));
+  tbody.querySelectorAll('.damage-view-btn').forEach(btn => btn.addEventListener('click', e => openDamageViewModal(rowAllocation(e))));
 
   renderTablePagination(document.querySelector('.pagination'), allocPage, totalPages, p => {
     allocPage = p;
@@ -255,9 +337,21 @@ function rowAllocation(e) {
   return allocState.allocations.find(a => a.allocation_id === tr.dataset.id);
 }
 
-async function markReturned(a) {
+// ---------- Return allocation ----------
+// Every row is now a single allocated unit (or, for spare parts, one
+// service's request) — so returning it is a one-shot confirm, no picking
+// serials or splitting quantity.
+function openReturnModal(a) {
   if (!a) return;
-  if (!confirm('Mark this allocation as returned?')) return;
+  const isSpare = a.allocation_type === 'spare_part';
+  const label = isSpare
+    ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
+    : (a.items || []).map(i => `${i.product_name}${itemSerials(i) ? ' (SN: ' + itemSerials(i) + ')' : ''}`).join(', ');
+  if (!confirm(`Mark "${label}" as returned?`)) return;
+  submitReturn(a);
+}
+
+async function submitReturn(a) {
   try {
     const res = await apiFetch(`/allocation/return/${a.allocation_id}`, { method: 'POST' });
     const data = await res.json();
@@ -292,6 +386,100 @@ function openViewAllocationModal(a) {
     <div class="detail"><small>Allotment Date</small><p>${a.allotment_date ? new Date(a.allotment_date).toLocaleString() : '-'}</p></div>
     <div class="detail"><small>Return Due</small><p>${a.return_due_date ? new Date(a.return_due_date).toLocaleString() : '-'}</p></div>
     <div class="detail"><small>Status</small><p>${meta.label}</p></div>`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
+
+// ---------- Report Damaged Product modal ----------
+function openDamageReportModal(a) {
+  if (!a) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Report Damaged Product</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <form id="damageForm" style="display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <label style="font-size:12px;color:#64748b;">Photo of damage (required)</label>
+        <input type="file" name="image" accept="image/*" required style="width:100%;padding:6px 0;">
+      </div>
+      <textarea name="issue" placeholder="Specify the issue (e.g. cracked casing, broken screen...)" required rows="4"
+        style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+      <p style="font-size:11px;color:#94a3b8;">Photo is emailed immediately and auto-deleted from the database after 2 days.</p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Submit</button>
+      </div>
+    </form>`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+
+  content.querySelector('#damageForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const issue = (fd.get('issue') || '').trim();
+    const imageFile = e.target.image.files[0];
+
+    if (!imageFile) { alert('Please attach a photo of the damaged product.'); return; }
+    if (!issue) { alert('Please specify the issue.'); return; }
+
+    const maxBytes = 2 * 1024 * 1024;
+    if (imageFile.size > maxBytes) {
+      alert(`Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`);
+      return;
+    }
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await apiFetch(`/allocation/report_damage/${a.allocation_id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issue, image: reader.result })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'damage report failed');
+        modal.style.display = 'none';
+        await loadAllocations();
+      } catch (err) {
+        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit';
+      }
+    };
+    reader.readAsDataURL(imageFile);
+  });
+
+  modal.style.display = 'flex';
+}
+
+function openDamageViewModal(a) {
+  if (!a?.damage_report) return;
+  const dr = a.damage_report;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+
+  const imageHtml = dr.image
+    ? `<img src="${dr.image}" style="max-width:100%;border-radius:10px;margin-top:8px;">`
+    : `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">Photo already emailed and auto-deleted from the database (2-day retention).</p>`;
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Damage Report</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div class="detail"><small>Issue</small><p>${dr.issue ?? ''}</p></div>
+    <div class="detail"><small>Reported By</small><p>${dr.reported_by ?? ''}</p></div>
+    <div class="detail"><small>Reported At</small><p>${dr.reported_at ? new Date(dr.reported_at).toLocaleString() : '-'}</p></div>
+    <div class="detail"><small>Photo</small>${imageHtml}</div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.style.display = 'flex';

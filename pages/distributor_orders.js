@@ -365,14 +365,28 @@ function renderNewCustomerStep() {
   });
 }
 
-// Step 3: product picker with quantity per row
+// Multiple inventory entries can share the same product_id (e.g. separate
+// batches/lots). Showing them as separate rows would let the user type into
+// two different rows for "the same" product — since the cart is keyed by
+// product_id, only the last one edited would actually stick. Collapse them
+// into a single row per product_id.
+function dedupeProducts(rawProducts) {
+  const map = new Map();
+  for (const p of rawProducts) {
+    if (!map.has(p.product_id)) map.set(p.product_id, { ...p });
+  }
+  return Array.from(map.values());
+}
+
+// Step 3: product picker with quantity + manually entered price per row
 function renderProductsStep() {
-  const products = doState.products || [];
+  const products = dedupeProducts(doState.products || []);
   wizBody().innerHTML = wizHeader(`New Order — ${orderWiz.customer?.company_name ?? 'Products'}`) + `
+    <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Stock</th><th>Price</th><th style="width:70px;">Qty</th></tr></thead>
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th style="width:70px;">Qty</th><th style="width:100px;">Price</th></tr></thead>
         <tbody id="prodRows"></tbody>
       </table>
     </div>
@@ -383,80 +397,116 @@ function renderProductsStep() {
   wireWizClose();
   document.getElementById('backBtn3').addEventListener('click', () => orderWiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
 
+  // ---------- Category tabs: Products / Accessories / Spare Parts ----------
+  // Filters the same product table by product_type, same pattern used on
+  // the admin Orders page and the Inventory page.
+  const catTabsBox = document.getElementById('prodCatTabs');
+  const categories = [
+    { type: 'product', label: 'Products' },
+    { type: 'accessories', label: 'Accessories' },
+    { type: 'spare_parts', label: 'Spare Parts' }
+  ];
+  let activeCategory = 'product';
+
+  function paintCatTab(btn, active) {
+    btn.style.border = active ? '1px solid #1665ff' : '1px solid #e2e8f0';
+    btn.style.background = active ? '#eaf1ff' : '#f8fafc';
+    btn.style.color = active ? '#1665ff' : '#334155';
+    btn.style.borderRadius = '8px';
+    btn.style.padding = '8px 14px';
+    btn.style.cursor = 'pointer';
+    btn.style.fontSize = '13px';
+  }
+
+  catTabsBox.innerHTML = categories.map(c => `<button type="button" class="prod-cat-btn" data-type="${c.type}">${c.label}</button>`).join('');
+  catTabsBox.querySelectorAll('.prod-cat-btn').forEach(btn => {
+    paintCatTab(btn, btn.dataset.type === activeCategory);
+    btn.addEventListener('click', () => {
+      activeCategory = btn.dataset.type;
+      catTabsBox.querySelectorAll('.prod-cat-btn').forEach(b => paintCatTab(b, b.dataset.type === activeCategory));
+      applyFilters();
+    });
+  });
+
   const rowsBox = document.getElementById('prodRows');
 
   function productRowHtml(p) {
-    const qtyInCart = orderWiz.cart[p.product_id]?.quantity ?? '';
+    const cartLine = orderWiz.cart[p.product_id];
+    const qtyInCart = cartLine?.quantity ?? '';
+    const priceInCart = cartLine?.price ?? '';
     return `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
-        <td>${p.quantity ?? 0}</td>
-        <td>₹${p.price ?? 0}</td>
+        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' — ' + p.model_no : ''}</small></td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
               placeholder="0" data-product-id="${p.product_id}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+        <td><input type="number" min="0" inputmode="decimal" value="${priceInCart}"
+              placeholder="₹0" data-product-id="${p.product_id}" class="priceInput"
+              style="width:85px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
       </tr>`;
   }
 
   function renderRows(list) { rowsBox.innerHTML = list.map(productRowHtml).join(''); }
 
   function computeTypedQty(inp) {
-    if (inp.value.trim() === '') return null;
+    if (!inp || inp.value.trim() === '') return null;
     let qty = Math.floor(Math.max(0, Number(inp.value)));
     if (!Number.isFinite(qty)) qty = 0;
     return qty;
   }
 
-  function applyQtyToCart(productId, p, qty) {
+  function computeTypedPrice(inp) {
+    if (!inp || inp.value.trim() === '') return null;
+    let price = Math.max(0, Number(inp.value));
+    if (!Number.isFinite(price)) price = 0;
+    return price;
+  }
+
+  // Price is entered manually here instead of being pulled from the catalog
+  // — the cart line is only ever built (or updated) from whatever is
+  // currently in the row's Qty and Price fields, not from p.price.
+  function syncRowToCart(productId, p) {
+    const qtyInp = rowsBox.querySelector(`.qtyInput[data-product-id="${productId}"]`);
+    const priceInp = rowsBox.querySelector(`.priceInput[data-product-id="${productId}"]`);
+    const qty = computeTypedQty(qtyInp);
+
     if (qty === null || qty <= 0) { delete orderWiz.cart[productId]; return; }
+
+    const price = computeTypedPrice(priceInp) ?? 0;
     orderWiz.cart[productId] = {
       product_id: p.product_id,
       product_name: p.product_name,
-      price: Number(p.price) || 0,
+      price,
       tax_rate: Number(p.tax_rate) || 0,
       quantity: qty
     };
   }
 
-  // Same fix as the admin Orders page: don't rewrite the field mid-keystroke
-  // (it yanks the caret to the end and breaks multi-digit entry on mobile).
-  // Only clamp to stock once the user leaves the field.
   rowsBox.addEventListener('input', (e) => {
-    const inp = e.target.closest('.qtyInput');
+    const inp = e.target.closest('.qtyInput, .priceInput');
     if (!inp) return;
     const productId = inp.dataset.productId;
     const p = products.find(x => x.product_id === productId);
     if (!p) return;
-    applyQtyToCart(productId, p, computeTypedQty(inp));
+    syncRowToCart(productId, p);
   });
 
-  rowsBox.addEventListener('blur', (e) => {
-    const inp = e.target.closest('.qtyInput');
-    if (!inp) return;
-    const productId = inp.dataset.productId;
-    const p = products.find(x => x.product_id === productId);
-    if (!p) return;
+  function currentCategoryProducts() {
+    return products.filter(p => (p.product_type || 'product') === activeCategory);
+  }
 
-    let qty = computeTypedQty(inp);
-    if (qty === null) return;
+  function applyFilters() {
+    const term = document.getElementById('prodFilter').value.trim().toLowerCase();
+    const base = currentCategoryProducts();
+    const filtered = term
+      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term))
+      : base;
+    renderRows(filtered);
+  }
 
-    const hasKnownStock = p.quantity !== undefined && p.quantity !== null && Number.isFinite(Number(p.quantity));
-    if (hasKnownStock) {
-      const stock = Number(p.quantity);
-      if (qty > stock) {
-        qty = stock;
-        inp.value = qty || '';
-        alert(stock > 0
-          ? `Only ${stock} unit(s) of ${p.product_name} are in stock — quantity adjusted.`
-          : `${p.product_name} is out of stock.`);
-      }
-    }
-    applyQtyToCart(productId, p, qty);
-  }, true);
-
-  renderRows(products);
+  applyFilters();
   if (!products.length) {
-    rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:#94a3b8;">
+    rowsBox.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:16px;color:#94a3b8;">
       No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
     </td></tr>`;
     document.getElementById('retryInvBtn')?.addEventListener('click', async () => {
@@ -465,13 +515,12 @@ function renderProductsStep() {
     });
   }
 
-  document.getElementById('prodFilter').addEventListener('input', e => {
-    const term = e.target.value.trim().toLowerCase();
-    renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term)));
-  });
+  document.getElementById('prodFilter').addEventListener('input', applyFilters);
 
   document.getElementById('toPaymentBtn').addEventListener('click', () => {
-    if (!Object.keys(orderWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
+    const cartItems = Object.values(orderWiz.cart);
+    if (!cartItems.length) { alert('Add quantity for at least one product.'); return; }
+    if (cartItems.some(i => !i.price || i.price <= 0)) { alert('Enter a price for every product you added.'); return; }
     renderPaymentStep();
   });
 }

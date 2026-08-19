@@ -96,7 +96,18 @@ function renderTable(rows) {
 
   pageRows.forEach(row => {
     const d = row.data;
-    const isDispatched = !!d.dispatch;
+    const hasDispatch = !!d.dispatch;
+    const hasDocket = hasDispatch && !!d.dispatch.docket_no;
+    const statusHtml = !hasDispatch
+      ? `<span class="pending">Pending</span>`
+      : hasDocket
+        ? `<span class="delivered">Dispatched</span>`
+        : `<span style="background:#fef3c7;color:#b45309;padding:3px 10px;border-radius:999px;font-size:12px;">In Progress</span>`;
+    const actionHtml = !hasDispatch
+      ? '<button class="confirm-dispatch-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Confirm Dispatch</button>'
+      : hasDocket
+        ? '-'
+        : '<button class="add-docket-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#b45309;color:#fff;cursor:pointer;">Add Docket No.</button>';
     const tr = document.createElement('tr');
     tr.dataset.id = row.kind === 'order' ? d.order_id : d.allocation_id;
     tr.dataset.kind = row.kind;
@@ -108,12 +119,20 @@ function renderTable(rows) {
       <td>${billToLabel(row)}</td>
       <td>${d.dispatch?.docket_no ?? '-'}</td>
       <td>${d.dispatch?.invoice_no ?? '-'}</td>
-      <td><span class="${isDispatched ? 'delivered' : 'pending'}">${isDispatched ? 'Dispatched' : 'Pending'}</span></td>
-      <td>${isDispatched ? '-' : '<button class="confirm-dispatch-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Confirm Dispatch</button>'}</td>`;
+      <td>${statusHtml}</td>
+      <td>${actionHtml}</td>`;
     tbody.appendChild(tr);
   });
 
   tbody.querySelectorAll('.confirm-dispatch-btn').forEach(btn => btn.addEventListener('click', e => {
+    const tr = e.target.closest('tr');
+    const kind = tr.dataset.kind;
+    const id = tr.dataset.id;
+    const row = combinedRows().find(r => (kind === 'order' ? r.data.order_id : r.data.allocation_id) === id && r.kind === kind);
+    if (row) openDispatchModal(row);
+  }));
+
+  tbody.querySelectorAll('.add-docket-btn').forEach(btn => btn.addEventListener('click', e => {
     const tr = e.target.closest('tr');
     const kind = tr.dataset.kind;
     const id = tr.dataset.id;
@@ -133,8 +152,10 @@ function wireFilter() {
     const status = document.getElementById('statusFilter').value;
     const filtered = combinedRows().filter(row => {
       const typeOk = !type || row.kind === type;
-      const isDispatched = !!row.data.dispatch;
-      const statusOk = !status || (status === 'dispatched' ? isDispatched : !isDispatched);
+      const hasDispatch = !!row.data.dispatch;
+      const hasDocket = hasDispatch && !!row.data.dispatch.docket_no;
+      const state = !hasDispatch ? 'pending' : hasDocket ? 'dispatched' : 'in_progress';
+      const statusOk = !status || status === state;
       return typeOk && statusOk;
     });
     renderTable(filtered);
@@ -145,17 +166,18 @@ function wireFilter() {
 function openDispatchModal(row) {
   const modal = document.getElementById('dispatchModal');
   const content = modal.querySelector('.modal-content');
+  const existing = row.data.dispatch || null;
   const billTo = row.kind === 'order'
     ? `${row.data.customer?.company_name || ''}${row.data.customer?.company_address ? ', ' + row.data.customer.company_address : ''}`
     : `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)} (technician location)`;
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>Confirm Dispatch</h3>
+      <h3>${existing ? 'Update Dispatch' : 'Confirm Dispatch'}</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     <form id="dispatchForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="docket_no" placeholder="Docket No." required>
+      <input name="docket_no" placeholder="Docket No. (optional)" value="${existing?.docket_no ?? ''}">
 
       <div>
         <label style="font-size:12px;color:#64748b;">Bill To Address</label>
@@ -163,19 +185,33 @@ function openDispatchModal(row) {
       </div>
 
       <label style="font-size:13px;color:#475569;display:flex;align-items:center;gap:6px;">
-        <input type="checkbox" id="shipDifferentCheck"> Ship to a different address
+        <input type="checkbox" id="shipDifferentCheck" ${existing?.ship_to_different ? 'checked' : ''}> Ship to a different address
       </label>
-      <div id="shipToFields" style="display:none;flex-direction:column;gap:10px;">
-        <input name="ship_company_name" placeholder="Ship To — Company Name">
-        <input name="ship_address" placeholder="Ship To — Address">
+      <div id="shipToFields" style="display:${existing?.ship_to_different ? 'flex' : 'none'};flex-direction:column;gap:10px;">
+        <input name="ship_company_name" placeholder="Ship To — Company Name" value="${existing?.ship_to_address?.company_name ?? ''}">
+        <input name="ship_address" placeholder="Ship To — Address" value="${existing?.ship_to_address?.address ?? ''}">
       </div>
 
-      <input name="invoice_no" placeholder="Invoice No." required>
-      <input name="invoice_date" type="date" required>
+      <select name="mode_of_delivery" required>
+        <option value="" disabled ${!existing?.mode_of_delivery ? 'selected' : ''}>Mode of Delivery</option>
+        <option value="road" ${existing?.mode_of_delivery === 'road' ? 'selected' : ''}>Road</option>
+        <option value="air" ${existing?.mode_of_delivery === 'air' ? 'selected' : ''}>Air</option>
+        <option value="rail" ${existing?.mode_of_delivery === 'rail' ? 'selected' : ''}>Rail</option>
+        <option value="courier" ${existing?.mode_of_delivery === 'courier' ? 'selected' : ''}>Courier</option>
+        <option value="self_pickup" ${existing?.mode_of_delivery === 'self_pickup' ? 'selected' : ''}>Self Pickup</option>
+      </select>
+
+      <input name="invoice_no" placeholder="Invoice No." value="${existing?.invoice_no ?? ''}" required>
+      <input name="invoice_date" type="date" value="${existing?.invoice_date ? existing.invoice_date.slice(0, 10) : ''}" required>
+
+      <div>
+        <label style="font-size:12px;color:#64748b;">Packaging / Handover Photo (optional)</label>
+        <input type="file" name="image" accept="image/*" style="width:100%;padding:6px 0;">
+      </div>
 
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
         <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Confirm</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">${existing ? 'Update' : 'Confirm'}</button>
       </div>
     </form>`;
 
@@ -192,28 +228,50 @@ function openDispatchModal(row) {
     e.preventDefault();
     const fd = new FormData(e.target);
     const shipDifferent = shipCheck.checked;
-    const payload = {
-      docket_no: fd.get('docket_no'),
-      invoice_no: fd.get('invoice_no'),
+
+    const imageFile = e.target.image.files[0];
+    if (imageFile) {
+      const maxBytes = 2 * 1024 * 1024;
+      if (imageFile.size > maxBytes) {
+        alert(`Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`);
+        return;
+      }
+    }
+
+    const buildPayload = (imageDataUrl) => ({
+      docket_no: fd.get('docket_no') ? fd.get('docket_no').trim().toLowerCase() : null,
+      invoice_no: fd.get('invoice_no').trim().toLowerCase(),
       invoice_date: fd.get('invoice_date'),
+      mode_of_delivery: fd.get('mode_of_delivery'),
       ship_to_different: shipDifferent,
-      ship_to_address: shipDifferent ? { company_name: fd.get('ship_company_name') || '', address: fd.get('ship_address') || '' } : null
-    };
+      ship_to_address: shipDifferent ? { company_name: fd.get('ship_company_name') || '', address: fd.get('ship_address') || '' } : null,
+      image: imageDataUrl || null
+    });
 
     const endpoint = row.kind === 'order'
       ? `/dispatch/confirm/order/${row.data.order_id}`
       : `/dispatch/confirm/spare_part/${row.data.allocation_id}`;
 
-    try {
-      const res = await apiFetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'dispatch confirmation failed');
-      modal.style.display = 'none';
-      await loadDispatchQueue();
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    const sendConfirmation = async (payload) => {
+      try {
+        const res = await apiFetch(endpoint, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'dispatch confirmation failed');
+        modal.style.display = 'none';
+        await loadDispatchQueue();
+      } catch (err) {
+        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+      }
+    };
+
+    if (imageFile) {
+      const reader = new FileReader();
+      reader.onload = () => sendConfirmation(buildPayload(reader.result));
+      reader.readAsDataURL(imageFile);
+    } else {
+      await sendConfirmation(buildPayload(null));
     }
   });
 

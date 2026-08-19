@@ -155,68 +155,64 @@
         </div>
       </section>
       <section class="dashboard-grid">
-        <div class="panel">
-          <div class="panel-header">
-            <h3>Recent Orders</h3>
-            <a href="pages/orders.html"><button class="view-all-btn">View All</button></a>
+        <div class="dashboard-left-stack" style="display:flex;flex-direction:column;gap:24px;">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Recent Orders</h3>
+              <a href="pages/orders.html"><button class="view-all-btn">View All</button></a>
+            </div>
+
+            <div class="order-list" style="max-height:230px;overflow-y:auto;">
+              <div class="order-item">
+                <div class="order-left">
+                  <div class="order-icon">
+                    <i class="fa-solid fa-file-medical"></i>
+                  </div>
+                  <div>
+                    <h4>ORD1025</h4>
+                    <p>20 May 2025</p>
+                  </div>
+                </div>
+                <span class="status pending">Pending</span>
+                <strong>₹24,500</strong>
+              </div>
+
+              <div class="order-item">
+                <div class="order-left">
+                  <div class="order-icon">
+                    <i class="fa-solid fa-file-medical"></i>
+                  </div>
+                  <div>
+                    <h4>ORD1024</h4>
+                    <p>19 May 2025</p>
+                  </div>
+                </div>
+                <span class="status delivered">Delivered</span>
+                <strong>₹18,750</strong>
+              </div>
+
+              <div class="order-item">
+                <div class="order-left">
+                  <div class="order-icon">
+                    <i class="fa-solid fa-file-medical"></i>
+                  </div>
+                  <div>
+                    <h4>ORD1023</h4>
+                    <p>18 May 2025</p>
+                  </div>
+                </div>
+                <span class="status processing">Processing</span>
+                <strong>₹32,100</strong>
+              </div>
+            </div>
           </div>
 
-          <div class="order-list">
-            <div class="order-item">
-              <div class="order-left">
-                <div class="order-icon">
-                  <i class="fa-solid fa-file-medical"></i>
-                </div>
-                <div>
-                  <h4>ORD1025</h4>
-                  <p>20 May 2025</p>
-                </div>
-              </div>
-              <span class="status pending">Pending</span>
-              <strong>₹24,500</strong>
+          <div class="panel" id="myTeamPanel">
+            <div class="panel-header">
+              <h3>My Team</h3>
+              <p style="color:#64748b;font-size:13px;">Click a member to see their report</p>
             </div>
-
-            <div class="order-item">
-              <div class="order-left">
-                <div class="order-icon">
-                  <i class="fa-solid fa-file-medical"></i>
-                </div>
-                <div>
-                  <h4>ORD1024</h4>
-                  <p>19 May 2025</p>
-                </div>
-              </div>
-              <span class="status delivered">Delivered</span>
-              <strong>₹18,750</strong>
-            </div>
-
-            <div class="order-item">
-              <div class="order-left">
-                <div class="order-icon">
-                  <i class="fa-solid fa-file-medical"></i>
-                </div>
-                <div>
-                  <h4>ORD1023</h4>
-                  <p>18 May 2025</p>
-                </div>
-              </div>
-              <span class="status processing">Processing</span>
-              <strong>₹32,100</strong>
-            </div>
-
-            <div class="order-item">
-              <div class="order-left">
-                <div class="order-icon">
-                  <i class="fa-solid fa-file-medical"></i>
-                </div>
-                <div>
-                  <h4>ORD1022</h4>
-                  <p>17 May 2025</p>
-                </div>
-              </div>
-              <span class="status cancelled">Cancelled</span>
-              <strong>₹8,450</strong>
-            </div>
+            <div class="service-list" id="teamMemberList" style="max-height:280px;overflow-y:auto;"></div>
           </div>
         </div>
         <div class="dashboard-right">
@@ -276,7 +272,7 @@
               <a href="pages/service.html"><button class="view-all-btn">View All</button></a>
             </div>
 
-            <div class="service-list">
+            <div class="service-list" id="serviceRequestsList">
               <div class="service-item">
                 <div>
                   <h4>Ticket #251</h4>
@@ -330,6 +326,12 @@
         <button class="confirm-btn" onclick="logoutNow()">Logout</button>
       </div>
     </div>
+  </div>
+
+  <!-- Team Member Report Modal (populated dynamically by dashboard.js) -->
+  <div id="teamReportModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:460px;max-height:86vh;overflow-y:auto;"></div>
   </div>
   <script src="common_auth.js"></script>
   <script>

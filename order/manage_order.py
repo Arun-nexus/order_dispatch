@@ -6,7 +6,7 @@ import uuid
 
 class order_manager(mongodbclient):
 
-    def __init__(self, customer=None, items=None, payment_mode=None, payment_details=None, discount=0, creator=None):
+    def __init__(self, customer=None, items=None, payment_mode=None, payment_details=None, discount=0, creator=None, warranty_years=1, warranty_charge=0):
         """
         customer: dict -> {customer_id, company_name, company_address, gst_number,
                             contractor_person, contractor_number, contractor_email}
@@ -19,6 +19,8 @@ class order_manager(mongodbclient):
             Cheque       -> {"cheque_number": str, "cheque_date": str, "bank_name": str}
             DemandDraft  -> {"dd_number": str, "dd_date": str, "bank_name": str}
             UPI/Cash/NetBanking -> {}
+        warranty_years: int -> standard warranty is 1 year; > 1 means extended
+        warranty_charge: float -> additional charge for the extended warranty (0 for standard)
         """
 
         super().__init__()
@@ -31,6 +33,8 @@ class order_manager(mongodbclient):
         self.status = "placed"
         self.discount = discount
         self.creator = creator or {}
+        self.warranty_years = warranty_years or 1
+        self.warranty_charge = warranty_charge or 0
 
     def add(self, collection_name):
         try:
@@ -55,7 +59,7 @@ class order_manager(mongodbclient):
                 subtotal += line_amount
                 tax_total += line_tax
 
-            total_mrp = subtotal + tax_total - self.discount
+            total_mrp = subtotal + tax_total - self.discount + self.warranty_charge
 
             order_dict = {
                 "order_id": self.order_id,
@@ -67,6 +71,8 @@ class order_manager(mongodbclient):
                 "subtotal": subtotal,
                 "tax_total": tax_total,
                 "discount": self.discount,
+                "warranty_years": self.warranty_years,
+                "warranty_charge": self.warranty_charge,
                 "total_mrp": total_mrp,
                 "creator": self.creator,
                 "order_date": datetime.now(timezone.utc).isoformat()

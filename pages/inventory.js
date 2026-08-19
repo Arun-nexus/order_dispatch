@@ -1,6 +1,6 @@
 const invState = { products: [], activeProductId: null, editSerials: [], editRemovedSerials: [] };
 let invPage = 1;
-const INV_PAGE_SIZE = 7;
+const INV_PAGE_SIZE = 20;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
@@ -23,9 +23,118 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInventory();
   wireTopActions();
   wireFilter();
+  wireCategoryFilter();
+  wireHeaderSearch();
   wireModals();
   applyRolePermissions();
 });
+
+// ---------- Product type (Product / Spare Parts / Damaged Product) helpers ----------
+const PRODUCT_TYPE_LABELS = {
+  product: 'Product',
+  spare_parts: 'Spare Parts',
+  damaged: 'Damaged Product',
+  accessories: 'Accessories'
+};
+
+function productTypeLabel(type) {
+  return PRODUCT_TYPE_LABELS[type] || PRODUCT_TYPE_LABELS.product;
+}
+
+function productTypeBadgeClass(type) {
+  if (type === 'spare_parts') return 'medium';
+  if (type === 'damaged') return 'low';
+  if (type === 'accessories') return 'medium';
+  return 'high';
+}
+
+// serial numbers are optional for this type only
+function isSerialOptionalType(type) {
+  return type === 'accessories';
+}
+
+// ---------- Reading serial numbers out of an uploaded Excel/CSV file ----------
+// Flattens every non-empty cell across the whole sheet into a de-duplicated
+// list of serial numbers, so any layout (one column, one row, multiple
+// columns) works without asking the user to format the file a certain way.
+function parseSerialsFromFile(file, onDone, onError) {
+  if (typeof XLSX === 'undefined') {
+    onError('Excel reader failed to load. Check your connection and try again.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      const serials = [];
+      rows.forEach(row => {
+        (row || []).forEach(cell => {
+          const val = String(cell ?? '').trim();
+          if (val && val.toLowerCase() !== 'serial number' && val.toLowerCase() !== 'serial no') {
+            serials.push(val.toLowerCase());
+          }
+        });
+      });
+      const unique = [...new Set(serials)];
+      if (!unique.length) { onError('No serial numbers were found in that file.'); return; }
+      onDone(unique);
+    } catch (err) {
+      onError('Could not read that file. Please upload a valid Excel or CSV file.');
+    }
+  };
+  reader.onerror = () => onError('Could not read that file.');
+  reader.readAsArrayBuffer(file);
+}
+
+// ---------- Category filter tabs (Product / Spare Parts / Damaged Product) ----------
+function wireCategoryFilter() {
+  const buttons = document.querySelectorAll('.cat-filter-btn');
+  if (!buttons.length) return;
+
+  const paint = (btn, active) => {
+    btn.style.border = active ? '1px solid #1665ff' : '1px solid #e2e8f0';
+    btn.style.background = active ? '#eaf1ff' : '#f8fafc';
+    btn.style.color = active ? '#1665ff' : '#334155';
+    btn.style.borderRadius = '8px';
+    btn.style.padding = '8px 14px';
+    btn.style.cursor = 'pointer';
+    btn.style.fontSize = '13px';
+  };
+  buttons.forEach(btn => paint(btn, false));
+
+  let activeType = null;
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const type = btn.dataset.type;
+      activeType = activeType === type ? null : type; // click again to clear
+      buttons.forEach(b => paint(b, b.dataset.type === activeType));
+      invPage = 1;
+      const filtered = activeType
+        ? invState.products.filter(p => (p.product_type || 'product') === activeType)
+        : invState.products;
+      renderInventoryTable(filtered);
+    });
+  });
+}
+
+function wireHeaderSearch() {
+  const input = document.querySelector('.search input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    invPage = 1;
+    if (!q) { renderInventoryTable(invState.products); return; }
+    const filtered = invState.products.filter(p =>
+      (p.product_name || '').toLowerCase().includes(q) ||
+      (p.supplier || '').toLowerCase().includes(q) ||
+      (p.serial_numbers || []).some(s => (s || '').toLowerCase().includes(q))
+    );
+    renderInventoryTable(filtered);
+  });
+}
 
 function applyRolePermissions() {
   const role = getRole();
@@ -103,7 +212,8 @@ function renderInventoryTable(products) {
       <td><input type="checkbox"></td>
       <td>${p.product_name ?? ''}</td>
       <td>${p.product_id ?? ''}</td>
-      <td>${p.lot_no ?? ''}</td>
+      <td>${p.model_no ?? ''}</td>
+      <td><span class="stock ${productTypeBadgeClass(p.product_type)}">${productTypeLabel(p.product_type)}</span></td>
       <td>${p.supplier ?? ''}</td>
       <td>${p.purchase_date ?? ''}</td>
       <td><span class="stock ${stockClass(Number(p.quantity) || 0)}">${p.quantity ?? 0}</span></td>
@@ -149,8 +259,8 @@ function exportInventoryCSV() {
     dateLabel: 'Purchase Date',
     getRows: () => invState.products,
     onConfirm: (rows) => {
-      const header = ['Product Name', 'Product ID', 'Lot No', 'Supplier', 'Purchase Date', 'Quantity', 'Price', 'Tax'];
-      const csvRows = rows.map(p => [p.product_name, p.product_id, p.lot_no, p.supplier, p.purchase_date, p.quantity, p.price, p.tax_rate]);
+      const header = ['Product Name', 'Product ID', 'Type', 'Lot No', 'Supplier', 'Purchase Date', 'Quantity', 'Price', 'Tax'];
+      const csvRows = rows.map(p => [p.product_name, p.product_id, productTypeLabel(p.product_type), p.lot_no, p.supplier, p.purchase_date, p.quantity, p.price, p.tax_rate]);
       downloadCSV(header, csvRows, 'inventory.csv');
     }
   });
@@ -252,8 +362,10 @@ function openViewModal(p) {
   if (!p) return;
   const modal = document.getElementById('viewModal');
   const values = modal.querySelectorAll('.detail p');
-  const fields = [p.product_name, p.product_id, p.lot_no, p.supplier, p.purchase_date, p.quantity, `₹${p.price}`, `${p.tax_rate}%`];
+  const fields = [p.product_name, p.product_id, productTypeLabel(p.product_type), p.lot_no, p.supplier, p.purchase_date, p.quantity, `₹${p.price}`, `${p.tax_rate}%`];
   values.forEach((el, i) => el.textContent = fields[i] ?? '');
+  const serialBox = document.getElementById('viewSerialNumbers');
+  if (serialBox) serialBox.textContent = (p.serial_numbers || []).length ? p.serial_numbers.join(', ') : 'None on file';
   modal.style.display = 'flex';
 }
 
@@ -274,11 +386,52 @@ function openEditModal(p) {
   inputs[6].value = p.price ?? '';
   inputs[7].value = p.tax_rate ?? '';
 
+  const typeSelect = document.getElementById('editProductType');
+  if (typeSelect) typeSelect.value = p.product_type || 'product';
+
   renderEditSerialsUI();
   inputs[5].removeEventListener('input', renderEditSerialsUI);
   inputs[5].addEventListener('input', renderEditSerialsUI);
 
+  if (typeSelect) {
+    typeSelect.removeEventListener('change', renderEditSerialsUI);
+    typeSelect.addEventListener('change', renderEditSerialsUI);
+  }
+
+  wireEditSerialFileUpload();
+
   modal.style.display = 'flex';
+}
+
+// "Add by file" for the edit modal: lets the user upload an Excel/CSV of
+// serial numbers instead of typing each new one in by hand when quantity
+// goes up. Re-wired on every open so listeners don't stack across opens.
+function wireEditSerialFileUpload() {
+  const btn = document.getElementById('editSerialFileBtn');
+  const fileInput = document.getElementById('editSerialFileInput');
+  const preview = document.getElementById('editFileSerialPreview');
+  if (!btn || !fileInput) return;
+
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  const newFileInput = fileInput.cloneNode(true);
+  fileInput.parentNode.replaceChild(newFileInput, fileInput);
+
+  newBtn.addEventListener('click', () => newFileInput.click());
+  newFileInput.addEventListener('change', () => {
+    const file = newFileInput.files[0];
+    if (!file) return;
+    parseSerialsFromFile(file, (serials) => {
+      const modal = document.getElementById('editModal');
+      const quantityInput = modal.querySelectorAll('form input')[5];
+      const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
+      quantityInput.value = keptCount + serials.length;
+      renderEditSerialsUI();
+      const newInputs = document.querySelectorAll('#newSerialsBox .new-serial-input');
+      newInputs.forEach((inp, i) => { inp.value = serials[i] || ''; });
+      preview.textContent = `${serials.length} serial number(s) loaded from file.`;
+    }, (msg) => { preview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; });
+  });
 }
 
 // Keeps the serial-number list in sync with whatever quantity is typed into
@@ -289,6 +442,8 @@ function renderEditSerialsUI() {
   const quantityInput = modal.querySelectorAll('form input')[5];
   const targetQuantity = Number(quantityInput.value) || 0;
   const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
+  const typeSelect = document.getElementById('editProductType');
+  const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
 
   const currentList = document.getElementById('currentSerialsList');
   currentList.innerHTML = invState.editSerials.map(s => {
@@ -316,10 +471,27 @@ function renderEditSerialsUI() {
 
   const msgBox = document.getElementById('serialDeltaMsg');
   const newBox = document.getElementById('newSerialsBox');
+  const fileBtn = document.getElementById('editSerialFileBtn');
   const diff = targetQuantity - keptCount;
 
+  // accessories: serial numbers are optional, so quantity can move freely
+  // without needing to add/remove serials to match it
+  if (serialOptional) {
+    msgBox.textContent = 'Serial numbers are optional for accessories.';
+    msgBox.style.color = '#64748b';
+    newBox.innerHTML = '';
+    if (fileBtn) fileBtn.style.display = 'none';
+    return;
+  }
+
+  if (fileBtn) fileBtn.style.display = diff > 0 ? 'inline-block' : 'none';
+  if (diff <= 0) {
+    const preview = document.getElementById('editFileSerialPreview');
+    if (preview) preview.textContent = '';
+  }
+
   if (diff > 0) {
-    msgBox.textContent = `Quantity increased — add ${diff} new serial number(s) below.`;
+    msgBox.textContent = `Quantity increased — add ${diff} new serial number(s) below, or upload them from a file.`;
     msgBox.style.color = '#005ca9';
     const existingInputs = newBox.querySelectorAll('input');
     const existingValues = [...existingInputs].map(i => i.value);
@@ -346,6 +518,8 @@ function renderEditSerialsUI() {
 function openDeleteModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
+  const msg = document.querySelector('#deleteModal p');
+  if (msg) msg.textContent = `Are you sure you want to delete "${p.product_name}"? This action cannot be undone.`;
   document.getElementById('deleteModal').style.display = 'flex';
 }
 
@@ -354,6 +528,7 @@ const addWiz = {
   productId: '',
   productName: '',
   modelNo: '',
+  productType: 'product',
   lotNo: '',
   quantity: 1,
   serials: [],
@@ -368,6 +543,7 @@ function resetAddWizard() {
   addWiz.productId = '';
   addWiz.productName = '';
   addWiz.modelNo = '';
+  addWiz.productType = 'product';
   addWiz.lotNo = '';
   addWiz.quantity = 1;
   addWiz.serials = [];
@@ -443,6 +619,7 @@ function renderExistingProductStep() {
       addWiz.productId = p.product_id;
       addWiz.productName = p.product_name;
       addWiz.modelNo = p.model_no || '';
+      addWiz.productType = p.product_type || 'product';
       renderLotDetailsStep();
     }));
   };
@@ -469,9 +646,56 @@ function renderNewProductStep() {
       </div>
     </form>`;
   document.getElementById('backAdd2').addEventListener('click', renderAddChoiceStep);
+  const nameInput = document.querySelector('#newProductForm [name="product_name"]');
+  const idInput = document.querySelector('#newProductForm [name="product_id"]');
+  const modelInput = document.querySelector('#newProductForm [name="model_no"]');
+  const warnBox = document.createElement('p');
+  warnBox.style.cssText = 'font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px;display:none;';
+  modelInput.insertAdjacentElement('afterend', warnBox);
+
+  // The same product_id can legitimately list different variants (e.g. the
+  // same product in black vs grey, each with its own model_no) — so this
+  // only counts as "the same product" when name + id + model ALL match
+  // exactly. Anything less is a different product, even if the ID matches.
+  function findExactMatch() {
+    const name = nameInput.value.trim();
+    const id = idInput.value.trim();
+    const model = modelInput.value.trim();
+    if (!name || !id || !model) return null;
+    return invState.products.find(p =>
+      p.product_id === id && p.product_name === name && (p.model_no || '') === model);
+  }
+
+  function refreshDuplicateWarning() {
+    const match = findExactMatch();
+    if (match) {
+      warnBox.style.display = 'block';
+      warnBox.textContent = `This exact product (ID, name and model) already exists. Submitting will add a new lot to it instead of a separate product.`;
+    } else {
+      warnBox.style.display = 'none';
+    }
+  }
+  [nameInput, idInput, modelInput].forEach(inp => inp.addEventListener('input', refreshDuplicateWarning));
+
   document.getElementById('newProductForm').addEventListener('submit', e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+
+    // Someone may type in an ID/name/model combo that's already on file
+    // instead of using "Add Existing Product". Rather than let that create
+    // a second record, treat an exact match the same as picking the
+    // existing product — this just becomes a new lot for it. A partial
+    // match (e.g. same ID, different model/colour) is a different product
+    // and is allowed through as usual.
+    const existing = findExactMatch();
+    if (existing) {
+      addWiz.productId = existing.product_id;
+      addWiz.productName = existing.product_name;
+      addWiz.modelNo = existing.model_no || '';
+      renderLotDetailsStep();
+      return;
+    }
+
     addWiz.productId = fd.get('product_id').trim();
     addWiz.productName = fd.get('product_name').trim();
     addWiz.modelNo = fd.get('model_no').trim();
@@ -485,9 +709,22 @@ function renderLotDetailsStep() {
   addWizTitle(`${addWiz.productName} — Lot Details`);
   body.innerHTML = `
     <form id="lotForm" style="display:flex;flex-direction:column;gap:10px;">
+      <label style="font-size:13px;color:#64748b;">Type</label>
+      <select name="product_type" id="lotProductType" required>
+        <option value="product">Product</option>
+        <option value="spare_parts">Spare Parts</option>
+        <option value="damaged">Damaged Product</option>
+        <option value="accessories">Accessories</option>
+      </select>
       <input name="lot_no" placeholder="Lot No." required>
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
-      <input name="first_serial" placeholder="Serial No. (first unit)" required>
+      <input name="first_serial" id="firstSerialInput" placeholder="Serial No. (first unit)">
+      <div id="serialOptionalMsg" style="display:none;font-size:12px;color:#64748b;">Serial numbers are optional for accessories — leave blank to skip, or add them below.</div>
+      <div id="fileSerialBox" style="border:1px dashed #94a3b8;border-radius:8px;padding:8px;">
+        <label style="font-size:12px;color:#64748b;">Or add by file — upload an Excel/CSV of serial numbers</label>
+        <input type="file" id="serialFileInput" accept=".xlsx,.xls,.csv" style="width:100%;padding:6px 0;font-size:12px;">
+        <div id="fileSerialPreview" style="font-size:12px;color:#0369a1;margin-top:4px;"></div>
+      </div>
       <div id="serialModeBox" style="display:none;">
         <label style="font-size:13px;color:#64748b;">Remaining serial numbers</label>
         <div style="display:flex;gap:14px;margin:6px 0;font-size:13px;">
@@ -510,12 +747,55 @@ function renderLotDetailsStep() {
 
   document.getElementById('backAdd3').addEventListener('click', () => addWiz.productId && invState.products.some(p => p.product_id === addWiz.productId) ? renderExistingProductStep() : renderNewProductStep());
 
+  document.getElementById('lotProductType').value = addWiz.productType || 'product';
+
   const form = document.getElementById('lotForm');
+  const typeSelect = document.getElementById('lotProductType');
   const qtyInput = form.querySelector('[name="quantity"]');
-  const firstSerialInput = form.querySelector('[name="first_serial"]');
+  const firstSerialInput = document.getElementById('firstSerialInput');
+  const serialOptionalMsg = document.getElementById('serialOptionalMsg');
   const serialModeBox = document.getElementById('serialModeBox');
   const manualBox = document.getElementById('manualSerialsBox');
   const autoPreviewBox = document.getElementById('autoPreviewBox');
+  const fileSerialInput = document.getElementById('serialFileInput');
+  const fileSerialPreview = document.getElementById('fileSerialPreview');
+  let fileSerials = [];
+  let usingFileSerials = false;
+
+  // serial number is required for every type except accessories
+  function syncSerialRequirement() {
+    const optional = isSerialOptionalType(typeSelect.value);
+    firstSerialInput.required = !optional;
+    serialOptionalMsg.style.display = optional ? 'block' : 'none';
+  }
+  typeSelect.addEventListener('change', () => { syncSerialRequirement(); refreshSerialUI(); });
+  syncSerialRequirement();
+
+  fileSerialInput.addEventListener('change', () => {
+    const file = fileSerialInput.files[0];
+    if (!file) return;
+    parseSerialsFromFile(file, (serials) => {
+      fileSerials = serials;
+      usingFileSerials = true;
+      qtyInput.value = serials.length;
+      qtyInput.readOnly = true;
+      firstSerialInput.value = serials[0];
+      firstSerialInput.readOnly = true;
+      serialModeBox.style.display = 'none';
+      fileSerialPreview.innerHTML = `${serials.length} serial number(s) loaded from file. ` +
+        `<button type="button" id="clearFileSerials" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:12px;">Clear</button>`;
+      document.getElementById('clearFileSerials').addEventListener('click', () => {
+        usingFileSerials = false;
+        fileSerials = [];
+        fileSerialInput.value = '';
+        qtyInput.readOnly = false;
+        firstSerialInput.readOnly = false;
+        firstSerialInput.value = '';
+        fileSerialPreview.innerHTML = '';
+        refreshSerialUI();
+      });
+    }, (msg) => { fileSerialPreview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; });
+  });
 
   function generateAutoSerials(firstSerial, quantity) {
     const match = firstSerial.match(/^(.*?)(\d+)$/);
@@ -544,7 +824,32 @@ function renderLotDetailsStep() {
     }
   }
 
+  let autoSerials = [];
+  let autoRemoved = new Set();
+
+  function renderAutoChips() {
+    const remaining = autoSerials.filter(s => !autoRemoved.has(s));
+    autoPreviewBox.innerHTML = `<div style="margin-bottom:6px;">Will generate ${remaining.length} unit(s) — click × to drop one:</div>` +
+      autoSerials.map(s => {
+        const removed = autoRemoved.has(s);
+        return `<span data-s="${s}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px;border-radius:14px;font-size:11px;${removed ? 'background:#fee2e2;color:#b91c1c;text-decoration:line-through;' : 'background:#e0f2fe;color:#0369a1;'}">
+          ${s}<button type="button" class="auto-serial-toggle" data-s="${s}" style="border:none;background:none;cursor:pointer;font-weight:700;color:inherit;">${removed ? '↺' : '×'}</button></span>`;
+      }).join('');
+    autoPreviewBox.querySelectorAll('.auto-serial-toggle').forEach(btn => btn.addEventListener('click', () => {
+      const s = btn.dataset.s;
+      if (autoRemoved.has(s)) {
+        autoRemoved.delete(s);
+      } else {
+        const stillRemaining = autoSerials.filter(x => !autoRemoved.has(x));
+        if (stillRemaining.length <= 1) { alert('At least one serial number / unit must remain.'); return; }
+        autoRemoved.add(s);
+      }
+      renderAutoChips();
+    }));
+  }
+
   function refreshSerialUI() {
+    if (usingFileSerials) return;
     const quantity = Math.max(1, Number(qtyInput.value) || 1);
     const firstSerial = firstSerialInput.value.trim();
     if (quantity <= 1 || !firstSerial) {
@@ -555,9 +860,10 @@ function renderLotDetailsStep() {
     const mode = form.querySelector('[name="serial_mode"]:checked').value;
     if (mode === 'auto') {
       manualBox.style.display = 'none';
-      const preview = generateAutoSerials(firstSerial, quantity);
       autoPreviewBox.style.display = 'block';
-      autoPreviewBox.textContent = `Will generate: ${preview.join(', ')}`;
+      autoSerials = generateAutoSerials(firstSerial, quantity);
+      autoRemoved = new Set();
+      renderAutoChips();
     } else {
       autoPreviewBox.style.display = 'none';
       manualBox.style.display = 'flex';
@@ -572,26 +878,49 @@ function renderLotDetailsStep() {
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(form);
-    const quantity = Math.max(1, Number(fd.get('quantity')) || 1);
-    const firstSerial = fd.get('first_serial').trim();
+    const productType = fd.get('product_type') || 'product';
+    const serialOptional = isSerialOptionalType(productType);
+    let quantity, serials;
 
-    let serials = [firstSerial];
-    if (quantity > 1) {
-      const mode = form.querySelector('[name="serial_mode"]:checked').value;
-      if (mode === 'auto') {
-        serials = generateAutoSerials(firstSerial, quantity);
+    if (usingFileSerials) {
+      serials = fileSerials;
+      quantity = serials.length;
+    } else {
+      quantity = Math.max(1, Number(fd.get('quantity')) || 1);
+      const firstSerial = (fd.get('first_serial') || '').trim().toLowerCase();
+
+      if (serialOptional && !firstSerial) {
+        // accessories can be listed with no serial numbers at all
+        serials = [];
       } else {
-        const manualInputs = [...manualBox.querySelectorAll('.manualSerialInput')].map(i => i.value.trim());
-        if (manualInputs.some(v => !v)) { alert('Please fill in all serial numbers.'); return; }
-        serials = [firstSerial, ...manualInputs];
+        serials = [firstSerial];
+        if (quantity > 1) {
+          const mode = form.querySelector('[name="serial_mode"]:checked').value;
+          if (mode === 'auto') {
+            serials = autoSerials.filter(s => !autoRemoved.has(s)).map(s => s.toLowerCase());
+            quantity = serials.length;
+          } else {
+            const manualInputs = [...manualBox.querySelectorAll('.manualSerialInput')].map(i => i.value.trim().toLowerCase());
+            if (manualInputs.some(v => !v)) { alert('Please fill in all serial numbers.'); return; }
+            serials = [firstSerial, ...manualInputs];
+          }
+        }
       }
     }
-    if (new Set(serials).size !== serials.length) { alert('Serial numbers must be unique.'); return; }
+
+    if (serials.length) {
+      if (new Set(serials).size !== serials.length) { alert('Serial numbers must be unique.'); return; }
+
+      const existingSerials = new Set(invState.products.flatMap(p => p.serial_numbers || []).map(s => (s || '').toLowerCase()));
+      const duplicates = serials.filter(s => existingSerials.has(s));
+      if (duplicates.length) { alert(`These serial number(s) already exist in inventory: ${duplicates.join(', ')}`); return; }
+    }
 
     const payload = {
       product_name: addWiz.productName,
       product_id: addWiz.productId,
       model_no: addWiz.modelNo,
+      product_type: fd.get('product_type') || 'product',
       lot_no: fd.get('lot_no'),
       quantity,
       serial_numbers: serials,
@@ -629,19 +958,36 @@ function wireModals() {
     const inputs = e.target.querySelectorAll('input');
     const targetQuantity = Number(inputs[5].value);
 
-    const new_serial_numbers = [...e.target.querySelectorAll('.new-serial-input')].map(i => i.value.trim());
+    const new_serial_numbers = [...e.target.querySelectorAll('.new-serial-input')].map(i => i.value.trim().toLowerCase());
     const remove_serial_numbers = [...invState.editRemovedSerials];
     const keptCount = invState.editSerials.length - remove_serial_numbers.length;
 
-    if (targetQuantity > keptCount) {
-      if (new_serial_numbers.some(v => !v)) {
-        showResponseModal('Missing serial numbers', 'Please fill in every new serial number field before saving.', false);
+    const typeSelect = document.getElementById('editProductType');
+    const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
+
+    // accessories: quantity and serial count don't have to match, so skip
+    // all the strict sync checks below
+    if (!serialOptional) {
+      if (targetQuantity > keptCount) {
+        if (new_serial_numbers.some(v => !v)) {
+          showResponseModal('Missing serial numbers', 'Please fill in every new serial number field before saving.', false);
+          return;
+        }
+        const existingSerials = new Set(
+          invState.products.flatMap(p => p.serial_numbers || [])
+            .filter(s => !invState.editSerials.includes(s))
+            .map(s => (s || '').toLowerCase())
+        );
+        const duplicates = new_serial_numbers.filter(s => existingSerials.has(s));
+        if (duplicates.length) {
+          showResponseModal('Duplicate serial numbers', `These serial number(s) already exist in inventory: ${duplicates.join(', ')}`, false);
+          return;
+        }
+      }
+      if (targetQuantity < keptCount) {
+        showResponseModal('Remove more serial numbers', `Quantity is ${targetQuantity} but ${keptCount} serial number(s) are still on file — mark ${keptCount - targetQuantity} more for removal.`, false);
         return;
       }
-    }
-    if (targetQuantity < keptCount) {
-      showResponseModal('Remove more serial numbers', `Quantity is ${targetQuantity} but ${keptCount} serial number(s) are still on file — mark ${keptCount - targetQuantity} more for removal.`, false);
-      return;
     }
 
     const updated_values = {
@@ -651,7 +997,8 @@ function wireModals() {
       purchase_date: inputs[4].value,
       quantity: targetQuantity,
       price: inputs[6].value,
-      tax_rate: Number(inputs[7].value)
+      tax_rate: Number(inputs[7].value),
+      product_type: typeSelect ? typeSelect.value : 'product'
     };
     try {
       const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {

@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from mongodb.mongodb_connection import mongodbclient
 from user.company import login
 from order.manage_order import order_manager
-from service.service_details import service_detail
+from service.service_details import service_detail, GDRIVE_PLACEHOLDER
+from gdrive_media import upload_base64_to_drive
 from inventory.inventory_handling import inventory_manager
 from user.customer_details import customer_manager
 from sales.sales_person_manager import sales_person_manager
@@ -18,6 +19,10 @@ from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
+import base64
+import smtplib
+from email.message import EmailMessage
+from datetime import datetime, timezone, timedelta
 
 load_dotenv()
 app = FastAPI()
@@ -43,6 +48,15 @@ CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
 SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
 REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
+
+# ---- Damaged-product report settings ----
+# Image is emailed out immediately when reported, then wiped from Mongo after
+# DAMAGE_IMAGE_RETENTION_DAYS to keep the database light. The issue text and
+# who/when metadata are kept forever - only the (large) base64 image is purged.
+DAMAGE_IMAGE_RETENTION_DAYS = int(os.getenv("DAMAGE_IMAGE_RETENTION_DAYS", "2"))
+GMAIL_SENDER_EMAIL = os.getenv("GMAIL_SENDER_EMAIL", "")
+GMAIL_SENDER_APP_PASSWORD = os.getenv("GMAIL_SENDER_APP_PASSWORD", "")
+GMAIL_NOTIFY_RECEIVER = os.getenv("GMAIL_NOTIFY_RECEIVER", GMAIL_SENDER_EMAIL)
 
 
 class LoginRequest(BaseModel):
@@ -153,11 +167,13 @@ class OrderStatusRequest(BaseModel):
 
 
 class DispatchConfirmRequest(BaseModel):
-    docket_no: str
+    docket_no: Optional[str] = None
     invoice_no: str
     invoice_date: str
+    mode_of_delivery: Optional[str] = None
     ship_to_different: bool = False
     ship_to_address: Optional[dict]= None   # {company_name, address} — only used when ship_to_different is True
+    image: Optional[str] = None   # optional base64 data URI, e.g. packaging/handover photo
 
 
 class ServiceUpdateRequest(BaseModel):
@@ -203,6 +219,7 @@ class InventoryRequest(BaseModel):
     model_no: str = ""
     supplier_address: str = ""
     serial_numbers: list[str] = []
+    product_type: str = "product"  # "product" | "spare_parts" | "damaged" | "accessories"
 
 
 class InventoryUpdateRequest(BaseModel):
@@ -682,9 +699,137 @@ async def order(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="order dataset cannot be fetched")
 
 
+DISPATCH_MEDIA_STALE_DAYS = int(os.getenv("DISPATCH_MEDIA_STALE_DAYS", "5"))
+
+
+class DamageReportRequest(BaseModel):
+    issue: str
+    image: str  # base64 data URL - required, enforced below
+
+
+def send_damage_report_email(allocation_id: str, product_label: str, issue: str, image_data_url: str, reported_by: str):
+    """
+    Emails the damage photo + issue description to GMAIL_NOTIFY_RECEIVER right
+    away, before the image gets purged from Mongo. Never raises - a failed
+    email should not block the damage report from being saved.
+    """
+    if not GMAIL_SENDER_EMAIL or not GMAIL_SENDER_APP_PASSWORD or not GMAIL_NOTIFY_RECEIVER:
+        logging.error("gmail credentials not configured - skipping damage report email")
+        return False
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = f"Damaged product reported - allocation {allocation_id[:8]}"
+        msg["From"] = GMAIL_SENDER_EMAIL
+        msg["To"] = GMAIL_NOTIFY_RECEIVER
+        msg.set_content(
+            f"Allocation ID: {allocation_id}\n"
+            f"Product: {product_label}\n"
+            f"Reported by: {reported_by}\n"
+            f"Reported at: {datetime.now(timezone.utc).isoformat()}\n\n"
+            f"Issue:\n{issue}\n\n"
+            f"(Photo attached. This image will be deleted from the database "
+            f"{DAMAGE_IMAGE_RETENTION_DAYS} day(s) after being reported.)"
+        )
+
+        if image_data_url.startswith("data:"):
+            header, b64data = image_data_url.split(",", 1)
+            mime = header.split(":")[1].split(";")[0]  # e.g. image/jpeg
+            subtype = mime.split("/")[1] if "/" in mime else "jpeg"
+            img_bytes = base64.b64decode(b64data)
+            msg.add_attachment(img_bytes, maintype="image", subtype=subtype, filename=f"damage_{allocation_id[:8]}.{subtype}")
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(GMAIL_SENDER_EMAIL, GMAIL_SENDER_APP_PASSWORD)
+            smtp.send_message(msg)
+
+        logging.info(f"damage report email sent for allocation {allocation_id}")
+        return True
+    except Exception as e:
+        logging.error(f"failed to send damage report email for allocation {allocation_id}: {e}")
+        return False
+
+
+def purge_stale_damage_images():
+    """
+    Finds damage reports whose image is still stored and is older than
+    DAMAGE_IMAGE_RETENTION_DAYS, then clears just the image field (issue text
+    and metadata are kept). Runs automatically whenever allocations are
+    loaded. Never raises - a hiccup here should not break the page.
+    """
+    try:
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=DAMAGE_IMAGE_RETENTION_DAYS)).isoformat()
+        stale_query = {
+            "damage_report.reported_at": {"$ne": None, "$lt": cutoff_iso},
+            "damage_report.image": {"$ne": None}
+        }
+        db = mongodbclient()
+        stale_docs = db.get_data(collection_name=ALLOCATION_COLLECTION, query=stale_query)
+        purged_count = 0
+        for doc in stale_docs:
+            allocation_id = doc.get("allocation_id")
+            db.update_data(
+                collection_name=ALLOCATION_COLLECTION,
+                query={"allocation_id": allocation_id},
+                update_values={"damage_report.image": None, "damage_report.image_purged": True}
+            )
+            purged_count += 1
+        if purged_count:
+            logging.info(f"purged {purged_count} stale damage report image(s)")
+        return purged_count
+    except Exception as e:
+        logging.error(f"stale damage image purge skipped due to error: {e}")
+        return 0
+
+
+def migrate_stale_dispatch_media():
+    """
+    Same idea as service_detail.migrate_stale_media(), applied to the
+    "dispatch" sub-document embedded on orders and spare-part allocations:
+    finds dispatch records whose image is still a raw base64 blob and is
+    older than DISPATCH_MEDIA_STALE_DAYS (default 5 days), uploads it to
+    Google Drive, and replaces the field in Mongo with a placeholder +
+    the Drive link. Runs automatically on every dispatch queue load. Never
+    raises - a Drive/network hiccup should not break the page.
+    """
+    try:
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=DISPATCH_MEDIA_STALE_DAYS)).isoformat()
+        stale_query = {
+            "dispatch.media_updated_at": {"$ne": None, "$lt": cutoff_iso},
+            "dispatch.image": {"$regex": "^data:"}
+        }
+
+        migrated_count = 0
+        for collection_name, id_field in ((ORDERS_COLLECTION, "order_id"), (ALLOCATION_COLLECTION, "allocation_id")):
+            db = mongodbclient()
+            stale_docs = db.get_data(collection_name=collection_name, query=stale_query)
+            for doc in stale_docs:
+                record_id = doc.get(id_field)
+                image_val = (doc.get("dispatch") or {}).get("image") or ""
+                if not image_val.startswith("data:"):
+                    continue
+                try:
+                    link = upload_base64_to_drive(image_val, filename=f"dispatch_{record_id}_image")
+                    db.update_data(
+                        collection_name=collection_name,
+                        query={id_field: record_id},
+                        update_values={"dispatch.image": GDRIVE_PLACEHOLDER, "dispatch.image_drive_link": link}
+                    )
+                    migrated_count += 1
+                except Exception as media_err:
+                    logging.error(f"failed to migrate dispatch image for {id_field} {record_id}: {media_err}")
+
+        if migrated_count:
+            logging.info(f"migrated dispatch images to Google Drive for {migrated_count} record(s)")
+        return migrated_count
+    except Exception as e:
+        logging.error(f"stale dispatch media migration skipped due to error: {e}")
+        return 0
+
+
 @app.get("/dispatch/")
 async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))):
     try:
+        migrate_stale_dispatch_media()
         odb = order_manager()
         all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": "processing"})
         pending_orders = [o for o in all_orders if not o.get("dispatch")]
@@ -722,9 +867,12 @@ async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest,
             "docket_no": request.docket_no,
             "invoice_no": request.invoice_no,
             "invoice_date": request.invoice_date,
+            "mode_of_delivery": request.mode_of_delivery,
             "bill_to_address": {"company_name": customer.get("company_name", ""), "address": customer.get("company_address", "")},
             "ship_to_different": request.ship_to_different,
             "ship_to_address": request.ship_to_address if request.ship_to_different else None,
+            "image": request.image,
+            "media_updated_at": datetime.now(timezone.utc).isoformat() if request.image else None,
             "dispatched_by": user["username"]
         }
         db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values={"dispatch": dispatch_info})
@@ -748,8 +896,11 @@ async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfi
             "docket_no": request.docket_no,
             "invoice_no": request.invoice_no,
             "invoice_date": request.invoice_date,
+            "mode_of_delivery": request.mode_of_delivery,
             "ship_to_different": request.ship_to_different,
             "ship_to_address": request.ship_to_address if request.ship_to_different else None,
+            "image": request.image,
+            "media_updated_at": datetime.now(timezone.utc).isoformat() if request.image else None,
             "dispatched_by": user["username"]
         }
         db.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id}, update_values={"dispatch": dispatch_info})
@@ -964,7 +1115,10 @@ async def inventory(user: dict = Depends(get_current_user)):
 @app.post("/inventory/create")
 async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
-        if len(request.serial_numbers) != request.quantity:
+        # serial numbers are optional for accessories — only enforce the
+        # quantity match when at least one serial number was actually given
+        serials_required = request.product_type != "accessories" or len(request.serial_numbers) > 0
+        if serials_required and len(request.serial_numbers) != request.quantity:
             raise HTTPException(status_code=400, detail="number of serial numbers must match quantity")
         if len(set(request.serial_numbers)) != len(request.serial_numbers):
             raise HTTPException(status_code=400, detail="serial numbers must be unique")
@@ -980,7 +1134,8 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
             tax_rate=request.tax_rate,
             model_no=request.model_no,
             supplier_address=request.supplier_address,
-            serial_numbers=request.serial_numbers
+            serial_numbers=request.serial_numbers,
+            product_type=request.product_type
         )
         inventory_item.add(collection_name=INVENTORY_COLLECTION)
         logging.info("product listed successfully on inventory")
@@ -1001,12 +1156,33 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         if not existing:
             raise HTTPException(status_code=404, detail="product not found")
         current_serials = existing[0].get("serial_numbers") or []
+        current_type = existing[0].get("product_type", "product")
 
         updated_values = dict(request.updated_values)
+        effective_type = updated_values.get("product_type", current_type)
+
+        # serial numbers are optional for accessories, so quantity is free to
+        # move independently of the serial list for that type — only sync
+        # serials with quantity for product/spare_parts/damaged
+        if effective_type == "accessories":
+            if request.new_serial_numbers:
+                if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
+                    raise HTTPException(status_code=400, detail="new serial numbers must be unique")
+                duplicates = [s for s in request.new_serial_numbers if s in current_serials]
+                if duplicates:
+                    raise HTTPException(status_code=400,
+                                         detail=f"serial number(s) already exist on this product: {', '.join(duplicates)}")
+            serials = list(current_serials)
+            if request.remove_serial_numbers:
+                serials = [s for s in serials if s not in request.remove_serial_numbers]
+            if request.new_serial_numbers:
+                serials = serials + request.new_serial_numbers
+            if request.remove_serial_numbers or request.new_serial_numbers:
+                updated_values["serial_numbers"] = serials
 
         # whenever quantity changes, keep serial_numbers in sync instead of letting
         # them silently drift out of step with the stock count
-        if "quantity" in updated_values and updated_values["quantity"] is not None:
+        elif "quantity" in updated_values and updated_values["quantity"] is not None:
             new_quantity = int(updated_values["quantity"])
             serials = list(current_serials)
 
@@ -1090,10 +1266,9 @@ async def search_customer(term: str = "", user: dict = Depends(get_current_user)
         db = customer_manager()
         dataset = db.search(collection_name=CUSTOMER_COLLECTION, term=term) if term else db.get_data(CUSTOMER_COLLECTION, query={})
         if user["role"] == "distributor":
-            acc_db = login()
-            team = acc_db.get_data(ACCOUNTS_COLLECTION, query={"role": "distributor", "manager": user["username"]})
-            visible_usernames = {user["username"]} | {m["username"] for m in team}
-            dataset = [c for c in dataset if c.get("created_by") in visible_usernames]
+            # a distributor should only see customers they themselves created —
+            # not customers created by other salespeople on their team
+            dataset = [c for c in dataset if c.get("created_by") == user["username"]]
         return {"message": "customer search results", "dataset": dataset}
     except Exception as e:
         logging.error("customer search failed")
@@ -1223,12 +1398,68 @@ async def active_services(user: dict = Depends(get_current_user)):
 @app.get("/allocation/")
 async def allocations(user: dict = Depends(get_current_user)):
     try:
+        purge_stale_damage_images()
         db = allocation_manager()
         dataset = db.get_data(collection_name=ALLOCATION_COLLECTION, query={})
         return {"message": "allocation dataset", "dataset": dataset}
     except Exception as e:
         logging.error("fetching allocations failed")
         raise HTTPException(status_code=500, detail="allocation dataset cannot be fetched")
+
+
+@app.post("/allocation/report_damage/{allocation_id}")
+async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "employee", "distributor"))):
+    try:
+        if not request.image:
+            raise HTTPException(status_code=400, detail="a photo of the damaged product is required")
+        if not request.issue or not request.issue.strip():
+            raise HTTPException(status_code=400, detail="please specify the issue")
+
+        db = allocation_manager()
+        matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="allocation not found")
+
+        allocation = matches[0]
+        is_spare = allocation.get("allocation_type") == "spare_part"
+        product_label = (
+            f"{allocation.get('spare_part', {}).get('part_name', '')}"
+            if is_spare else
+            ", ".join(f"{i.get('product_name')} x{i.get('quantity')}" for i in allocation.get("items", []))
+        )
+
+        reported_at = datetime.now(timezone.utc).isoformat()
+        email_sent = send_damage_report_email(
+            allocation_id=allocation_id,
+            product_label=product_label,
+            issue=request.issue,
+            image_data_url=request.image,
+            reported_by=user["username"]
+        )
+
+        db.update_data(
+            collection_name=ALLOCATION_COLLECTION,
+            query={"allocation_id": allocation_id},
+            update_values={
+                "damage_report": {
+                    "reported": True,
+                    "issue": request.issue,
+                    "image": request.image,
+                    "image_purged": False,
+                    "reported_by": user["username"],
+                    "reported_at": reported_at,
+                    "email_sent": email_sent
+                }
+            }
+        )
+
+        logging.info(f"damage reported for allocation {allocation_id} by {user['username']}")
+        return {"message": "damage reported successfully", "allocation_id": allocation_id, "email_sent": email_sent}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"reporting damage failed: {e}")
+        raise HTTPException(status_code=500, detail="damage report could not be saved")
 
 
 @app.get("/allocation/mine")
@@ -1650,24 +1881,37 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                 }
 
         inventory_db = inventory_manager()
-        allocation_items = []
         for item in request.items:
             available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id)
             if available < item.quantity:
                 raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}: only {available} available")
 
+        # No more partial returns: every allocated unit becomes its own
+        # allocation document (quantity=1, one serial number each) instead of
+        # bundling the whole quantity into a single row. A cart of ProductA x2
+        # therefore creates two separate rows on the Allocated page, each
+        # independently returnable.
+        created_allocation_ids = []
         for item in request.items:
             allocated_serials = inventory_db.allocate_serials(
                 collection_name=INVENTORY_COLLECTION,
                 product_id=item.product_id,
                 quantity=item.quantity
             )
-            allocation_items.append({
-                "product_id": item.product_id,
-                "product_name": item.product_name,
-                "quantity": item.quantity,
-                "serial_numbers": allocated_serials
-            })
+            for serial in allocated_serials:
+                unit_allocation = allocation_manager(
+                    sales_person=sales_person_snapshot,
+                    items=[{
+                        "product_id": item.product_id,
+                        "product_name": item.product_name,
+                        "quantity": 1,
+                        "serial_numbers": [serial]
+                    }],
+                    company_name=request.company_name,
+                    address=request.address
+                )
+                unit_allocation.add(collection_name=ALLOCATION_COLLECTION)
+                created_allocation_ids.append(unit_allocation.allocation_id)
 
         spare_part_dict = None
         redirect_to = None
@@ -1685,17 +1929,16 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
             spare_part_dict = request.spare_part.dict()
             redirect_to = "service.html"
 
-        allocation = allocation_manager(
-            sales_person=sales_person_snapshot,
-            items=allocation_items,
-            spare_part=spare_part_dict,
-            company_name=request.company_name,
-            address=request.address
-        )
-        allocation.add(collection_name=ALLOCATION_COLLECTION)
+            spare_allocation = allocation_manager(
+                spare_part=spare_part_dict,
+                company_name=request.company_name,
+                address=request.address
+            )
+            spare_allocation.add(collection_name=ALLOCATION_COLLECTION)
+            created_allocation_ids.append(spare_allocation.allocation_id)
 
-        logging.info(f"allocation {allocation.allocation_id} created successfully")
-        return {"message": "allocation created successfully", "allocation_id": allocation.allocation_id, "redirect": redirect_to}
+        logging.info(f"allocation(s) created successfully: {created_allocation_ids}")
+        return {"message": "allocation created successfully", "allocation_ids": created_allocation_ids, "redirect": redirect_to}
 
     except HTTPException:
         raise
@@ -1706,12 +1949,38 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
 @app.post("/allocation/return/{allocation_id}")
 async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "employee", "distributor"))):
+    """
+    Every allocation — product or spare part — now returns in one shot.
+    Partial returns were removed: since each product allocation document
+    represents a single allocated unit (quantity=1, one serial number),
+    there's nothing left to split — the row is either returned or it isn't.
+    """
     try:
         db = allocation_manager()
-        db.mark_returned(collection_name=ALLOCATION_COLLECTION, allocation_id=allocation_id)
+        matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="allocation not found")
+        allocation = matches[0]
+
+        if allocation.get("return_status") == "returned":
+            raise HTTPException(status_code=400, detail="this allocation is already returned")
+
+        db.update_data(
+            collection_name=ALLOCATION_COLLECTION,
+            query={"allocation_id": allocation_id},
+            update_values={
+                "return_status": "returned",
+                "return_completed_at": datetime.now(timezone.utc).isoformat(),
+                "returned_by": user["username"]
+            }
+        )
+        logging.info(f"allocation {allocation_id} marked as returned")
         return {"message": "allocation marked as returned", "allocation_id": allocation_id}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error("marking allocation as returned failed!")
+        logging.error(f"marking allocation as returned failed! {e}")
         raise HTTPException(status_code=500, detail="allocation cannot be marked as returned")
 
 

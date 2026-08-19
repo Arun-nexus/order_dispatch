@@ -366,7 +366,7 @@ function openStatusModal(s) {
         <option value="completed">Completed</option>
         <option value="rejected">Rejected</option>
       </select>
-      <textarea name="reason" placeholder="Reason (required if Rejected)" style="min-height:60px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;"></textarea>
+      <textarea name="reason" placeholder="Remarks (required for In Progress or Rejected)" style="min-height:60px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;"></textarea>
       <textarea name="spare_parts" placeholder="Spare part used (required if Completed)" style="min-height:60px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">${s.spare_parts || ''}</textarea>
       <label style="font-size:13px;color:#64748b;"><input type="checkbox" name="spare_parts_used"> Spare parts were used for this repair</label>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
@@ -380,9 +380,15 @@ function openStatusModal(s) {
   content.querySelector('#statusForm').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const statusVal = fd.get('service_status');
+    const reasonVal = fd.get('reason') || '';
+    if ((statusVal === 'in_progress' || statusVal === 'rejected') && !reasonVal.trim()) {
+      alert('Remarks are required for this status.');
+      return;
+    }
     const payload = {
-      service_status: fd.get('service_status'),
-      reason: fd.get('reason') || '',
+      service_status: statusVal,
+      reason: reasonVal,
       spare_parts: fd.get('spare_parts') || '',
       spare_parts_used: fd.get('spare_parts_used') === 'on'
     };
@@ -477,7 +483,7 @@ function openRequestServiceModal() {
     const payload = {
       product_id: fd.get('product_id'),
       location: fd.get('location'),
-      serial_no: fd.get('serial_no'),
+      serial_no: (fd.get('serial_no') || '').trim().toLowerCase(),
       purchase_date: fd.get('purchase_date'),
       issue: fd.get('issue'),
       spare_parts: fd.get('spare_parts') || ''

@@ -8,6 +8,8 @@
 
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <!-- SheetJS: used to read serial numbers out of an uploaded Excel/CSV file -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -143,6 +145,22 @@
         <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
       </section>
 
+      <!-- CATEGORY FILTER TABS -->
+      <section class="category-filter-tabs" style="display:flex;gap:10px;margin:14px 0;">
+        <button type="button" class="cat-filter-btn" data-type="product">
+          <i class="fa-solid fa-box"></i> Product
+        </button>
+        <button type="button" class="cat-filter-btn" data-type="spare_parts">
+          <i class="fa-solid fa-gears"></i> Spare Parts
+        </button>
+        <button type="button" class="cat-filter-btn" data-type="damaged">
+          <i class="fa-solid fa-triangle-exclamation"></i> Damaged Product
+        </button>
+        <button type="button" class="cat-filter-btn" data-type="accessories">
+          <i class="fa-solid fa-plug"></i> Accessories
+        </button>
+      </section>
+
       <!-- TABLE -->
       <div class="table-container">
         <table>
@@ -151,7 +169,8 @@
               <th></th>
               <th>Product Name</th>
               <th>Product ID</th>
-              <th>Lot No.</th>
+              <th>Model No.</th>
+              <th>Type</th>
               <th>Supplier</th>
               <th>Purchase Date</th>
               <th>Quantity</th>
@@ -222,6 +241,9 @@
       <div class="detail"><small>Product ID</small>
         <p></p>
       </div>
+      <div class="detail"><small>Type</small>
+        <p id="viewProductType"></p>
+      </div>
       <div class="detail"><small>Lot No.</small>
         <p></p>
       </div>
@@ -239,6 +261,9 @@
       </div>
       <div class="detail"><small>Tax</small>
         <p></p>
+      </div>
+      <div class="detail"><small>Serial Numbers</small>
+        <p id="viewSerialNumbers" style="line-height:1.6;"></p>
       </div>
     </div>
   </div>
@@ -281,6 +306,13 @@
       <form style="display:flex;flex-direction:column;gap:10px;">
         <input placeholder="Product Name">
         <input placeholder="Product ID" disabled style="background:#f3f4f6;">
+        <label style="font-size:13px;color:#64748b;">Type</label>
+        <select id="editProductType" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="product">Product</option>
+          <option value="spare_parts">Spare Parts</option>
+          <option value="damaged">Damaged Product</option>
+          <option value="accessories">Accessories</option>
+        </select>
         <input placeholder="Lot No.">
         <input placeholder="Supplier">
         <input type="date">
@@ -292,6 +324,11 @@
           <label style="font-size:13px;font-weight:600;color:#334155;">Serial Numbers on file</label>
           <div id="currentSerialsList" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;"></div>
           <div id="serialDeltaMsg" style="font-size:12px;color:#64748b;margin-bottom:6px;"></div>
+          <button type="button" id="editSerialFileBtn" style="display:none;font-size:12px;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;cursor:pointer;margin-bottom:6px;">
+            <i class="fa-solid fa-file-excel"></i> Add by file (upload Excel)
+          </button>
+          <input type="file" id="editSerialFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+          <div id="editFileSerialPreview" style="font-size:12px;color:#0369a1;margin-bottom:6px;"></div>
           <div id="newSerialsBox" style="display:flex;flex-direction:column;gap:6px;"></div>
         </div>
 

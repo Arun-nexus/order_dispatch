@@ -7,7 +7,7 @@ class inventory_manager(mongodbclient):
 
     def __init__(self, product_name=None, product_id=None, quantity=None,
                  purchase_date=None, lot_no=None, supplier=None, price=None, tax_rate=None,
-                 model_no=None, supplier_address=None, serial_numbers=None):
+                 model_no=None, supplier_address=None, serial_numbers=None, product_type=None):
 
         super().__init__()
 
@@ -22,6 +22,8 @@ class inventory_manager(mongodbclient):
         self.model_no = model_no
         self.supplier_address = supplier_address
         self.serial_numbers = serial_numbers or []
+        # "product" | "spare_parts" | "damaged" | "accessories"
+        self.product_type = product_type or "product"
 
     def add(self, collection_name):
         try:
@@ -36,7 +38,8 @@ class inventory_manager(mongodbclient):
                 "purchase_date": self.purchase_date,
                 "quantity": self.quantity,
                 "model_no": self.model_no,
-                "serial_numbers": self.serial_numbers
+                "serial_numbers": self.serial_numbers,
+                "product_type": self.product_type
             }
             product = super().add(collection_name=collection_name, dictionary=product_dic)
             logging.info("product added successfully")
