@@ -15,6 +15,7 @@ from user.customer_details import customer_manager
 from sales.sales_person_manager import sales_person_manager
 from allocation.allocation import allocation_manager
 from request.request_manager import request_manager
+from shipment.manage_shipment import shipment_manager
 from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,6 +49,7 @@ CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
 SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
 REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
+SHIPMENT_COLLECTION = params.get("shipment_collection_name", "shipments")
 
 # ---- Damaged-product report settings ----
 # Image is emailed out immediately when reported, then wiped from Mongo after
@@ -226,6 +228,35 @@ class InventoryUpdateRequest(BaseModel):
     updated_values: dict
     new_serial_numbers: list[str] = []
     remove_serial_numbers: list[str] = []
+
+
+class ShipmentPart(BaseModel):
+    part_name: str
+    quantity: int = 0
+
+
+class ShipmentProduct(BaseModel):
+    product_name: str
+    quantity: int = 0
+    price: float = 0
+    warranty: str = ""            # e.g. "12 months" - optional
+    parts: list[ShipmentPart] = []
+
+
+class CreateShipmentRequest(BaseModel):
+    company_name: str
+    company_address: str = ""
+    dispatch_date: str
+    received_date: str = ""       # optional - can be added later via mark_received
+    products: list[ShipmentProduct]
+
+
+class ShipmentReceivedRequest(BaseModel):
+    received_date: str
+
+
+class ShipmentUpdateRequest(BaseModel):
+    updated_values: dict
 
 
 @app.get("/")
@@ -697,6 +728,110 @@ async def order(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("order dataset cannot be fetched")
         raise HTTPException(status_code=500, detail="order dataset cannot be fetched")
+
+
+# =========================================================
+# SHIPMENT
+# =========================================================
+
+@app.get("/shipment/")
+async def shipment(user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = shipment_manager()
+        dataset = db.get_data(collection_name=SHIPMENT_COLLECTION, query={})
+        logging.info("shipment dataset was fetched successfully")
+        return {"message": "shipment dataset", "dataset": dataset}
+    except Exception as e:
+        logging.error("shipment dataset cannot be fetched")
+        raise HTTPException(status_code=500, detail="shipment dataset cannot be fetched")
+
+
+@app.get("/shipment/{shipment_id}")
+async def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = shipment_manager()
+        result = db.shipment_tracking(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("shipment tracking failed!")
+        raise HTTPException(status_code=404, detail="no shipment found with this shipment_id")
+
+
+@app.post("/shipment/create")
+async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        shipment_item = shipment_manager(
+            company_name=request.company_name,
+            company_address=request.company_address,
+            dispatch_date=request.dispatch_date,
+            received_date=request.received_date or None,
+            products=[product.dict() for product in request.products],
+            created_by=user["username"],
+        )
+        _, shipment_id = shipment_item.add(collection_name=SHIPMENT_COLLECTION)
+        logging.info("shipment created successfully")
+        return {"message": "shipment created successfully", "shipment_id": shipment_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("shipment creation failed!")
+        raise HTTPException(status_code=500, detail="shipment creation failed")
+
+
+@app.post("/shipment/mark_received/{shipment_id}")
+async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = shipment_manager()
+        existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no shipment found with this shipment_id")
+
+        db.mark_received(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id, received_date=request.received_date)
+        return {"message": "shipment marked as received", "shipment_id": shipment_id, "received_date": request.received_date}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("marking shipment as received failed")
+        raise HTTPException(status_code=500, detail="shipment could not be marked as received")
+
+
+@app.post("/shipment/update/{shipment_id}")
+async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = shipment_manager()
+        existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no shipment found with this shipment_id")
+
+        updated = dict(request.updated_values)
+        # keep status in sync if the caller is editing received_date directly
+        if "received_date" in updated:
+            updated["status"] = "received" if updated["received_date"] else "pending"
+
+        db.update(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id}, update_values=updated)
+        logging.info("shipment value was updated successfully.")
+        return {"message": "shipment value was updated", "shipment_id": shipment_id, "updated_value": updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("shipment cannot be updated")
+        raise HTTPException(status_code=500, detail="shipment value cannot be updated")
+
+
+@app.post("/shipment/delete/{shipment_id}")
+async def delete_shipment(shipment_id: str, user: dict = Depends(require_role("admin"))):
+    try:
+        db = shipment_manager()
+        db.delete(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
+        return {"message": "shipment deleted", "shipment_id": shipment_id}
+    except Exception as e:
+        logging.error("shipment deletion failed")
+        raise HTTPException(status_code=500, detail="shipment deletion failed!")
 
 
 DISPATCH_MEDIA_STALE_DAYS = int(os.getenv("DISPATCH_MEDIA_STALE_DAYS", "5"))
