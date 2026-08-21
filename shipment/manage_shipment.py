@@ -52,9 +52,13 @@ class shipment_manager(mongodbclient):
                 part_name = (part.get("part_name") or "").strip()
                 if not part_name:
                     continue
+                status = part.get("status", "assembly")
+                if status not in ("assembly", "purchase", "warranty"):
+                    status = "assembly"
                 parts.append({
                     "part_name": part_name,
                     "quantity": part.get("quantity", 0) or 0,
+                    "status": status,
                 })
 
             normalized.append({
@@ -135,6 +139,61 @@ class shipment_manager(mongodbclient):
             return result
         except Exception as e:
             logging.error("marking shipment as received failed!")
+            raise Exception(e)
+
+    def consume_parts(self, collection_name, shipment_id, parts_needed):
+        """
+        Deducts spare-part quantities from a shipment's stock — used when an
+        Assembly is built using parts sourced from this shipment.
+
+        parts_needed: list of {"part_name": str, "quantity": int}
+        Matches part_name case-insensitively across every product's parts
+        list inside the shipment (parts are a shared pool for the whole
+        shipment, not tied to a single product). Raises if the shipment
+        doesn't have enough of a part left, so callers can roll back /
+        surface a clear error instead of silently going negative.
+        """
+        try:
+            existing = self.get_data(collection_name=collection_name, query={"shipment_id": shipment_id})
+            if not existing:
+                raise Exception(f"no shipment found with id {shipment_id}")
+            shipment = existing[0]
+            products = shipment.get("products", [])
+
+            # how much of each part is available right now, across all products
+            available = {}
+            for product in products:
+                for part in product.get("parts", []):
+                    key = part["part_name"].strip().lower()
+                    available[key] = available.get(key, 0) + (part.get("quantity", 0) or 0)
+
+            for need in parts_needed:
+                key = (need.get("part_name") or "").strip().lower()
+                qty = need.get("quantity", 0) or 0
+                if qty <= 0:
+                    continue
+                if available.get(key, 0) < qty:
+                    raise Exception(
+                        f"not enough '{need.get('part_name')}' in shipment {shipment_id} "
+                        f"(need {qty}, have {available.get(key, 0)})"
+                    )
+
+            # deduct greedily across whichever product/part entries carry that name
+            remaining_need = {(n.get("part_name") or "").strip().lower(): n.get("quantity", 0) or 0 for n in parts_needed}
+            for product in products:
+                for part in product.get("parts", []):
+                    key = part["part_name"].strip().lower()
+                    if remaining_need.get(key, 0) > 0:
+                        take = min(part.get("quantity", 0) or 0, remaining_need[key])
+                        part["quantity"] = (part.get("quantity", 0) or 0) - take
+                        remaining_need[key] -= take
+
+            self.update(collection_name=collection_name, query={"shipment_id": shipment_id}, update_values={"products": products})
+            logging.info(f"parts consumed from shipment {shipment_id}: {parts_needed}")
+            return True
+
+        except Exception as e:
+            logging.error("consuming parts from shipment failed!")
             raise Exception(e)
 
     def shipment_tracking(self, collection_name: str, shipment_id):

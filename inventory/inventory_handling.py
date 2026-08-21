@@ -1,13 +1,15 @@
 from mongodb.mongodb_connection import mongodbclient
 from logger import logging
 from bson import ObjectId
+import uuid
 
 
 class inventory_manager(mongodbclient):
 
     def __init__(self, product_name=None, product_id=None, quantity=None,
                  purchase_date=None, lot_no=None, supplier=None, price=None, tax_rate=None,
-                 model_no=None, supplier_address=None, serial_numbers=None, product_type=None):
+                 model_no=None, supplier_address=None, serial_numbers=None, product_type=None,
+                 warranty_until=None, reason=""):
 
         super().__init__()
 
@@ -24,6 +26,13 @@ class inventory_manager(mongodbclient):
         self.serial_numbers = serial_numbers or []
         # "product" | "spare_parts" | "damaged" | "accessories"
         self.product_type = product_type or "product"
+        # only meaningful for "damaged" entries created from a swapped-out
+        # faulty part: warranty_until carries the source shipment lot's
+        # warranty expiry forward (so /inventory/'s dynamic warranty_status
+        # calc picks it up), and reason records why it's flagged (e.g. which
+        # service/serial it was pulled from when it's already out of warranty)
+        self.warranty_until = warranty_until
+        self.reason = reason
 
     def add(self, collection_name):
         try:
@@ -39,13 +48,64 @@ class inventory_manager(mongodbclient):
                 "quantity": self.quantity,
                 "model_no": self.model_no,
                 "serial_numbers": self.serial_numbers,
-                "product_type": self.product_type
+                "product_type": self.product_type,
+                "warranty_until": self.warranty_until,
+                "reason": self.reason,
             }
             product = super().add(collection_name=collection_name, dictionary=product_dic)
             logging.info("product added successfully")
             return product
         except Exception as e:
             logging.error("adding product to inventory was failed!")
+            raise Exception(e)
+
+    def add_or_merge(self, collection_name):
+        """
+        Used by the "Add Existing Product" restock flow. If an entry already
+        exists for this exact product_name + product_id + model_no, the new
+        serial numbers are appended to it and its quantity is increased —
+        instead of creating a second, separate document for the same product
+        (which used to make the table/eye-view ambiguous about which lot's
+        quantity/serials belong to which row). Otherwise a fresh entry is
+        created, same as add().
+        """
+        try:
+            existing = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": self.product_name, "product_id": self.product_id, "model_no": self.model_no}
+            )
+            if existing:
+                entry = existing[0]
+                current_serials = entry.get("serial_numbers") or []
+                duplicates = [s for s in self.serial_numbers if s in current_serials]
+                if duplicates:
+                    raise Exception(f"serial number(s) already exist on this product: {', '.join(duplicates)}")
+
+                merged_serials = current_serials + list(self.serial_numbers)
+                new_quantity = int(entry.get("quantity", 0) or 0) + int(self.quantity or 0)
+
+                update_values = {
+                    "serial_numbers": merged_serials,
+                    "quantity": new_quantity,
+                    "lot_no": self.lot_no,
+                    "supplier": self.supplier,
+                    "supplier_address": self.supplier_address,
+                    "price": self.price,
+                    "tax_rate": self.tax_rate,
+                    "purchase_date": self.purchase_date,
+                }
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values=update_values
+                )
+                logging.info(f"merged {self.quantity} unit(s) into existing inventory entry for {self.product_id}")
+                return {"mode": "merged", "product_id": self.product_id, "quantity_added": self.quantity}
+
+            return self.add(collection_name=collection_name)
+
+        except Exception as e:
+            logging.error("adding/merging inventory entry failed!")
             raise Exception(e)
 
     def update(self, collection_name, query, update_values, many=False):
@@ -87,6 +147,129 @@ class inventory_manager(mongodbclient):
             return sum(int(e.get("quantity", 0) or 0) for e in entries)
         except Exception as e:
             logging.error("checking available quantity failed!")
+            raise Exception(e)
+
+    def get_available_quantity_by_name(self, collection_name, product_name, product_type):
+        """
+        Same idea as get_available_quantity, but for entries that have no
+        natural product_id (e.g. spare_parts pushed in from a shipment) —
+        sums quantity across every entry matching product_name + product_type.
+        """
+        try:
+            entries = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": product_name, "product_type": product_type}
+            )
+            return sum(int(e.get("quantity", 0) or 0) for e in entries)
+        except Exception as e:
+            logging.error("checking available quantity by name failed!")
+            raise Exception(e)
+
+    def get_hologram_available_by_name(self, collection_name, product_name, product_type):
+        """
+        Sums how many hologram numbers are on file (across every matching lot)
+        for a product_name + product_type — used before assembly to make sure
+        there's a hologram number for every unit about to be consumed.
+        """
+        try:
+            entries = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": product_name, "product_type": product_type}
+            )
+            return sum(len(e.get("hologram_numbers") or []) for e in entries)
+        except Exception as e:
+            logging.error("checking available hologram numbers by name failed!")
+            raise Exception(e)
+
+    def consume_quantity(self, collection_name, product_name, product_type, quantity):
+        """
+        Deducts `quantity` units of a non-serialized product (e.g. a
+        spare_parts entry) identified by product_name + product_type,
+        oldest lots (by purchase_date) first. Raises if stock is insufficient.
+        """
+        try:
+            entries = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": product_name, "product_type": product_type, "quantity": {"$gt": 0}}
+            )
+            entries.sort(key=lambda e: e.get("purchase_date") or "")
+
+            remaining = quantity
+            for entry in entries:
+                if remaining <= 0:
+                    break
+                available = int(entry.get("quantity", 0) or 0)
+                take = min(remaining, available)
+                if take <= 0:
+                    continue
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"quantity": available - take}
+                )
+                remaining -= take
+
+            if remaining > 0:
+                raise Exception(f"insufficient stock for '{product_name}', short by {remaining}")
+
+            logging.info(f"consumed {quantity} unit(s) of '{product_name}' from {product_type}")
+            return quantity
+        except Exception as e:
+            logging.error("consuming quantity from inventory failed!")
+            raise Exception(e)
+
+    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity):
+        """
+        Deducts `quantity` units of a spare_parts/service_parts entry (matched by
+        product_name + product_type) AND pulls that many hologram numbers along with
+        it — oldest lots first, same pattern as allocate_serials below. Every unit
+        consumed this way must have its own hologram number on file; raises if
+        either the stock or the hologram numbers on file fall short. Returns the
+        flat list of hologram numbers taken, in the order they were consumed — this
+        becomes the per-unit hologram_number for the assembly's serials.
+        """
+        try:
+            entries = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": product_name, "product_type": product_type, "quantity": {"$gt": 0}}
+            )
+            entries.sort(key=lambda e: e.get("purchase_date") or "")
+
+            # verify enough hologram numbers exist across all matching lots before touching anything
+            total_hologram = sum(len(e.get("hologram_numbers") or []) for e in entries)
+            if total_hologram < quantity:
+                raise Exception(
+                    f"only {total_hologram} hologram number(s) on file for '{product_name}', need {quantity}"
+                )
+
+            remaining = quantity
+            allocated = []
+            for entry in entries:
+                if remaining <= 0:
+                    break
+                available_qty = int(entry.get("quantity", 0) or 0)
+                available_hologram = entry.get("hologram_numbers") or []
+                take = min(remaining, available_qty, len(available_hologram))
+                if take <= 0:
+                    continue
+                taken = available_hologram[:take]
+                leftover_hologram = available_hologram[take:]
+                new_quantity = available_qty - take
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"hologram_numbers": leftover_hologram, "quantity": new_quantity}
+                )
+                allocated.extend(taken)
+                remaining -= take
+
+            if remaining > 0:
+                raise Exception(f"insufficient hologram-tagged stock for '{product_name}', short by {remaining}")
+
+            logging.info(f"allocated {len(allocated)} hologram number(s) for '{product_name}'")
+            return allocated
+        except Exception as e:
+            logging.error("hologram number allocation failed!")
             raise Exception(e)
 
     def allocate_serials(self, collection_name, product_id, quantity):
@@ -135,4 +318,171 @@ class inventory_manager(mongodbclient):
 
         except Exception as e:
             logging.error("serial allocation failed!")
+            raise Exception(e)
+
+    def add_from_assembly(self, collection_name, product_name, product_id, model_no, quantity,
+                           serial_numbers, price=0, tax_rate=0, purchase_date=None,
+                           supplier="In-house Assembly", supplier_address="", lot_no="",
+                           product_type="product"):
+        """
+        Called right after an Assembly is marked completed, to push the
+        freshly built units into inventory.
+
+        If an inventory entry already exists with the same product_name +
+        product_id + model_no, the assembled serial numbers are appended to
+        that entry and its quantity is increased by `quantity`. Otherwise a
+        brand new inventory entry is created for this assembled batch.
+
+        Returns {"mode": "merged" | "created", "product_id": ..., "quantity_added": ...}
+        """
+        try:
+            if not product_name or not product_id:
+                raise Exception("assembled product must have a product name and product id")
+            if not quantity or quantity <= 0:
+                raise Exception("assembled quantity must be greater than 0")
+
+            existing = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": product_name, "product_id": product_id, "model_no": model_no}
+            )
+
+            if existing:
+                entry = existing[0]
+                merged_serials = (entry.get("serial_numbers") or []) + list(serial_numbers)
+                new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"serial_numbers": merged_serials, "quantity": new_quantity}
+                )
+                logging.info(f"merged {quantity} assembled unit(s) into existing inventory entry for {product_id}")
+                return {"mode": "merged", "product_id": product_id, "quantity_added": quantity}
+
+            product_dic = {
+                "product_name": product_name,
+                "product_id": product_id,
+                "lot_no": lot_no,
+                "supplier": supplier,
+                "supplier_address": supplier_address,
+                "price": price,
+                "tax_rate": tax_rate,
+                "purchase_date": purchase_date,
+                "quantity": quantity,
+                "model_no": model_no,
+                "serial_numbers": list(serial_numbers),
+                "product_type": product_type,
+            }
+            super().add(collection_name=collection_name, dictionary=product_dic)
+            logging.info(f"created new inventory entry for assembled product {product_id}")
+            return {"mode": "created", "product_id": product_id, "quantity_added": quantity}
+
+        except Exception as e:
+            logging.error("pushing assembled units into inventory failed!")
+            raise Exception(e)
+
+    def add_from_shipment_parts(self, collection_name, parts, product_type,
+                                 supplier="", supplier_address="", purchase_date=None, lot_no=""):
+        """
+        Called right after a Shipment is marked received, to push its parts
+        into inventory — grouped here by product_type so the caller decides
+        which bucket they land in:
+          - parts marked "assembly" on the shipment -> product_type="spare_parts"
+          - parts marked "purchase" / "warranty" on the shipment -> product_type="service_parts"
+
+        parts: list of {
+            "part_name": str,
+            "parent_product_name": str,                        # which shipment product this part belongs to
+            "quantity": int,
+            "part_category": "purchase" | "warranty" | None,  # only meaningful for service_parts
+            "warranty_until": "YYYY-MM-DD" | None,             # only meaningful when part_category == "warranty"
+        }
+
+        Unlike assembled units, shipment parts have no serial numbers (they're
+        tracked purely by quantity) and no natural product_id, so:
+          - if an inventory entry with the same product_name + parent_product_name +
+            product_type + part_category + purchase_date + warranty_until already
+            exists, its quantity is simply increased
+          - otherwise a new entry is created with an auto-generated product_id
+
+        purchase_date and warranty_until are part of the match on purpose: two
+        shipments of the "same" part received on different dates, or covered by
+        different warranty windows, must NOT collapse into one inventory row —
+        each stays its own lot with its own date/warranty so nothing gets mixed.
+
+        Returns a list of {"part_name", "mode": "merged" | "created", "quantity_added"}
+        """
+        try:
+            results = []
+            for part in parts:
+                part_name = (part.get("part_name") or "").strip()
+                parent_product_name = (part.get("parent_product_name") or "").strip()
+                quantity = part.get("quantity", 0) or 0
+                if not part_name or quantity <= 0:
+                    continue
+
+                part_category = part.get("part_category")     # None | "purchase" | "warranty"
+                warranty_until = part.get("warranty_until")    # only set for "warranty"
+
+                # keep purchase / warranty batches of the same part separate,
+                # and keep the same part name sourced from different products
+                # separate too, so their category/parent isn't lost on merge.
+                # purchase_date and warranty_until are ALSO part of the match:
+                # two shipments of the same part received on different dates,
+                # or with different warranty windows, must land in separate
+                # inventory rows instead of merging their quantity together
+                # (which would silently mix two different dates/warranties).
+                match_query = {
+                    "product_name": part_name,
+                    "parent_product_name": parent_product_name,
+                    "product_type": product_type,
+                    "purchase_date": purchase_date,
+                    "warranty_until": warranty_until,
+                }
+                if part_category:
+                    match_query["part_category"] = part_category
+
+                existing = self.get_data(collection_name=collection_name, query=match_query)
+
+                if existing:
+                    # purchase_date and warranty_until are guaranteed identical
+                    # to the existing entry here (they're part of match_query
+                    # above), so merging only ever adds quantity - it never
+                    # overwrites/mixes a different date or warranty window.
+                    entry = existing[0]
+                    new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+                    self.update_data(
+                        collection_name=collection_name,
+                        query={"_id": ObjectId(entry["_id"])},
+                        update_values={"quantity": new_quantity}
+                    )
+                    logging.info(f"merged {quantity} unit(s) of '{part_name}' into existing {product_type} entry")
+                    results.append({"part_name": part_name, "mode": "merged", "quantity_added": quantity})
+                else:
+                    product_id = f"SP-{uuid.uuid4().hex[:8].upper()}"
+                    product_dic = {
+                        "product_name": part_name,
+                        "parent_product_name": parent_product_name,
+                        "product_id": product_id,
+                        "lot_no": lot_no,
+                        "supplier": supplier,
+                        "supplier_address": supplier_address,
+                        "price": 0,
+                        "tax_rate": 0,
+                        "purchase_date": purchase_date,
+                        "quantity": quantity,
+                        "model_no": "",
+                        "serial_numbers": [],
+                        "product_type": product_type,
+                        "part_category": part_category,
+                        "warranty_until": warranty_until,
+                    }
+                    super().add(collection_name=collection_name, dictionary=product_dic)
+                    logging.info(f"created new {product_type} inventory entry for '{part_name}'")
+                    results.append({"part_name": part_name, "mode": "created", "quantity_added": quantity})
+
+            return results
+
+        except Exception as e:
+            logging.error("pushing shipment parts into inventory failed!")
             raise Exception(e)

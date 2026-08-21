@@ -24,6 +24,7 @@
                 <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
                 <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
                 <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
 
                 <li class="active"><a href="service.html"><i
                             class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
@@ -300,7 +301,19 @@
                     <option value="Rejected">Rejected</option>
                 </select>
                 <textarea placeholder="Reason (required if Rejected)" style="min-height:60px;"></textarea>
-                <textarea placeholder="Spare part used (required if Completed)" style="min-height:60px;"></textarea>
+                <textarea class="spare-parts-text" placeholder="Spare part used (required if Completed)"
+                    style="min-height:60px;"></textarea>
+                <div class="spare-used-toggle" style="display:flex;gap:10px;">
+                    <button type="button" class="spare-used-btn" data-used="true"
+                        style="flex:1;padding:10px;border:1px solid #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;">Spare
+                        Part Used</button>
+                    <button type="button" class="spare-used-btn" data-used="false"
+                        style="flex:1;padding:10px;border:1px solid #1665ff;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Not
+                        Used</button>
+                </div>
+                <div class="parts-used-list" style="display:none;flex-direction:column;gap:8px;"></div>
+                <button type="button" class="add-part-btn" style="display:none;padding:8px;border:1px dashed #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;">+
+                    Add Spare Part</button>
                 <input type="number" min="0" step="0.01" class="service-charges-input"
                     placeholder="Service Charges (required if Completed)">
                 <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">

@@ -569,18 +569,71 @@ function wireModals() {
 
   const statusForm = document.querySelector('#statusModal form');
   if (statusForm) {
+    let spareUsed = false;
+    const spareBtns = statusForm.querySelectorAll('.spare-used-btn');
+    const partsList = statusForm.querySelector('.parts-used-list');
+    const addPartBtn = statusForm.querySelector('.add-part-btn');
+    const sparePartsText = statusForm.querySelector('.spare-parts-text');
+
+    const partRowHtml = () => `
+      <div class="part-row" style="display:flex;gap:6px;align-items:center;">
+        <input type="text" class="part-name-input" placeholder="Part name" style="flex:1;">
+        <input type="text" class="part-old-hologram-input" placeholder="Old hologram no." style="flex:1;">
+        <input type="text" class="part-new-hologram-input" placeholder="New hologram no." style="flex:1;">
+        <button type="button" class="remove-part-btn" style="border:none;background:#eee;border-radius:6px;padding:8px 10px;cursor:pointer;">&times;</button>
+      </div>`;
+
+    const addPartRow = () => {
+      partsList.insertAdjacentHTML('beforeend', partRowHtml());
+      partsList.lastElementChild.querySelector('.remove-part-btn').addEventListener('click', e => {
+        e.target.closest('.part-row').remove();
+      });
+    };
+    addPartBtn.addEventListener('click', addPartRow);
+
+    const renderSpareUsed = () => {
+      spareBtns.forEach(b => {
+        const active = (b.dataset.used === 'true') === spareUsed;
+        b.style.background = active ? '#1665ff' : '#fff';
+        b.style.color = active ? '#fff' : '#1665ff';
+      });
+      partsList.style.display = spareUsed ? 'flex' : 'none';
+      addPartBtn.style.display = spareUsed ? 'block' : 'none';
+      sparePartsText.style.display = spareUsed ? 'none' : 'block';
+      if (spareUsed && !partsList.children.length) addPartRow();
+    };
+    spareBtns.forEach(b => b.addEventListener('click', () => {
+      spareUsed = b.dataset.used === 'true';
+      renderSpareUsed();
+    }));
+    renderSpareUsed();
+
     statusForm.addEventListener('submit', async e => {
       e.preventDefault();
       const select = statusForm.querySelector('select');
-      const textareas = statusForm.querySelectorAll('textarea');
-      const reasonBox = textareas[0];
-      const sparePartsBox = textareas[1];
+      const reasonBox = statusForm.querySelector('textarea:not(.spare-parts-text)');
       const chargesBox = statusForm.querySelector('.service-charges-input');
 
       const statusMap = { 'Active': 'active', 'In Progress': 'in_progress', 'Completed': 'completed', 'Rejected': 'rejected' };
       const service_status = statusMap[select.value] || select.value.toLowerCase().replace(' ', '_');
 
-      if (service_status === 'completed' && !sparePartsBox.value.trim()) {
+      let parts_used = [];
+      if (spareUsed) {
+        parts_used = [...partsList.querySelectorAll('.part-row')].map(row => ({
+          part_name: row.querySelector('.part-name-input').value.trim(),
+          old_hologram_number: row.querySelector('.part-old-hologram-input').value.trim(),
+          new_hologram_number: row.querySelector('.part-new-hologram-input').value.trim()
+        }));
+        if (service_status === 'completed') {
+          if (!parts_used.length || parts_used.some(p => !p.part_name || !p.old_hologram_number || !p.new_hologram_number)) {
+            alert('Every spare part needs a name, its old hologram number and its new hologram number.');
+            return;
+          }
+        }
+      }
+      const spare_parts = spareUsed ? parts_used.map(p => p.part_name).join(', ') : sparePartsText.value;
+
+      if (service_status === 'completed' && !spare_parts.trim()) {
         alert('Spare part used must be written before marking the service as Completed.');
         return;
       }
@@ -596,8 +649,9 @@ function wireModals() {
       const payload = {
         service_status,
         reason: reasonBox ? reasonBox.value : '',
-        spare_parts: sparePartsBox ? sparePartsBox.value : '',
-        spare_parts_used: false,
+        spare_parts,
+        spare_parts_used: spareUsed,
+        parts_used,
         service_charges: chargesBox.value !== '' ? Number(chargesBox.value) : null
       };
 
@@ -611,7 +665,13 @@ function wireModals() {
         if (!res.ok) throw new Error(data.detail || 'status update failed');
         document.getElementById('statusModal').style.display = 'none';
         statusForm.reset();
+        spareUsed = false;
+        partsList.innerHTML = '';
+        renderSpareUsed();
         await loadServices();
+        if (data.hologram_mismatch) {
+          alert('This hologram number was not associated with that serial number.');
+        }
       } catch (err) {
         if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
       }

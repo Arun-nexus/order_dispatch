@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+from bson import ObjectId
 from logger import logging
 from configuration import load_params
 from dotenv import load_dotenv
@@ -16,14 +17,51 @@ from sales.sales_person_manager import sales_person_manager
 from allocation.allocation import allocation_manager
 from request.request_manager import request_manager
 from shipment.manage_shipment import shipment_manager
+from assembly.manage_assembly import assembly_manager
 from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
+import re
+import uuid
 import base64
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timezone, timedelta
+
+
+def compute_warranty_until(received_date: str, warranty_text: str):
+    """
+    Parses a free-text warranty duration like "12 months", "1 year", "30 days"
+    (as entered on the shipment product) and adds it to received_date
+    (YYYY-MM-DD) to get the warranty expiry date. Returns an ISO date string
+    (YYYY-MM-DD), or None if either input can't be parsed.
+    """
+    if not received_date or not warranty_text:
+        return None
+    match = re.search(r"(\d+)\s*(day|month|year)", warranty_text.strip().lower())
+    if not match:
+        return None
+    amount, unit = int(match.group(1)), match.group(2)
+    try:
+        base = datetime.strptime(received_date, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+    if unit == "day":
+        result = base + timedelta(days=amount)
+    elif unit == "year":
+        result = base.replace(year=base.year + amount)
+    else:  # month
+        total_months = base.month - 1 + amount
+        year = base.year + total_months // 12
+        month = total_months % 12 + 1
+        days_in_month = [31, 29 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 28,
+                          31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        day = min(base.day, days_in_month[month - 1])
+        result = base.replace(year=year, month=month, day=day)
+
+    return result.strftime("%Y-%m-%d")
 
 load_dotenv()
 app = FastAPI()
@@ -50,6 +88,7 @@ SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_person
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
 REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
 SHIPMENT_COLLECTION = params.get("shipment_collection_name", "shipments")
+ASSEMBLY_COLLECTION = params.get("assembly_collection_name", "assemblies")
 
 # ---- Damaged-product report settings ----
 # Image is emailed out immediately when reported, then wiped from Mongo after
@@ -178,6 +217,12 @@ class DispatchConfirmRequest(BaseModel):
     image: Optional[str] = None   # optional base64 data URI, e.g. packaging/handover photo
 
 
+class ServicePartUsed(BaseModel):
+    part_name: str
+    old_hologram_number: str
+    new_hologram_number: str
+
+
 class ServiceUpdateRequest(BaseModel):
     service_status: str
     reason: str = ""
@@ -186,6 +231,7 @@ class ServiceUpdateRequest(BaseModel):
     spare_parts_used: bool = False
     spare_parts: str = ""
     service_charges: Optional[float] = None
+    parts_used: list[ServicePartUsed] = []
 
 
 class ServiceChargeRequest(BaseModel):
@@ -221,18 +267,22 @@ class InventoryRequest(BaseModel):
     model_no: str = ""
     supplier_address: str = ""
     serial_numbers: list[str] = []
-    product_type: str = "product"  # "product" | "spare_parts" | "damaged" | "accessories"
+    product_type: str = "product"  # "product" | "spare_parts" | "service_parts" | "damaged" | "accessories"
 
 
 class InventoryUpdateRequest(BaseModel):
     updated_values: dict
     new_serial_numbers: list[str] = []
     remove_serial_numbers: list[str] = []
+    new_hologram_numbers: list[str] = []      # serial-wise hologram numbers to add (spare_parts / service_parts only)
+    remove_hologram_numbers: list[str] = []
+    model_no: Optional[str] = None   # disambiguates which lot-document to touch when a product_id has multiple model_no variants
 
 
 class ShipmentPart(BaseModel):
     part_name: str
     quantity: int = 0
+    status: str = "assembly"      # "assembly" (-> inventory spare_parts) | "purchase" | "warranty" (both -> inventory service_parts)
 
 
 class ShipmentProduct(BaseModel):
@@ -256,6 +306,29 @@ class ShipmentReceivedRequest(BaseModel):
 
 
 class ShipmentUpdateRequest(BaseModel):
+    updated_values: dict
+
+
+class AssemblyPartUsed(BaseModel):
+    part_name: str
+    quantity: int = 0
+    source: str = "inventory"     # "inventory" (deduct from inventory's spare_parts stock) | "local" (sourced outside, no deduction)
+
+
+class AssemblySerialItem(BaseModel):
+    serial_number: str
+
+
+class CreateAssemblyRequest(BaseModel):
+    product_name: str
+    product_id: str = ""
+    model_number: str = ""
+    quantity: int
+    parts_used: list[AssemblyPartUsed] = []
+    serials: list[AssemblySerialItem]
+
+
+class AssemblyUpdateRequest(BaseModel):
     updated_values: dict
 
 
@@ -473,6 +546,101 @@ def _raise_media_review_request(service_id: str, raised_by: str):
         req.add(collection_name=REQUESTS_COLLECTION)
     except Exception:
         logging.error("could not raise media review notification")
+
+
+def _damaged_part_warranty(old_hologram: str):
+    """Looks up which shipment lot the removed part (identified by its old
+    hologram number) came from - i.e. the spare_parts/service_parts
+    inventory entry whose hologram_numbers list contains this hologram - and
+    returns that lot's warranty_until (or None if the hologram isn't found
+    on any lot, or the lot was never covered by a warranty)."""
+    inv_db = inventory_manager()
+    entries = inv_db.get_data(
+        collection_name=INVENTORY_COLLECTION,
+        query={"hologram_numbers": old_hologram, "product_type": {"$in": ["spare_parts", "service_parts"]}}
+    )
+    if not entries:
+        return None
+    return entries[0].get("warranty_until")
+
+
+def _swap_faulty_part(service_id: str, parts_used: list):
+    """When a service is closed with spare part(s) used: for each part,
+    checks the entered old hologram number against the hologram currently
+    on file for the product's serial number in the assembly record (a
+    mismatch is only a warning, never blocks), rolls the assembly record's
+    hologram forward to that part's new hologram number, and adds the
+    removed part into inventory as a damaged product (name = part name,
+    product_id = its old hologram number).
+
+    Before filing it as damaged, the shipment lot the part originally came
+    from (matched via its old hologram number) is looked up so we know
+    whether that lot's warranty is still valid:
+      - still under warranty -> warranty_until is carried onto the damaged
+        entry, so /inventory/'s dynamic warranty_status calc marks it
+        "under warranty" (and how many days are left) automatically
+      - warranty expired, or no shipment lot/warranty found at all -> marked
+        "over warranty", and this service's service_id is recorded in the
+        damaged entry's `reason` field for traceability
+
+    Returns True if any part's old hologram number did not match what's on
+    file (or couldn't be verified)."""
+    svc_db = service_detail()
+    svc = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
+    if not svc:
+        return False
+    serial_no = svc[0].get("serial_no")
+
+    assembly = None
+    serials = None
+    serial_entry = None
+    if serial_no:
+        asm_db = assembly_manager()
+        assemblies = asm_db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"serials.serial_number": serial_no})
+        if assemblies:
+            assembly = assemblies[0]
+            serials = assembly.get("serials", [])
+            for s in serials:
+                if s.get("serial_number") == serial_no:
+                    serial_entry = s
+                    break
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    mismatch = False
+    for part in parts_used:
+        part_name = part.get("part_name")
+        old_hologram = part.get("old_hologram_number")
+        new_hologram = part.get("new_hologram_number")
+
+        if serial_entry is not None:
+            recorded_hologram = serial_entry.get("hologram_number") or ""
+            if recorded_hologram and recorded_hologram != old_hologram:
+                mismatch = True
+            serial_entry["replaced"] = True
+            serial_entry["previous_hologram_number"] = old_hologram
+            serial_entry["hologram_number"] = new_hologram
+        else:
+            mismatch = True
+
+        warranty_until = _damaged_part_warranty(old_hologram)
+        under_warranty = bool(warranty_until) and warranty_until >= today
+        # only when the part is already out of warranty (or its shipment lot
+        # couldn't be traced at all) do we stamp the damage reason with this
+        # service's service_id - an in-warranty part doesn't need that
+        # trail, its warranty_until on the entry already tells the story
+        reason = "" if under_warranty else f"damaged part removed during service {service_id}"
+
+        inv_db = inventory_manager(product_name=part_name, product_id=old_hologram,
+                                    quantity=1, product_type="damaged",
+                                    warranty_until=warranty_until, reason=reason)
+        inv_db.add(collection_name=INVENTORY_COLLECTION)
+
+    if assembly is not None and serials is not None:
+        asm_db.update(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly["assembly_id"]},
+                      update_values={"serials": serials})
+
+    logging.info(f"faulty part(s) swapped for service {service_id}: {len(parts_used)} part(s) processed")
+    return mismatch
 
 
 def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None):
@@ -789,8 +957,100 @@ async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequ
         if not existing:
             raise HTTPException(status_code=404, detail="no shipment found with this shipment_id")
 
+        shipment = existing[0]
         db.mark_received(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id, received_date=request.received_date)
-        return {"message": "shipment marked as received", "shipment_id": shipment_id, "received_date": request.received_date}
+
+        # push this shipment's parts into inventory, bucketed by each part's
+        # status: "assembly" parts -> inventory spare_parts, "purchase" and
+        # "warranty" parts -> inventory service_parts (kept apart there via
+        # part_category so the two never merge into one entry). Warranty parts
+        # also get a warranty_until date computed from this product's warranty
+        # duration + the shipment's received_date, so inventory can later show
+        # them as "under warranty" / "over warranty".
+        # Kept non-fatal: the shipment is already marked received above, so an
+        # inventory hiccup here is reported back but doesn't roll that back.
+        inventory_sync = "skipped"
+        try:
+            spare_parts_needed = {}      # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}   (status == "assembly")
+            purchase_parts_needed = {}   # (product_name, part_name) -> total qty   (status == "purchase")
+            warranty_parts_needed = {}   # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}
+
+            for product in shipment.get("products", []):
+                parent_product_name = product.get("product_name", "")
+                product_warranty_until = compute_warranty_until(request.received_date, product.get("warranty", ""))
+                for part in product.get("parts", []):
+                    name = (part.get("part_name") or "").strip()
+                    qty = part.get("quantity", 0) or 0
+                    if not name or qty <= 0:
+                        continue
+                    status = part.get("status", "assembly")
+                    key = (parent_product_name, name)
+
+                    if status == "assembly":
+                        # spare parts ship bundled with the product, so they're
+                        # covered under that same product's warranty window
+                        entry = spare_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
+                        entry["quantity"] += qty
+                        if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
+                            entry["warranty_until"] = product_warranty_until
+                    elif status == "purchase":
+                        purchase_parts_needed[key] = purchase_parts_needed.get(key, 0) + qty
+                    else:  # "warranty"
+                        entry = warranty_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
+                        entry["quantity"] += qty
+                        # if the same part shows up under multiple products, keep the
+                        # furthest-out expiry so the part stays covered the longest possible
+                        if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
+                            entry["warranty_until"] = product_warranty_until
+
+            if spare_parts_needed or purchase_parts_needed or warranty_parts_needed:
+                inv_db = inventory_manager()
+                sync_results = []
+                if spare_parts_needed:
+                    sync_results += inv_db.add_from_shipment_parts(
+                        collection_name=INVENTORY_COLLECTION,
+                        parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"],
+                                "warranty_until": v["warranty_until"]}
+                               for (pn, n), v in spare_parts_needed.items()],
+                        product_type="spare_parts",
+                        supplier=shipment.get("company_name", ""),
+                        supplier_address=shipment.get("company_address", ""),
+                        purchase_date=request.received_date,
+                    )
+                if purchase_parts_needed:
+                    sync_results += inv_db.add_from_shipment_parts(
+                        collection_name=INVENTORY_COLLECTION,
+                        parts=[{"part_name": n, "parent_product_name": pn, "quantity": q, "part_category": "purchase"}
+                               for (pn, n), q in purchase_parts_needed.items()],
+                        product_type="service_parts",
+                        supplier=shipment.get("company_name", ""),
+                        supplier_address=shipment.get("company_address", ""),
+                        purchase_date=request.received_date,
+                    )
+                if warranty_parts_needed:
+                    sync_results += inv_db.add_from_shipment_parts(
+                        collection_name=INVENTORY_COLLECTION,
+                        parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"], "part_category": "warranty",
+                                "warranty_until": v["warranty_until"]}
+                               for (pn, n), v in warranty_parts_needed.items()],
+                        product_type="service_parts",
+                        supplier=shipment.get("company_name", ""),
+                        supplier_address=shipment.get("company_address", ""),
+                        purchase_date=request.received_date,
+                    )
+                inventory_sync = sync_results
+            else:
+                inventory_sync = "no_parts"
+        except Exception as inv_err:
+            logging.error(f"shipment {shipment_id} received but parts->inventory sync failed: {inv_err}")
+            inventory_sync = f"failed: {inv_err}"
+
+        return {
+            "message": "shipment marked as received",
+            "shipment_id": shipment_id,
+            "received_date": request.received_date,
+            "inventory_sync": inventory_sync,
+        }
 
     except HTTPException:
         raise
@@ -832,6 +1092,251 @@ async def delete_shipment(shipment_id: str, user: dict = Depends(require_role("a
     except Exception as e:
         logging.error("shipment deletion failed")
         raise HTTPException(status_code=500, detail="shipment deletion failed!")
+
+
+# =========================================================
+# ASSEMBLY
+# =========================================================
+
+@app.get("/assembly/")
+async def assembly(user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = assembly_manager()
+        dataset = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={})
+        logging.info("assembly dataset was fetched successfully")
+        return {"message": "assembly dataset", "dataset": dataset}
+    except Exception as e:
+        logging.error("assembly dataset cannot be fetched")
+        raise HTTPException(status_code=500, detail="assembly dataset cannot be fetched")
+
+
+@app.get("/assembly/available_parts")
+async def available_parts_for_assembly(user: dict = Depends(require_role("admin", "employee"))):
+    """
+    Spare parts currently sitting in inventory — the pool an assembly's parts
+    are pulled from. This stock is fed by shipments: a shipment part marked
+    "assembly" lands in inventory as product_type="spare_parts" as soon as
+    the shipment is marked received (see mark_shipment_received above).
+
+    Only parts that already carry hologram numbers are surfaced here — each
+    assembled unit needs one, so a part with none on file can't be used to
+    build one. "hologram_available" tells the UI how many units of this part
+    can actually be assembled (which may be less than raw quantity, if only
+    some units have had a hologram number added yet).
+    """
+    try:
+        inv_db = inventory_manager()
+        dataset = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "spare_parts"})
+
+        pool = {}
+        for entry in dataset:
+            name = entry.get("product_name", "")
+            qty = int(entry.get("quantity", 0) or 0)
+            hologram_count = len(entry.get("hologram_numbers") or [])
+            if not name or qty <= 0 or hologram_count <= 0:
+                continue
+            agg = pool.setdefault(name, {"quantity": 0, "hologram_available": 0})
+            agg["quantity"] += qty
+            agg["hologram_available"] += hologram_count
+
+        available = [
+            {"part_name": name, "quantity": v["quantity"], "hologram_available": v["hologram_available"]}
+            for name, v in pool.items()
+        ]
+        return {"message": "available parts", "dataset": available}
+    except Exception as e:
+        logging.error("available parts for assembly cannot be fetched")
+        raise HTTPException(status_code=500, detail="available parts cannot be fetched")
+
+
+@app.get("/assembly/{assembly_id}")
+async def track_assembly(assembly_id: str, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = assembly_manager()
+        result = db.assembly_tracking(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("assembly tracking failed!")
+        raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
+
+
+@app.post("/assembly/create")
+async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        parts_used = [part.dict() for part in request.parts_used]
+
+        if len(request.serials) != request.quantity:
+            raise HTTPException(status_code=400, detail="number of serial numbers must match the assembly quantity")
+        serial_values = [s.serial_number.strip() for s in request.serials]
+        if any(not s for s in serial_values):
+            raise HTTPException(status_code=400, detail="every unit needs a serial number")
+        if len(set(serial_values)) != len(serial_values):
+            raise HTTPException(status_code=400, detail="serial numbers must be unique within this batch")
+
+        # sum up everything sourced from inventory, merging duplicate part names
+        needed_from_inventory: dict[str, int] = {}
+        for p in parts_used:
+            if p["source"] != "inventory" or p["quantity"] <= 0:
+                continue
+            needed_from_inventory[p["part_name"]] = needed_from_inventory.get(p["part_name"], 0) + p["quantity"]
+
+        if not needed_from_inventory:
+            raise HTTPException(
+                status_code=400,
+                detail="add at least one part from inventory — its hologram numbers supply the assembled units' hologram numbers",
+            )
+
+        # exactly one inventory part must be used at a 1:1 ratio with the assembly
+        # quantity — that's the hologram-bearing part, and its hologram numbers
+        # (one per unit) become each finished unit's hologram number
+        hologram_candidates = [name for name, qty in needed_from_inventory.items() if qty == request.quantity]
+        if len(hologram_candidates) != 1:
+            raise HTTPException(
+                status_code=400,
+                detail="exactly one part from inventory must have quantity equal to the assembly quantity — "
+                       "that part supplies the hologram number for each assembled unit",
+            )
+        hologram_part_name = hologram_candidates[0]
+
+        inv_db = inventory_manager()
+
+        # validate stock (and, for the hologram part, hologram numbers on file) is
+        # sufficient for EVERY part before deducting any of them — otherwise a
+        # shortage on part #2 would leave part #1 already (irreversibly) deducted
+        for part_name, qty in needed_from_inventory.items():
+            have = inv_db.get_available_quantity_by_name(
+                collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts"
+            )
+            if have < qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"not enough '{part_name}' in inventory spare parts (need {qty}, have {have})",
+                )
+            if part_name == hologram_part_name:
+                hologram_have = inv_db.get_hologram_available_by_name(
+                    collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts"
+                )
+                if hologram_have < qty:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"not enough hologram-tagged '{part_name}' in inventory (need {qty}, have {hologram_have})",
+                    )
+
+        # stock confirmed for every part — now actually deduct
+        hologram_numbers: list[str] = []
+        for part_name, qty in needed_from_inventory.items():
+            if part_name == hologram_part_name:
+                hologram_numbers = inv_db.allocate_hologram_numbers_by_name(
+                    collection_name=INVENTORY_COLLECTION, product_name=part_name,
+                    product_type="spare_parts", quantity=qty,
+                )
+            else:
+                inv_db.consume_quantity(
+                    collection_name=INVENTORY_COLLECTION, product_name=part_name,
+                    product_type="spare_parts", quantity=qty,
+                )
+
+        if len(hologram_numbers) != request.quantity:
+            raise HTTPException(status_code=500, detail="could not allocate a hologram number for every assembled unit")
+
+        serials = [
+            {"serial_number": s.serial_number.strip(), "hologram_number": hologram_numbers[i]}
+            for i, s in enumerate(request.serials)
+        ]
+
+        assembly_item = assembly_manager(
+            product_name=request.product_name,
+            product_id=request.product_id,
+            model_number=request.model_number,
+            quantity=request.quantity,
+            parts_used=parts_used,
+            serials=serials,
+            created_by=user["username"],
+        )
+        _, assembly_id = assembly_item.add(collection_name=ASSEMBLY_COLLECTION)
+        logging.info("assembly created successfully")
+        return {"message": "assembly created successfully", "assembly_id": assembly_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("assembly creation failed!")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/assembly/mark_completed/{assembly_id}")
+async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = assembly_manager()
+        existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
+        assembly = existing[0]
+
+        db.mark_completed(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
+
+        # push the freshly built units into inventory - merges into a matching
+        # product_name + product_id + model_no entry if one exists, else creates one.
+        # Kept non-fatal: the assembly is already marked completed above, so an
+        # inventory hiccup here is reported back but doesn't roll that back.
+        inventory_sync = "skipped"
+        try:
+            serial_numbers = [s.get("serial_number") for s in assembly.get("serials", []) if s.get("serial_number")]
+            inv_db = inventory_manager()
+            sync_result = inv_db.add_from_assembly(
+                collection_name=INVENTORY_COLLECTION,
+                product_name=assembly.get("product_name"),
+                product_id=assembly.get("product_id"),
+                model_no=assembly.get("model_number"),
+                quantity=assembly.get("quantity", 0),
+                serial_numbers=serial_numbers,
+                purchase_date=datetime.now(timezone.utc).date().isoformat(),
+            )
+            inventory_sync = sync_result["mode"]  # "merged" | "created"
+        except Exception as inv_err:
+            logging.error(f"assembly {assembly_id} completed but inventory sync failed: {inv_err}")
+            inventory_sync = f"failed: {inv_err}"
+
+        return {"message": "assembly marked as completed", "assembly_id": assembly_id, "inventory_sync": inventory_sync}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("marking assembly as completed failed")
+        raise HTTPException(status_code=500, detail="assembly could not be marked as completed")
+
+
+@app.post("/assembly/update/{assembly_id}")
+async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = assembly_manager()
+        existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
+
+        updated = dict(request.updated_values)
+        db.update(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id}, update_values=updated)
+        logging.info("assembly value was updated successfully.")
+        return {"message": "assembly value was updated", "assembly_id": assembly_id, "updated_value": updated}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("assembly cannot be updated")
+        raise HTTPException(status_code=500, detail="assembly value cannot be updated")
+
+
+@app.post("/assembly/delete/{assembly_id}")
+async def delete_assembly(assembly_id: str, user: dict = Depends(require_role("admin"))):
+    try:
+        db = assembly_manager()
+        db.delete(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
+        return {"message": "assembly deleted", "assembly_id": assembly_id}
+    except Exception as e:
+        logging.error("assembly deletion failed")
+        raise HTTPException(status_code=500, detail="assembly deletion failed!")
 
 
 DISPATCH_MEDIA_STALE_DAYS = int(os.getenv("DISPATCH_MEDIA_STALE_DAYS", "5"))
@@ -1113,8 +1618,16 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
             video=request.video,
             spare_parts_used=request.spare_parts_used,
             spare_parts=request.spare_parts,
-            service_charges=request.service_charges
+            service_charges=request.service_charges,
+            parts_used=[p.dict() for p in request.parts_used]
         )
+
+        hologram_mismatch = False
+        if request.service_status == "completed" and request.spare_parts_used:
+            try:
+                hologram_mismatch = _swap_faulty_part(service_id, [p.dict() for p in request.parts_used])
+            except Exception as swap_err:
+                logging.error(f"service {service_id} completed but faulty-part swap failed: {swap_err}")
 
         # auto-resolve any pending status_update requests raised for this service,
         # since admin/employee just applied the change directly from the Service page
@@ -1127,7 +1640,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
                                status="approved", resolved_by=user["username"])
 
         logging.info("service was updated")
-        return {"message": "service was updated successfully", "service_id": service_id}
+        return {"message": "service was updated successfully", "service_id": service_id, "hologram_mismatch": hologram_mismatch}
     except Exception as e:
         logging.error("service updation was unsuccessful!")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1240,6 +1753,24 @@ async def inventory(user: dict = Depends(get_current_user)):
     try:
         db = inventory_manager()
         dataset = db.get_data(collection_name=INVENTORY_COLLECTION, query={})
+
+        # warranty entries don't flip on their own — work it out fresh on every
+        # fetch by comparing today's date to the stored warranty_until.
+        # Applies to any item that carries a warranty_until: service_parts
+        # with part_category=="warranty", AND spare_parts (covered under the
+        # product's own warranty from the shipment).
+        today_dt = datetime.now(timezone.utc)
+        today = today_dt.strftime("%Y-%m-%d")
+        for item in dataset:
+            if item.get("warranty_until"):
+                item["warranty_status"] = "over warranty" if item["warranty_until"] < today else "under warranty"
+                if item["warranty_status"] == "under warranty":
+                    try:
+                        expiry = datetime.strptime(item["warranty_until"], "%Y-%m-%d")
+                        item["warranty_days_left"] = (expiry - today_dt.replace(tzinfo=None)).days
+                    except ValueError:
+                        item["warranty_days_left"] = None
+
         logging.info("inventory dataset was fetched successfully")
         return {"message": "inventory dataset", "dataset": dataset}
     except Exception as e:
@@ -1272,7 +1803,7 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
             serial_numbers=request.serial_numbers,
             product_type=request.product_type
         )
-        inventory_item.add(collection_name=INVENTORY_COLLECTION)
+        inventory_item.add_or_merge(collection_name=INVENTORY_COLLECTION)
         logging.info("product listed successfully on inventory")
         return {"message": "product was listed successfully"}
 
@@ -1280,14 +1811,17 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
         raise
     except Exception as e:
         logging.error("product cannot be listed to the inventory")
-        raise HTTPException(status_code=500, detail="product can't list into the inventory")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/inventory/update/{product_id}")
 async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
         db = inventory_manager()
-        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id})
+        match_query = {"product_id": product_id}
+        if request.model_no is not None:
+            match_query["model_no"] = request.model_no
+        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
         if not existing:
             raise HTTPException(status_code=404, detail="product not found")
         current_serials = existing[0].get("serial_numbers") or []
@@ -1296,10 +1830,10 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         updated_values = dict(request.updated_values)
         effective_type = updated_values.get("product_type", current_type)
 
-        # serial numbers are optional for accessories, so quantity is free to
-        # move independently of the serial list for that type — only sync
-        # serials with quantity for product/spare_parts/damaged
-        if effective_type == "accessories":
+        # serial numbers are optional for accessories / spare_parts / service_parts,
+        # so quantity is free to move independently of the serial list for those
+        # types — only sync serials with quantity for product/damaged
+        if effective_type in ("accessories", "spare_parts", "service_parts"):
             if request.new_serial_numbers:
                 if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
                     raise HTTPException(status_code=400, detail="new serial numbers must be unique")
@@ -1352,10 +1886,59 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 
             updated_values["serial_numbers"] = serials
 
-        db.update(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id},
+        # hologram numbers are tracked per-unit (one per quantity) for spare_parts /
+        # service_parts, separate from serial numbers. Each is added up to however many
+        # slots remain (quantity - hologram numbers already on file); anything beyond
+        # that is handed back as "leftover" so the caller can show a popup and let the
+        # user export the unused ones instead of silently dropping or over-filling.
+        hologram_added = 0
+        hologram_leftover: list[str] = []
+        if effective_type in ("spare_parts", "service_parts") and (
+            request.new_hologram_numbers or request.remove_hologram_numbers or "quantity" in updated_values
+        ):
+            current_hologram = existing[0].get("hologram_numbers")
+            if current_hologram is None:
+                legacy = existing[0].get("hologram_no")
+                current_hologram = [legacy] if legacy else []
+            else:
+                current_hologram = list(current_hologram)
+
+            if request.remove_hologram_numbers:
+                current_hologram = [h for h in current_hologram if h not in request.remove_hologram_numbers]
+
+            if request.new_hologram_numbers:
+                incoming = [h.strip() for h in request.new_hologram_numbers if h and h.strip()]
+                if len(set(incoming)) != len(incoming):
+                    raise HTTPException(status_code=400, detail="uploaded hologram numbers contain duplicates")
+                dup = [h for h in incoming if h in current_hologram]
+                if dup:
+                    raise HTTPException(status_code=400,
+                                         detail=f"hologram number(s) already on file: {', '.join(dup)}")
+                effective_quantity = int(updated_values.get("quantity", existing[0].get("quantity", 0)) or 0)
+                remaining_slots = max(0, effective_quantity - len(current_hologram))
+                to_add = incoming[:remaining_slots]
+                hologram_leftover = incoming[remaining_slots:]
+                hologram_added = len(to_add)
+                current_hologram = current_hologram + to_add
+
+            # never let hologram numbers on file outnumber the quantity (e.g. quantity
+            # was reduced) — trim from the end rather than leaving a stale mismatch
+            effective_quantity = int(updated_values.get("quantity", existing[0].get("quantity", 0)) or 0)
+            if len(current_hologram) > effective_quantity:
+                current_hologram = current_hologram[:effective_quantity]
+
+            updated_values["hologram_numbers"] = current_hologram
+            updated_values.pop("hologram_no", None)  # migrated to hologram_numbers list
+
+        db.update(collection_name=INVENTORY_COLLECTION, query=match_query,
                    update_values=updated_values)
         logging.info("inventory was updated")
-        return {"message": "inventory was updated successfully", "product_id": product_id}
+        return {
+            "message": "inventory was updated successfully",
+            "product_id": product_id,
+            "hologram_added": hologram_added,
+            "hologram_leftover": hologram_leftover
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1364,15 +1947,77 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 
 
 @app.post("/inventory/delete/{product_id}")
-async def delete_product(product_id: str, user: dict = Depends(require_role("admin"))):
+async def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
     try:
         db = inventory_manager(product_id=product_id)
-        db.delete(collection_name=INVENTORY_COLLECTION)
+        if model_no is not None:
+            existing = db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id, "model_no": model_no})
+            if not existing:
+                raise HTTPException(status_code=404, detail="product not found")
+            db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(existing[0]["_id"])})
+        else:
+            db.delete(collection_name=INVENTORY_COLLECTION)
         logging.info(f"product was deleted successfully from the inventory {product_id}")
         return {"message": "product deletion was successful", "product_id": product_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error("product deletion was failed!")
         raise HTTPException(status_code=500, detail="product cannot be deleted")
+
+
+@app.post("/inventory/repair/{product_id}")
+async def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin", "employee"))):
+    """Action button on the Damaged Product row (replaces Delete there).
+
+    - If the damaged entry is a full PRODUCT (it carries serial numbers,
+      just like a normal product entry) -> a new service record is opened
+      for it with issue="Inhouse Warranty", so it flows into the Service
+      page for in-house repair tracking.
+    - If it's a PART (no serial numbers - e.g. one swapped out during a
+      service and filed as damaged via its hologram number) -> it isn't
+      serviceable in-house, so it's simply flagged in the damaged row's
+      Status column as "Send to Parent Company" instead.
+    """
+    try:
+        db = inventory_manager()
+        match_query = {"product_id": product_id, "product_type": "damaged"}
+        if model_no is not None:
+            match_query["model_no"] = model_no
+        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
+        if not existing:
+            raise HTTPException(status_code=404, detail="damaged product not found")
+        item = existing[0]
+
+        is_product = bool(item.get("serial_numbers"))
+
+        if is_product:
+            serial_no = item["serial_numbers"][0] if item.get("serial_numbers") else ""
+            svc = service_detail(product_id=item.get("product_id", ""), serial_no=serial_no)
+            svc.add_service(
+                collection_name=SERVICE_COLLECTION,
+                technician_id="",
+                purchase_date=item.get("purchase_date", ""),
+                issue="Inhouse Warranty",
+                image="",
+                video="",
+                location="indoor",
+                spare_parts="",
+            )
+            db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
+                      update_values={"damage_status": "Sent for Repair (Inhouse Warranty)"})
+            logging.info(f"damaged product {product_id} sent for in-house repair, service {svc.service_id} created")
+            return {"message": "sent for in-house warranty repair", "mode": "product", "service_id": svc.service_id}
+        else:
+            db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
+                      update_values={"damage_status": "Send to Parent Company"})
+            logging.info(f"damaged part {product_id} marked to send to parent company")
+            return {"message": "marked to send to parent company", "mode": "part"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("repair action on damaged product failed!")
+        raise HTTPException(status_code=500, detail="repair action failed")
 
 
 @app.get("/customer/")
@@ -2089,6 +2734,10 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
     Partial returns were removed: since each product allocation document
     represents a single allocated unit (quantity=1, one serial number),
     there's nothing left to split — the row is either returned or it isn't.
+
+    If a damage report was filed on this allocation before it's returned,
+    the returned item(s) are also filed into inventory as "damaged" product
+    entries (kept non-fatal - a hiccup here doesn't roll back the return).
     """
     try:
         db = allocation_manager()
@@ -2110,6 +2759,50 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
             }
         )
         logging.info(f"allocation {allocation_id} marked as returned")
+
+        damage_report = allocation.get("damage_report") or {}
+        if damage_report.get("reported"):
+            try:
+                inv_db = inventory_manager()
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                reason = f"returned damaged from allocation {allocation_id}"
+                if damage_report.get("issue"):
+                    reason += f" — {damage_report['issue']}"
+
+                if allocation.get("allocation_type") == "spare_part":
+                    sp = allocation.get("spare_part", {})
+                    part_name = sp.get("part_name", "")
+                    qty = sp.get("quantity", 0) or 0
+                    if part_name and qty > 0:
+                        inventory_manager(
+                            product_name=part_name,
+                            product_id=f"DMG-{uuid.uuid4().hex[:8].upper()}",
+                            quantity=qty,
+                            purchase_date=today,
+                            product_type="damaged",
+                            reason=reason,
+                        ).add(collection_name=INVENTORY_COLLECTION)
+                else:
+                    for item in allocation.get("items", []):
+                        product_name = item.get("product_name", "")
+                        qty = item.get("quantity", 0) or 0
+                        if not product_name or qty <= 0:
+                            continue
+                        product_id = item.get("product_id") or f"DMG-{uuid.uuid4().hex[:8].upper()}"
+                        inventory_manager(
+                            product_name=product_name,
+                            product_id=product_id,
+                            quantity=qty,
+                            purchase_date=today,
+                            serial_numbers=item.get("serial_numbers", []) or [],
+                            product_type="damaged",
+                            reason=reason,
+                        ).add(collection_name=INVENTORY_COLLECTION)
+
+                logging.info(f"allocation {allocation_id}'s damaged item(s) filed into inventory as damaged product")
+            except Exception as inv_err:
+                logging.error(f"allocation {allocation_id} returned but filing damaged item(s) into inventory failed: {inv_err}")
+
         return {"message": "allocation marked as returned", "allocation_id": allocation_id}
 
     except HTTPException:

@@ -69,8 +69,9 @@ class service_detail(mongodbclient):
             logging.error("service was not able to delete!")
             raise Exception(e)
 
-    def update_service_status(self, service_status, reason: str, collection_name, query, image=None, video=None, spare_parts_used: bool = False, spare_parts: str = "", service_charges=None):
+    def update_service_status(self, service_status, reason: str, collection_name, query, image=None, video=None, spare_parts_used: bool = False, spare_parts: str = "", service_charges=None, parts_used: list = None):
         try:
+            parts_used = parts_used or []
             if service_status not in [s.value for s in ServiceStatus]:
                 raise Exception(f"invalid status: {service_status}")
 
@@ -81,8 +82,11 @@ class service_detail(mongodbclient):
                 if not spare_parts or not spare_parts.strip():
                     raise Exception("spare part used must be written before marking service as completed")
                 if spare_parts_used:
-                    if not image:
-                        raise Exception("image proof is required to close the service since spare parts were used")
+                    if not parts_used:
+                        raise Exception("at least one spare part with its hologram numbers is required")
+                    for p in parts_used:
+                        if not p.get("part_name") or not p.get("old_hologram_number") or not p.get("new_hologram_number"):
+                            raise Exception("each spare part needs a name, its old hologram number and its new hologram number")
                 else:
                     existing = self.get_service_data(collection_name=collection_name, query=query)
                     if not existing or not existing[0].get("manager_confirmed_return"):
@@ -97,6 +101,8 @@ class service_detail(mongodbclient):
             }
             if spare_parts:
                 update_values["spare_parts"] = spare_parts
+            if spare_parts_used and parts_used:
+                update_values["parts_replaced"] = parts_used
             if image:
                 update_values["image"] = image
             if video:

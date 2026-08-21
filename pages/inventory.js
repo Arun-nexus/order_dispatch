@@ -1,4 +1,4 @@
-const invState = { products: [], activeProductId: null, editSerials: [], editRemovedSerials: [] };
+const invState = { products: [], activeProductId: null, activeModelNo: '', activeCategory: null, searchQuery: '', activeFilters: null, editSerials: [], editRemovedSerials: [], editHolograms: [], editHologramQuantity: 0 };
 let invPage = 1;
 const INV_PAGE_SIZE = 20;
 
@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
 const PRODUCT_TYPE_LABELS = {
   product: 'Product',
   spare_parts: 'Spare Parts',
+  service_parts: 'Service Parts',
   damaged: 'Damaged Product',
   accessories: 'Accessories'
 };
@@ -43,14 +44,32 @@ function productTypeLabel(type) {
 
 function productTypeBadgeClass(type) {
   if (type === 'spare_parts') return 'medium';
+  if (type === 'service_parts') return 'medium';
   if (type === 'damaged') return 'low';
   if (type === 'accessories') return 'medium';
   return 'high';
 }
 
-// serial numbers are optional for this type only
+// service_parts entries carry a part_category ("purchase" | "warranty") so
+// the two never merge into one entry — show that as its own badge
+function partCategoryBadgeHtml(p) {
+  if (p.product_type !== 'service_parts' || !p.part_category) return '';
+  const label = p.part_category === 'warranty' ? 'Warranty' : 'Purchase';
+  return `<span class="stock medium" style="margin-left:4px;">${label}</span>`;
+}
+
+// warranty badge for service_parts entries synced from a shipment's
+// "warranty" parts — server computes warranty_status fresh on every fetch
+function warrantyBadgeHtml(p) {
+  if (p.part_category !== 'warranty' || !p.warranty_until) return '';
+  const over = p.warranty_status === 'over warranty';
+  return `<span class="stock ${over ? 'low' : 'high'}" style="margin-left:4px;">${over ? 'Over Warranty' : 'Under Warranty'}</span>`;
+}
+
+// serial numbers are optional for these types — accessories are sometimes
+// unserialized, and spare/service parts are tracked purely by quantity
 function isSerialOptionalType(type) {
-  return type === 'accessories';
+  return type === 'accessories' || type === 'spare_parts' || type === 'service_parts';
 }
 
 // ---------- Reading serial numbers out of an uploaded Excel/CSV file ----------
@@ -105,17 +124,13 @@ function wireCategoryFilter() {
   };
   buttons.forEach(btn => paint(btn, false));
 
-  let activeType = null;
   buttons.forEach(btn => {
     btn.addEventListener('click', () => {
       const type = btn.dataset.type;
-      activeType = activeType === type ? null : type; // click again to clear
-      buttons.forEach(b => paint(b, b.dataset.type === activeType));
+      invState.activeCategory = invState.activeCategory === type ? null : type; // click again to clear
+      buttons.forEach(b => paint(b, b.dataset.type === invState.activeCategory));
       invPage = 1;
-      const filtered = activeType
-        ? invState.products.filter(p => (p.product_type || 'product') === activeType)
-        : invState.products;
-      renderInventoryTable(filtered);
+      renderInventoryTable(getFilteredInventory());
     });
   });
 }
@@ -124,16 +139,43 @@ function wireHeaderSearch() {
   const input = document.querySelector('.search input');
   if (!input) return;
   input.addEventListener('input', () => {
-    const q = input.value.trim().toLowerCase();
+    invState.searchQuery = input.value.trim().toLowerCase();
     invPage = 1;
-    if (!q) { renderInventoryTable(invState.products); return; }
-    const filtered = invState.products.filter(p =>
+    renderInventoryTable(getFilteredInventory());
+  });
+}
+
+// Combines whatever category tab / header search / "Apply Filter" criteria
+// are currently active on invState and returns the resulting view. Used both
+// by the individual filter controls AND by loadInventory(), so that any
+// action which re-fetches data (delete, edit save, add, etc.) re-renders the
+// SAME filtered view the user was looking at instead of silently snapping
+// back to the full unfiltered product list.
+function getFilteredInventory() {
+  let list = invState.activeCategory
+    ? invState.products.filter(p => (p.product_type || 'product') === invState.activeCategory)
+    : invState.products;
+
+  const q = invState.searchQuery;
+  if (q) {
+    list = list.filter(p =>
       (p.product_name || '').toLowerCase().includes(q) ||
       (p.supplier || '').toLowerCase().includes(q) ||
       (p.serial_numbers || []).some(s => (s || '').toLowerCase().includes(q))
     );
-    renderInventoryTable(filtered);
-  });
+  }
+
+  const f = invState.activeFilters;
+  if (f) {
+    list = list.filter(p =>
+      (!f.name || (p.product_name || '').toLowerCase().includes(f.name)) &&
+      (!f.id || (p.product_id || '').toLowerCase().includes(f.id)) &&
+      (!f.supplier || (p.supplier || '').toLowerCase().includes(f.supplier)) &&
+      (!f.date || p.purchase_date === f.date)
+    );
+  }
+
+  return list;
 }
 
 function applyRolePermissions() {
@@ -157,7 +199,7 @@ async function loadInventory() {
     const data = await res.json();
     invState.products = (data.dataset || []).slice().reverse();
     invPage = 1;
-    renderInventoryTable(invState.products);
+    renderInventoryTable(getFilteredInventory());
     updateInventoryCards(invState.products);
   } catch (err) {
     console.error(err);
@@ -189,6 +231,121 @@ function stockClass(qty) {
   return 'low';
 }
 
+// Column sets per category — the header labels/cells shown adapt to whichever
+// filter tab is active, so irrelevant columns (e.g. Model No. for spare parts)
+// don't clutter the table.
+// hologram numbers are tracked one-per-unit (parallel to quantity, not to
+// serial numbers) — hologram_numbers is the array; hologram_no is the old
+// single-string field, kept here only as a fallback for un-migrated records
+function hologramNumbersOf(p) {
+  if (Array.isArray(p.hologram_numbers)) return p.hologram_numbers;
+  return p.hologram_no ? [p.hologram_no] : [];
+}
+
+function statusFromHologram(p) {
+  if (p.product_type !== 'spare_parts' && p.product_type !== 'service_parts') return 'Pending';
+  const count = hologramNumbersOf(p).length;
+  const qty = Number(p.quantity) || 0;
+  if (count === 0) return 'Pending';
+  if (qty && count >= qty) return 'Active';
+  return 'Partial';
+}
+
+function columnsForCategory(category) {
+  const typeCell = p => `<span class="stock ${productTypeBadgeClass(p.product_type)}">${productTypeLabel(p.product_type)}</span>${partCategoryBadgeHtml(p)}${warrantyBadgeHtml(p)}`;
+  const qtyCell = p => `<span class="stock ${stockClass(Number(p.quantity) || 0)}">${p.quantity ?? 0}</span>`;
+  const priceCell = p => `₹${p.price ?? ''}`;
+  const taxCell = p => `${p.tax_rate ?? 0}%`;
+  const dateCell = p => p.purchase_date ?? '';
+  const supplierCell = p => p.supplier ?? '';
+  const nameCell = p => p.product_name ?? '';
+  const idCell = p => p.product_id ?? '';
+  const modelCell = p => p.model_no ?? '';
+  // shipment stores warranty length in months (e.g. "12 months"); the backend
+  // adds that to the received_date and stores it as warranty_until. Here we
+  // just subtract today's date from that to show how many days are left.
+  const daysRemaining = (warrantyUntil) => {
+    if (!warrantyUntil) return null;
+    const until = new Date(warrantyUntil + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((until - today) / (1000 * 60 * 60 * 24));
+  };
+  const warrantyPeriodCell = p => {
+    const days = daysRemaining(p.warranty_until);
+    if (days === null) return '—';
+    if (days < 0) return `<span class="stock low">Expired ${Math.abs(days)}d ago</span>`;
+    if (days === 0) return `<span class="stock low">Expires today</span>`;
+    return `<span class="stock ${days <= 30 ? 'medium' : 'high'}">${days} day${days === 1 ? '' : 's'} left</span>`;
+  };
+  const statusBadge = p => {
+    const s = statusFromHologram(p);
+    const cls = s === 'Active' ? 'high' : (s === 'Partial' ? 'medium' : 'low');
+    return `<span class="stock ${cls}">${s}</span>`;
+  };
+
+  switch (category) {
+    case 'product':
+      return [
+        { label: 'Product Name', cell: nameCell },
+        { label: 'Product ID', cell: idCell },
+        { label: 'Model No.', cell: modelCell },
+        { label: 'Receiving Date', cell: dateCell },
+        { label: 'Quantity', cell: qtyCell },
+        { label: 'Price', cell: priceCell },
+        { label: 'Tax', cell: taxCell }
+      ];
+    case 'spare_parts':
+      return [
+        { label: 'Product Name', cell: p => p.parent_product_name ?? '—' },
+        { label: 'Part Name', cell: nameCell },
+        { label: 'Shipment Received Date', cell: dateCell },
+        { label: 'Warranty Period', cell: warrantyPeriodCell },
+        { label: 'Quantity', cell: qtyCell },
+        { label: 'Status', cell: statusBadge }
+      ];
+    case 'service_parts':
+      return [
+        { label: 'Product Name', cell: p => p.parent_product_name ?? '—' },
+        { label: 'Part Name', cell: nameCell },
+        { label: 'Shipment Received Date', cell: dateCell },
+        { label: 'Warranty Period', cell: warrantyPeriodCell },
+        { label: 'Quantity', cell: qtyCell },
+        { label: 'Status', cell: statusBadge },
+        { label: 'Type', cell: p => p.part_category ? (p.part_category === 'warranty' ? 'Warranty' : 'Purchase') : '—' }
+      ];
+    case 'damaged':
+      return [
+        { label: 'Product Name', cell: nameCell },
+        { label: 'Product ID', cell: idCell },
+        { label: 'Model No.', cell: modelCell },
+        { label: 'Received Date', cell: p => p.damage_date ?? p.purchase_date ?? '' },
+        { label: 'Warranty Period', cell: warrantyPeriodCell },
+        { label: 'Reason of Damage', cell: p => p.reason_of_damage ?? '—' },
+        { label: 'Status', cell: p => p.damage_status ?? 'Damaged' }
+      ];
+    default: // no category filter active — table stays exactly as it is today
+      return [
+        { label: 'Product Name', cell: nameCell },
+        { label: 'Product ID', cell: idCell },
+        { label: 'Model No.', cell: modelCell },
+        { label: 'Type', cell: typeCell },
+        { label: 'Supplier', cell: supplierCell },
+        { label: 'Purchase Date', cell: dateCell },
+        { label: 'Quantity', cell: qtyCell },
+        { label: 'Price', cell: priceCell },
+        { label: 'Tax', cell: taxCell }
+      ];
+  }
+}
+
+function renderTableHeader(category) {
+  const headRow = document.querySelector('.table-container thead tr');
+  if (!headRow) return;
+  const columns = columnsForCategory(category);
+  headRow.innerHTML = `<th></th>${columns.map(c => `<th>${c.label}</th>`).join('')}<th>Actions</th>`;
+}
+
 function renderInventoryTable(products) {
   // API returns products in insertion (ascending) order — reverse so the
   // most recently added product shows at the top instead of the bottom.
@@ -199,6 +356,9 @@ function renderInventoryTable(products) {
   const start = (invPage - 1) * INV_PAGE_SIZE;
   const pageRows = sorted.slice(start, start + INV_PAGE_SIZE);
 
+  const columns = columnsForCategory(invState.activeCategory);
+  renderTableHeader(invState.activeCategory);
+
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
 
@@ -208,21 +368,17 @@ function renderInventoryTable(products) {
   pageRows.forEach(p => {
     const tr = document.createElement('tr');
     tr.dataset.productId = p.product_id;
+    tr.dataset.modelNo = p.model_no || '';
+    const isDamaged = p.product_type === 'damaged';
     tr.innerHTML = `
       <td><input type="checkbox"></td>
-      <td>${p.product_name ?? ''}</td>
-      <td>${p.product_id ?? ''}</td>
-      <td>${p.model_no ?? ''}</td>
-      <td><span class="stock ${productTypeBadgeClass(p.product_type)}">${productTypeLabel(p.product_type)}</span></td>
-      <td>${p.supplier ?? ''}</td>
-      <td>${p.purchase_date ?? ''}</td>
-      <td><span class="stock ${stockClass(Number(p.quantity) || 0)}">${p.quantity ?? 0}</span></td>
-      <td>₹${p.price ?? ''}</td>
-      <td>${p.tax_rate ?? 0}%</td>
+      ${columns.map(c => `<td>${c.cell(p)}</td>`).join('')}
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
         ${canManage ? '<button class="icon-btn edit-btn"><i class="fa-solid fa-pen"></i></button>' : ''}
-        ${canDelete ? '<button class="icon-btn delete delete-btn"><i class="fa-solid fa-trash"></i></button>' : ''}
+        ${isDamaged
+          ? (canManage ? '<button class="icon-btn repair-btn" title="Repair"><i class="fa-solid fa-screwdriver-wrench"></i></button>' : '')
+          : (canDelete ? '<button class="icon-btn delete delete-btn"><i class="fa-solid fa-trash"></i></button>' : '')}
       </td>`;
     tbody.appendChild(tr);
   });
@@ -230,6 +386,7 @@ function renderInventoryTable(products) {
   tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewModal(rowProduct(e))));
   tbody.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', e => openEditModal(rowProduct(e))));
   tbody.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', e => openDeleteModal(rowProduct(e))));
+  tbody.querySelectorAll('.repair-btn').forEach(btn => btn.addEventListener('click', e => handleRepairClick(rowProduct(e))));
 
   renderTablePagination(document.querySelector('.pagination'), invPage, totalPages, p => {
     invPage = p;
@@ -239,7 +396,35 @@ function renderInventoryTable(products) {
 
 function rowProduct(e) {
   const tr = e.target.closest('tr');
-  return invState.products.find(p => p.product_id === tr.dataset.productId);
+  return invState.products.find(p => p.product_id === tr.dataset.productId && (p.model_no || '') === tr.dataset.modelNo);
+}
+
+// Repair action on a Damaged Product row (replaces Delete there):
+// - has serial numbers -> it's a full product -> opens a service record for
+//   in-house warranty repair (issue = "Inhouse Warranty")
+// - no serial numbers -> it's a part (e.g. swapped out during a service) ->
+//   not serviceable in-house, so it's just flagged "Send to Parent Company"
+//   in this row's Status column instead
+async function handleRepairClick(p) {
+  if (!p) return;
+  const isProduct = Array.isArray(p.serial_numbers) && p.serial_numbers.length > 0;
+  const confirmMsg = isProduct
+    ? 'Send this product for in-house warranty repair? A service record will be created for it.'
+    : 'Mark this part to be sent back to the parent company?';
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const qs = p.model_no ? `?model_no=${encodeURIComponent(p.model_no)}` : '';
+    const res = await apiFetch(`/inventory/repair/${encodeURIComponent(p.product_id)}${qs}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'repair action failed');
+    alert(data.mode === 'product'
+      ? `Sent for in-house warranty repair. Service ID: ${data.service_id}`
+      : 'Marked to send to parent company.');
+    await loadInventory();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }
 
 function wireTopActions() {
@@ -347,14 +532,9 @@ function wireFilter() {
     const supplier = supplierBox.value.trim().toLowerCase();
     const date = dateBox.value;
 
-    const filtered = invState.products.filter(p =>
-      (!name || (p.product_name || '').toLowerCase().includes(name)) &&
-      (!id || (p.product_id || '').toLowerCase().includes(id)) &&
-      (!supplier || (p.supplier || '').toLowerCase().includes(supplier)) &&
-      (!date || p.purchase_date === date)
-    );
+    invState.activeFilters = (name || id || supplier || date) ? { name, id, supplier, date } : null;
     invPage = 1;
-    renderInventoryTable(filtered);
+    renderInventoryTable(getFilteredInventory());
   });
 }
 
@@ -366,12 +546,49 @@ function openViewModal(p) {
   values.forEach((el, i) => el.textContent = fields[i] ?? '');
   const serialBox = document.getElementById('viewSerialNumbers');
   if (serialBox) serialBox.textContent = (p.serial_numbers || []).length ? p.serial_numbers.join(', ') : 'None on file';
+
+  const hologramRow = document.getElementById('viewHologramRow');
+  const hologramStatusEl = document.getElementById('viewHologramStatus');
+  const hologramListEl = document.getElementById('viewHologramList');
+  if (hologramRow && hologramStatusEl && hologramListEl) {
+    if (p.product_type === 'spare_parts' || p.product_type === 'service_parts') {
+      const holograms = hologramNumbersOf(p);
+      const qty = Number(p.quantity) || 0;
+      const status = statusFromHologram(p);
+      hologramStatusEl.textContent = `${status} — ${holograms.length} of ${qty} unit(s) have a hologram number on file`;
+      hologramListEl.textContent = holograms.length ? holograms.join(', ') : 'None on file';
+      hologramRow.style.display = '';
+    } else {
+      hologramRow.style.display = 'none';
+    }
+  }
+
+  const warrantyRow = document.getElementById('viewWarrantyRow');
+  const warrantyStatus = document.getElementById('viewWarrantyStatus');
+  if (warrantyRow && warrantyStatus) {
+    if (p.product_type === 'spare_parts' && p.warranty_until) {
+      const label = p.warranty_status === 'over warranty' ? 'Over Warranty' : 'Under Warranty';
+      warrantyStatus.textContent = `${label} (until ${p.warranty_until})`;
+      warrantyRow.style.display = '';
+    } else if (p.product_type === 'service_parts' && p.part_category) {
+      if (p.part_category === 'warranty' && p.warranty_until) {
+        const label = p.warranty_status === 'over warranty' ? 'Over Warranty' : 'Under Warranty';
+        warrantyStatus.textContent = `Warranty — ${label} (until ${p.warranty_until})`;
+      } else {
+        warrantyStatus.textContent = 'Purchase';
+      }
+      warrantyRow.style.display = '';
+    } else {
+      warrantyRow.style.display = 'none';
+    }
+  }
   modal.style.display = 'flex';
 }
 
 function openEditModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
+  invState.activeModelNo = p.model_no || '';
   invState.editSerials = [...(p.serial_numbers || [])];
   invState.editRemovedSerials = [];
 
@@ -389,18 +606,175 @@ function openEditModal(p) {
   const typeSelect = document.getElementById('editProductType');
   if (typeSelect) typeSelect.value = p.product_type || 'product';
 
+  invState.editHolograms = [...hologramNumbersOf(p)];
+  invState.editHologramQuantity = Number(p.quantity) || 0;
+  toggleHologramSection(p.product_type || 'product');
+  renderHologramUI();
+  wireHologramControls();
+
   renderEditSerialsUI();
   inputs[5].removeEventListener('input', renderEditSerialsUI);
   inputs[5].addEventListener('input', renderEditSerialsUI);
+  inputs[5].removeEventListener('input', syncEditHologramQuantity);
+  inputs[5].addEventListener('input', syncEditHologramQuantity);
 
   if (typeSelect) {
     typeSelect.removeEventListener('change', renderEditSerialsUI);
     typeSelect.addEventListener('change', renderEditSerialsUI);
+    typeSelect.removeEventListener('change', onEditTypeChangeForHologram);
+    typeSelect.addEventListener('change', onEditTypeChangeForHologram);
   }
 
   wireEditSerialFileUpload();
 
   modal.style.display = 'flex';
+}
+
+// hologram numbers are only tracked on spare_parts / service_parts entries —
+// "product" units get theirs via the per-serial service/assembly workflow instead
+function toggleHologramSection(type) {
+  const section = document.getElementById('editHologramSection');
+  if (section) section.style.display = (type === 'spare_parts' || type === 'service_parts') ? 'block' : 'none';
+}
+
+function onEditTypeChangeForHologram() {
+  const typeSelect = document.getElementById('editProductType');
+  toggleHologramSection(typeSelect ? typeSelect.value : 'product');
+}
+
+// keeps the hologram status line's "of N quantity" number in sync while the
+// user is typing a new quantity into the edit form (named fn so the
+// add/removeEventListener pairing in openEditModal actually works)
+function syncEditHologramQuantity() {
+  const modal = document.getElementById('editModal');
+  const quantityInput = modal.querySelectorAll('form input')[5];
+  invState.editHologramQuantity = Number(quantityInput.value) || 0;
+  renderHologramUI();
+}
+
+// ---------- Hologram numbers (per-unit, spare_parts / service_parts) ----------
+// Renders the chip list + status line ("Active"/"Partial"/"Pending") based on
+// how many hologram numbers are on file vs. the quantity on record.
+function renderHologramUI() {
+  const list = document.getElementById('currentHologramList');
+  const statusMsg = document.getElementById('hologramStatusMsg');
+  if (!list || !statusMsg) return;
+
+  const holograms = invState.editHolograms;
+  const qty = invState.editHologramQuantity;
+  const count = holograms.length;
+
+  list.innerHTML = holograms.map(h => `
+    <span data-hologram="${h}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;background:#eef3fb;color:#005ca9;">
+      ${h}
+      <button type="button" class="hologram-remove-btn" data-hologram="${h}" style="border:none;background:none;cursor:pointer;color:inherit;font-weight:700;">×</button>
+    </span>`).join('') || '<span style="font-size:12px;color:#94a3b8;">No hologram numbers on file.</span>';
+
+  list.querySelectorAll('.hologram-remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => submitHologramChange({ remove: [btn.dataset.hologram] }));
+  });
+
+  let status = 'Pending', color = '#64748b';
+  if (count > 0 && qty && count >= qty) { status = 'Active'; color = '#16a34a'; }
+  else if (count > 0) { status = 'Partial'; color = '#b45309'; }
+  statusMsg.textContent = `${status} — ${count} of ${qty} unit(s) have a hologram number on file${count < qty ? ` (${qty - count} remaining)` : ''}.`;
+  statusMsg.style.color = color;
+}
+
+// Sends a hologram add/remove to the server immediately (independent of the
+// main "Save" button) so the partial/leftover logic can be validated against
+// the quantity that's actually on record right now.
+async function submitHologramChange({ add = [], remove = [] }) {
+  try {
+    const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        updated_values: {},
+        new_hologram_numbers: add,
+        remove_hologram_numbers: remove,
+        model_no: invState.activeModelNo
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'could not update hologram numbers');
+
+    if (remove.length) invState.editHolograms = invState.editHolograms.filter(h => !remove.includes(h));
+    if (add.length) invState.editHolograms = invState.editHolograms.concat(add.slice(0, data.hologram_added));
+    renderHologramUI();
+    await loadInventory();
+
+    if ((data.hologram_leftover || []).length) {
+      openHologramOverflowModal(data.hologram_added, data.hologram_leftover);
+    }
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Hologram update failed', err.message, false);
+  }
+}
+
+// Shown when an uploaded/typed batch of hologram numbers has more entries
+// than there are remaining unit slots — offers exporting the unused ones.
+function openHologramOverflowModal(added, leftover) {
+  const modal = document.getElementById('hologramOverflowModal');
+  const msg = document.getElementById('hologramOverflowMsg');
+  const listBox = document.getElementById('hologramOverflowList');
+  if (!modal || !msg || !listBox) return;
+
+  msg.textContent = `${added} hologram number(s) were added. ${leftover.length} extra hologram number(s) didn't fit — quantity is already fully covered.`;
+  listBox.textContent = leftover.join(', ');
+  modal.dataset.leftover = JSON.stringify(leftover);
+  modal.style.display = 'flex';
+}
+
+function exportHologramLeftoverToExcel(leftover) {
+  const ws = XLSX.utils.aoa_to_sheet([['Hologram Number'], ...leftover.map(h => [h])]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Leftover Hologram Numbers');
+  XLSX.writeFile(wb, `leftover_hologram_numbers_${Date.now()}.xlsx`);
+}
+
+function wireHologramControls() {
+  const addBtn = document.getElementById('hologramManualAddBtn');
+  const manualInput = document.getElementById('hologramManualInput');
+  const fileBtn = document.getElementById('hologramFileBtn');
+  const fileInput = document.getElementById('hologramFileInput');
+  const preview = document.getElementById('hologramFilePreview');
+  if (!addBtn || !fileBtn) return;
+
+  // clone-replace to drop old listeners since this is re-wired on every open
+  const newAddBtn = addBtn.cloneNode(true);
+  addBtn.parentNode.replaceChild(newAddBtn, addBtn);
+  const newFileBtn = fileBtn.cloneNode(true);
+  fileBtn.parentNode.replaceChild(newFileBtn, fileBtn);
+  const newFileInput = fileInput.cloneNode(true);
+  fileInput.parentNode.replaceChild(newFileInput, fileInput);
+
+  newAddBtn.addEventListener('click', () => {
+    const val = manualInput.value.trim();
+    if (!val) return;
+    manualInput.value = '';
+    submitHologramChange({ add: [val] });
+  });
+
+  newFileBtn.addEventListener('click', () => newFileInput.click());
+  newFileInput.addEventListener('change', () => {
+    const file = newFileInput.files[0];
+    if (!file) return;
+    parseSerialsFromFile(file, (holograms) => {
+      preview.textContent = `${holograms.length} hologram number(s) read from file — adding...`;
+      preview.style.color = '#0369a1';
+      submitHologramChange({ add: holograms });
+    }, (msg) => { preview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; });
+  });
+
+  const overflowClose = document.getElementById('hologramOverflowCloseBtn');
+  const overflowExport = document.getElementById('hologramOverflowExportBtn');
+  if (overflowClose) overflowClose.onclick = () => { document.getElementById('hologramOverflowModal').style.display = 'none'; };
+  if (overflowExport) overflowExport.onclick = () => {
+    const modal = document.getElementById('hologramOverflowModal');
+    const leftover = JSON.parse(modal.dataset.leftover || '[]');
+    exportHologramLeftoverToExcel(leftover);
+  };
 }
 
 // "Add by file" for the edit modal: lets the user upload an Excel/CSV of
@@ -474,10 +848,10 @@ function renderEditSerialsUI() {
   const fileBtn = document.getElementById('editSerialFileBtn');
   const diff = targetQuantity - keptCount;
 
-  // accessories: serial numbers are optional, so quantity can move freely
+  // serial numbers are optional for some types, so quantity can move freely
   // without needing to add/remove serials to match it
   if (serialOptional) {
-    msgBox.textContent = 'Serial numbers are optional for accessories.';
+    msgBox.textContent = 'Serial numbers are optional for this product type.';
     msgBox.style.color = '#64748b';
     newBox.innerHTML = '';
     if (fileBtn) fileBtn.style.display = 'none';
@@ -518,6 +892,7 @@ function renderEditSerialsUI() {
 function openDeleteModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
+  invState.activeModelNo = p.model_no || '';
   const msg = document.querySelector('#deleteModal p');
   if (msg) msg.textContent = `Are you sure you want to delete "${p.product_name}"? This action cannot be undone.`;
   document.getElementById('deleteModal').style.display = 'flex';
@@ -713,13 +1088,14 @@ function renderLotDetailsStep() {
       <select name="product_type" id="lotProductType" required>
         <option value="product">Product</option>
         <option value="spare_parts">Spare Parts</option>
+        <option value="service_parts">Service Parts</option>
         <option value="damaged">Damaged Product</option>
         <option value="accessories">Accessories</option>
       </select>
       <input name="lot_no" placeholder="Lot No." required>
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
       <input name="first_serial" id="firstSerialInput" placeholder="Serial No. (first unit)">
-      <div id="serialOptionalMsg" style="display:none;font-size:12px;color:#64748b;">Serial numbers are optional for accessories — leave blank to skip, or add them below.</div>
+      <div id="serialOptionalMsg" style="display:none;font-size:12px;color:#64748b;">Serial numbers are optional for this type — leave blank to skip, or add them below.</div>
       <div id="fileSerialBox" style="border:1px dashed #94a3b8;border-radius:8px;padding:8px;">
         <label style="font-size:12px;color:#64748b;">Or add by file — upload an Excel/CSV of serial numbers</label>
         <input type="file" id="serialFileInput" accept=".xlsx,.xls,.csv" style="width:100%;padding:6px 0;font-size:12px;">
@@ -1004,7 +1380,7 @@ function wireModals() {
       const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers })
+        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, model_no: invState.activeModelNo })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');
@@ -1019,7 +1395,7 @@ function wireModals() {
   const deleteBtn = document.querySelector('#deleteModal .delete-btn');
   if (deleteBtn) deleteBtn.addEventListener('click', async () => {
     try {
-      const res = await apiFetch(`/inventory/delete/${invState.activeProductId}`, { method: 'POST' });
+      const res = await apiFetch(`/inventory/delete/${invState.activeProductId}?model_no=${encodeURIComponent(invState.activeModelNo || '')}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'delete failed');
       document.getElementById('deleteModal').style.display = 'none';

@@ -27,6 +27,7 @@
         <li class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
         </li>
                 <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
 
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
@@ -144,7 +145,7 @@
           <i class="fa-solid fa-calendar-days"></i>
           <input type="date">
         </div>
-        <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
+        <button type="button" class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
       </section>
 
       <!-- CATEGORY FILTER TABS -->
@@ -155,8 +156,11 @@
         <button type="button" class="cat-filter-btn" data-type="spare_parts">
           <i class="fa-solid fa-gears"></i> Spare Parts
         </button>
+        <button type="button" class="cat-filter-btn" data-type="service_parts">
+          <i class="fa-solid fa-screwdriver-wrench"></i> Service Parts
+        </button>
         <button type="button" class="cat-filter-btn" data-type="damaged">
-          <i class="fa-solid fa-triangle-exclamation"></i> Damaged Product
+          <i class="fa-solid fa-triangle-exclamation"></i> Faulty Product
         </button>
         <button type="button" class="cat-filter-btn" data-type="accessories">
           <i class="fa-solid fa-plug"></i> Accessories
@@ -264,6 +268,13 @@
       <div class="detail"><small>Tax</small>
         <p></p>
       </div>
+      <div class="detail" id="viewWarrantyRow" style="display:none;"><small>Category</small>
+        <p id="viewWarrantyStatus"></p>
+      </div>
+      <div class="detail" id="viewHologramRow" style="display:none;"><small>Hologram Numbers</small>
+        <p id="viewHologramStatus" style="margin-bottom:4px;"></p>
+        <p id="viewHologramList" style="line-height:1.6;font-size:13px;color:#475569;"></p>
+      </div>
       <div class="detail"><small>Serial Numbers</small>
         <p id="viewSerialNumbers" style="line-height:1.6;"></p>
       </div>
@@ -312,6 +323,7 @@
         <select id="editProductType" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
           <option value="product">Product</option>
           <option value="spare_parts">Spare Parts</option>
+          <option value="service_parts">Service Parts</option>
           <option value="damaged">Damaged Product</option>
           <option value="accessories">Accessories</option>
         </select>
@@ -321,6 +333,23 @@
         <input type="number" placeholder="Quantity">
         <input placeholder="Price">
         <input type="number" placeholder="Tax Rate (%)">
+
+        <div id="editHologramSection" style="display:none;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">
+          <label style="font-size:13px;font-weight:600;color:#334155;">Hologram Numbers</label>
+          <p id="hologramStatusMsg" style="font-size:12px;margin:4px 0 8px;"></p>
+          <div id="currentHologramList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+
+          <div style="display:flex;gap:6px;margin-bottom:6px;">
+            <input id="hologramManualInput" placeholder="Add one hologram number" style="flex:1;padding:8px 10px;border:1px solid #dbe5f1;border-radius:8px;">
+            <button type="button" id="hologramManualAddBtn" style="padding:8px 12px;border:none;border-radius:8px;background:#eaf1ff;color:#1665ff;cursor:pointer;font-size:13px;">Add</button>
+          </div>
+
+          <button type="button" id="hologramFileBtn" style="font-size:12px;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;cursor:pointer;">
+            <i class="fa-solid fa-file-excel"></i> Add by file (upload Excel — serial-wise hologram numbers)
+          </button>
+          <input type="file" id="hologramFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+          <div id="hologramFilePreview" style="font-size:12px;margin-top:6px;"></div>
+        </div>
 
         <div id="editSerialsSection" style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;">
           <label style="font-size:13px;font-weight:600;color:#334155;">Serial Numbers on file</label>
@@ -344,6 +373,24 @@
     </div>
   </div>
 
+  <!-- Hologram Overflow Modal -->
+  <div id="hologramOverflowModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:1000;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
+      <h3 style="margin-bottom:10px;">Extra Hologram Numbers</h3>
+      <p id="hologramOverflowMsg" style="color:#334155;margin-bottom:14px;font-size:14px;"></p>
+      <div id="hologramOverflowList" style="max-height:160px;overflow-y:auto;font-size:12px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px;margin-bottom:16px;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button type="button" id="hologramOverflowCloseBtn"
+          style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Close</button>
+        <button type="button" id="hologramOverflowExportBtn"
+          style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">
+          <i class="fa-solid fa-file-export"></i> Export leftover to Excel
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Product Modal -->
   <div id="deleteModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
@@ -351,9 +398,9 @@
       <h3 style="margin-bottom:10px;">Delete Product?</h3>
       <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
       <div style="display:flex;justify-content:center;gap:10px;">
-        <button class="cancel-btn"
+        <button type="button" class="cancel-btn"
           style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button class="delete-btn"
+        <button type="button" class="delete-btn"
           style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
       </div>
     </div>

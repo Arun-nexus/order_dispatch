@@ -33,6 +33,15 @@ function money(n) {
   return '₹' + v.toLocaleString('en-IN');
 }
 
+const PART_STATUS_LABELS = {
+  assembly: 'Assembly',
+  purchase: 'Purchase',
+  warranty: 'Warranty',
+};
+function partStatusLabel(status) {
+  return PART_STATUS_LABELS[status] || PART_STATUS_LABELS.assembly;
+}
+
 // =========================================================
 // LOAD + CARDS + TABLE
 // =========================================================
@@ -52,7 +61,7 @@ function fromServerShape(s) {
       quantity: p.quantity,
       price: p.price,
       warranty: p.warranty || '',
-      parts: (p.parts || []).map(part => ({ name: part.part_name, quantity: part.quantity })),
+      parts: (p.parts || []).map(part => ({ name: part.part_name, quantity: part.quantity, status: part.status || 'assembly' })),
     })),
   };
 }
@@ -68,7 +77,7 @@ function toServerShape(s) {
       quantity: Number(p.quantity) || 0,
       price: Number(p.price) || 0,
       warranty: p.warranty || '',
-      parts: (p.parts || []).map(part => ({ part_name: part.name, quantity: Number(part.quantity) || 0 })),
+      parts: (p.parts || []).map(part => ({ part_name: part.name, quantity: Number(part.quantity) || 0, status: part.status || 'assembly' })),
     })),
   };
 }
@@ -192,7 +201,7 @@ function openViewModal(id) {
         ${(p.parts && p.parts.length) ? `
           <p style="font-size:12px;font-weight:600;color:#334155;margin-top:8px;">Parts</p>
           <ul style="margin:4px 0 0 18px;font-size:13px;color:#475569;">
-            ${p.parts.map(part => `<li>${part.name} — qty ${part.quantity}</li>`).join('')}
+            ${p.parts.map(part => `<li>${part.name} — qty ${part.quantity} <span style="color:#94a3b8;">(${partStatusLabel(part.status)})</span></li>`).join('')}
           </ul>` : `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">No parts added</p>`}
       </div>
     `).join('') || '<p style="color:#94a3b8;">No products added</p>'}
@@ -229,16 +238,23 @@ function openReceivedModal(id) {
     const date = document.getElementById('receivedDateInput').value;
     const s = shipments.find(x => x.id === editingShipmentId);
     if (s) s.receivedDate = date;
+    let inventoryNote = '';
     try {
-      await apiFetch(`/shipment/mark_received/${editingShipmentId}`, {
+      const res = await apiFetch(`/shipment/mark_received/${editingShipmentId}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ received_date: date })
       });
+      const data = await res.json().catch(() => null);
+      if (data && Array.isArray(data.inventory_sync) && data.inventory_sync.length) {
+        inventoryNote = ` ${data.inventory_sync.length} part line(s) synced into Inventory.`;
+      } else if (data && typeof data.inventory_sync === 'string' && data.inventory_sync.startsWith('failed')) {
+        inventoryNote = ' Note: parts could not be synced into Inventory automatically — please check manually.';
+      }
     } catch (err) { /* local-only fallback, ignore */ }
     closeModal('receivedModal');
     renderCards();
     renderTable();
-    showResponseModal('Shipment updated', 'Received date has been saved.', true);
+    showResponseModal('Shipment updated', `Received date has been saved.${inventoryNote}`, true);
   });
   openModal('receivedModal');
 }
@@ -472,13 +488,19 @@ function renderPartsWizard() {
       </div>
 
       <label style="font-size:12px;color:#64748b;">Warranty (for parts)</label>
-      <input type="text" class="partWarranty" placeholder="e.g. 12 months" value="${p.warranty}" style="margin-bottom:10px;">
+      <input type="text" class="partWarranty" placeholder="e.g. 12 months" value="${p.warranty}" style="margin-bottom:6px;">
+      <p style="font-size:11px;color:#94a3b8;margin:0 0 10px;">Status: <b>Assembly</b> parts go to Inventory's Spare Parts on receive; <b>Purchase</b>/<b>Warranty</b> parts go to Service Parts.</p>
 
       <div class="partsRows" style="display:flex;flex-direction:column;gap:8px;">
         ${p.parts.map((part, prtIdx) => `
           <div style="display:flex;gap:8px;align-items:center;" data-part="${prtIdx}">
             <input type="text" class="partName" placeholder="Part Name" value="${part.name}" style="flex:2;">
             <input type="number" min="0" class="partQty" placeholder="Qty" value="${part.quantity}" style="flex:1;">
+            <select class="partStatus" style="flex:1.2;">
+              <option value="assembly" ${part.status === 'assembly' || !part.status ? 'selected' : ''}>Assembly</option>
+              <option value="purchase" ${part.status === 'purchase' ? 'selected' : ''}>Purchase</option>
+              <option value="warranty" ${part.status === 'warranty' ? 'selected' : ''}>Warranty</option>
+            </select>
             <button type="button" class="removePartBtn" data-index="${prtIdx}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:34px;height:34px;cursor:pointer;">
               <i class="fa-solid fa-xmark"></i>
             </button>
@@ -501,7 +523,7 @@ function renderPartsWizard() {
 
     section.querySelector('.addPartBtn').addEventListener('click', () => {
       syncPartsFromDom(pi);
-      shipmentDraft.products[pi].parts.push({ name: '', quantity: '' });
+      shipmentDraft.products[pi].parts.push({ name: '', quantity: '', status: 'assembly' });
       renderPartsWizard();
     });
 
@@ -523,6 +545,7 @@ function syncPartsFromDom(productIndex) {
     const prtIdx = Number(row.dataset.part);
     shipmentDraft.products[productIndex].parts[prtIdx].name = row.querySelector('.partName').value.trim();
     shipmentDraft.products[productIndex].parts[prtIdx].quantity = row.querySelector('.partQty').value;
+    shipmentDraft.products[productIndex].parts[prtIdx].status = row.querySelector('.partStatus').value;
   });
 }
 

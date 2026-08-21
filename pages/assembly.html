@@ -4,10 +4,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Shipment | Acer Biomedical</title>
+  <title>Assembly | Acer Biomedical</title>
 
   <link rel="stylesheet" href="../css/global.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <!-- used only to build the Serial/Hologram export file on the last wizard step -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -22,13 +24,12 @@
         <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
         <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-                <li class="active"><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
-        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
-
+        <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li class="active"><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
+        
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
         <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
-        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
         <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
         <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
         <li>
@@ -51,13 +52,13 @@
     <main>
       <header>
         <div>
-          <h1>Shipment</h1>
-          <p>Track shipments dispatched to and received from companies</p>
+          <h1>Assembly</h1>
+          <p>Build products from shipment / local parts and generate serial &amp; hologram numbers</p>
         </div>
         <div class="right-header">
           <div class="search">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" id="shipmentSearch" placeholder="Search company or product...">
+            <input type="text" id="assemblySearch" placeholder="Search product, ID or serial...">
           </div>
           <div style="position:relative;">
             <button id="notifBell"><i class="fa-regular fa-bell"></i></button>
@@ -79,33 +80,33 @@
       <section class="cards">
         <div class="card">
           <div>
-            <span>This Month Shipment</span>
+            <span>Total Assembly</span>
             <h2 id="cardThisMonth">0</h2>
-            <p>Created this month</p>
+            <p>Built this month</p>
           </div>
-          <i class="fa-solid fa-calendar-days"></i>
+          <i class="fa-solid fa-layer-group"></i>
         </div>
         <div class="card">
           <div>
-            <span>Today Shipment</span>
+            <span>Today Assembly</span>
             <h2 id="cardToday">0</h2>
-            <p>Created today</p>
+            <p>Built today</p>
           </div>
           <i class="fa-regular fa-calendar-check"></i>
         </div>
         <div class="card">
           <div>
-            <span>Received Shipment</span>
-            <h2 id="cardReceived">0</h2>
-            <p>Confirmed received</p>
+            <span>Hologram-tagged Parts</span>
+            <h2 id="cardAvailableShipment">0</h2>
+            <p>Distinct inventory spare parts with hologram numbers on file</p>
           </div>
-          <i class="fa-solid fa-circle-check"></i>
+          <i class="fa-solid fa-boxes-packing"></i>
         </div>
         <div class="card">
           <div>
-            <span>Pending Shipment</span>
+            <span>Pending Assembly</span>
             <h2 id="cardPending">0</h2>
-            <p>Receiving date not set</p>
+            <p>Not yet marked completed</p>
           </div>
           <i class="fa-regular fa-clock"></i>
         </div>
@@ -114,7 +115,7 @@
       <!-- TOP ACTIONS -->
       <div class="top-actions">
         <button class="export"><i class="fa-solid fa-download"></i> Export</button>
-        <button class="add-product" id="addShipmentBtn"><i class="fa-solid fa-plus"></i> Add Shipment</button>
+        <button class="add-product" id="addAssemblyBtn"><i class="fa-solid fa-plus"></i> Add Assembly</button>
       </div>
 
       <!-- FILTER SECTION -->
@@ -124,31 +125,28 @@
           <select id="statusFilter">
             <option value="">All Status</option>
             <option value="pending">Pending</option>
-            <option value="received">Received</option>
+            <option value="completed">Completed</option>
           </select>
         </div>
-        <div class="filter-box">
-          <i class="fa-solid fa-calendar-days"></i>
-          <input type="date" id="dispatchDateFilter">
-        </div>
-        <button class="filter-btn" id="applyShipmentFilter"><i class="fa-solid fa-filter"></i> Apply Filter</button>
+        <button class="filter-btn" id="applyAssemblyFilter"><i class="fa-solid fa-filter"></i> Apply Filter</button>
       </section>
 
       <div class="table-container">
         <table>
           <thead>
             <tr>
-              <th>Company</th>
-              <th>Address</th>
-              <th>Products</th>
-              <th>Dispatch Date</th>
-              <th>Received Date</th>
+              <th>Product Name</th>
+              <th>Product ID</th>
+              <th>Model No.</th>
+              <th>Quantity</th>
+              <th>Parts Source</th>
               <th>Status</th>
+              <th>Created</th>
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody id="shipmentTbody">
-            <!-- rows rendered dynamically by shipment.js -->
+          <tbody id="assemblyTbody">
+            <!-- rows rendered dynamically by assembly.js -->
           </tbody>
         </table>
       </div>
@@ -180,38 +178,32 @@
   <!-- common_auth.js MUST load first: enforces login + role-based page access -->
   <script src="../common_auth.js"></script>
 
-  <!-- View Shipment Modal -->
-  <div id="viewShipmentModal" class="modal"
+  <!-- View Assembly Modal -->
+  <div id="viewAssemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:86vh;overflow-y:auto;"></div>
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:560px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
-  <!-- Mark Received Modal -->
-  <div id="receivedModal" class="modal"
-    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;"></div>
-  </div>
-
-  <!-- Delete Shipment Modal -->
-  <div id="deleteShipmentModal" class="modal"
+  <!-- Delete Assembly Modal -->
+  <div id="deleteAssemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
-      <h3 style="margin-bottom:10px;">Delete Shipment?</h3>
-      <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone.</p>
+      <h3 style="margin-bottom:10px;">Delete Assembly?</h3>
+      <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone. Parts already deducted from the shipment are not restored.</p>
       <div style="display:flex;justify-content:center;gap:10px;">
-        <button class="cancel-btn" id="deleteShipmentCancel"
+        <button class="cancel-btn" id="deleteAssemblyCancel"
           style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button class="delete-btn" id="deleteShipmentConfirm"
+        <button class="delete-btn" id="deleteAssemblyConfirm"
           style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Delete</button>
       </div>
     </div>
   </div>
 
-  <!-- Add Shipment Modal (multi-step wizard built dynamically by shipment.js) -->
-  <div id="shipmentModal" class="modal"
+  <!-- Add Assembly Modal (4-step wizard built dynamically by assembly.js) -->
+  <div id="assemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content"
-      style="background:#fff;border-radius:16px;padding:26px;width:560px;max-height:88vh;overflow-y:auto;"></div>
+      style="background:#fff;border-radius:16px;padding:26px;width:640px;max-height:90vh;overflow-y:auto;"></div>
   </div>
 
   <script>
@@ -230,7 +222,7 @@
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
-  <script src="shipment.js"></script>
+  <script src="assembly.js"></script>
 </body>
 
 </html>
