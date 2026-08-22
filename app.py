@@ -2175,6 +2175,36 @@ async def active_services(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="active services cannot be fetched")
 
 
+@app.get("/service/available_hologram_parts")
+async def available_hologram_parts(user: dict = Depends(require_role("admin", "employee"))):
+    """
+    Powers the "Update Status" -> Completed -> spare part swap form on the
+    Service page: instead of letting the technician type a free-text new
+    hologram number (which can typo/mismatch what's actually on file and
+    silently create bad inventory data), this returns every service_parts
+    entry that actually carries hologram numbers on file, grouped by part
+    name, so the UI can offer a plain pick-list instead.
+    """
+    try:
+        inv_db = inventory_manager()
+        entries = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "service_parts"})
+        pool = {}
+        for entry in entries:
+            holograms = entry.get("hologram_numbers") or []
+            if not holograms:
+                continue
+            name = entry.get("product_name", "")
+            if not name:
+                continue
+            pool.setdefault(name, set()).update(holograms)
+        dataset = [{"part_name": name, "hologram_numbers": sorted(numbers)} for name, numbers in pool.items() if numbers]
+        dataset.sort(key=lambda p: p["part_name"].lower())
+        return {"message": "available hologram-tagged service parts", "dataset": dataset}
+    except Exception as e:
+        logging.error("fetching available hologram parts failed!")
+        raise HTTPException(status_code=500, detail="could not fetch available hologram parts")
+
+
 @app.get("/allocation/")
 async def allocations(user: dict = Depends(get_current_user)):
     try:
