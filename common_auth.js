@@ -70,7 +70,7 @@ function checkPageAccess() {
   const currentFile = location.pathname.split('/').pop() || 'main_dashboard.html';
   const allowed = ROLE_ACCESS[role] || [];
   if (!allowed.includes(currentFile)) {
-    alert('Aapke role ko is page ki permission nahi hai.');
+    alert('Your role doesnt have access to do that action');
     window.location.href = homePathFor(role);
   }
 }
@@ -101,7 +101,7 @@ async function apiFetch(url, options = {}) {
     throw new Error('unauthorized');
   }
   if (res.status === 403) {
-    alert('Aapke role ko is action ki permission nahi hai.');
+    alert('Your role doesnt have access to do that action');
     throw new Error('forbidden');
   }
   return res;
