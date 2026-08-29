@@ -1808,9 +1808,10 @@ async def inventory(user: dict = Depends(get_current_user)):
 @app.post("/inventory/create")
 async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
-        # serial numbers are optional for accessories — only enforce the
-        # quantity match when at least one serial number was actually given
-        serials_required = request.product_type != "accessories" or len(request.serial_numbers) > 0
+        # serial numbers are optional for accessories / spare_parts / service_parts —
+        # only enforce the quantity match when at least one serial number was actually given
+        serial_optional_types = ("accessories", "spare_parts", "service_parts")
+        serials_required = request.product_type not in serial_optional_types or len(request.serial_numbers) > 0
         if serials_required and len(request.serial_numbers) != request.quantity:
             raise HTTPException(status_code=400, detail="number of serial numbers must match quantity")
         if len(set(request.serial_numbers)) != len(request.serial_numbers):
@@ -2723,6 +2724,11 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
             if available < item.quantity:
                 raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}: only {available} available")
 
+        # No more partial returns: every allocated unit becomes its own
+        # allocation document (quantity=1, one serial number each) instead of
+        # bundling the whole quantity into a single row. A cart of ProductA x2
+        # therefore creates two separate rows on the Allocated page, each
+        # independently returnable.
         created_allocation_ids = []
         for item in request.items:
             allocated_serials = inventory_db.allocate_serials(
