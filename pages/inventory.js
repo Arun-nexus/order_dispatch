@@ -444,16 +444,27 @@ function exportInventoryCSV() {
     dateLabel: 'Purchase Date',
     getRows: () => invState.products,
     onConfirm: (rows) => {
-      const header = ['Product Name', 'Product ID', 'Type', 'Lot No', 'Supplier', 'Purchase Date', 'Quantity', 'Price', 'Tax'];
-      const csvRows = rows.map(p => [p.product_name, p.product_id, productTypeLabel(p.product_type), p.lot_no, p.supplier, p.purchase_date, p.quantity, p.price, p.tax_rate]);
+      const header = ['Product Name / ID / Model No', 'Type', 'Lot No', 'Supplier', 'Purchase Date', 'Quantity', 'Price', 'Tax', 'Serial Numbers'];
+      const csvRows = rows.map(p => [
+        `${p.product_name} (${p.product_id}) - ${p.model_number || ''}`,
+        productTypeLabel(p.product_type),
+        p.lot_no, p.supplier, p.purchase_date, p.quantity, p.price, p.tax_rate,
+        (p.serial_numbers || []).join('; ')
+      ]);
       downloadCSV(header, csvRows, 'inventory.csv');
     }
   });
 }
 
 // ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
+function csvEscape(val) {
+  const s = val === null || val === undefined ? '' : String(val);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
 function downloadCSV(header, rows, filename) {
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const csv = [header, ...rows].map(r => r.map(csvEscape).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
