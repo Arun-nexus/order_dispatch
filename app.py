@@ -902,6 +902,85 @@ async def order(user: dict = Depends(get_current_user)):
 # SHIPMENT
 # =========================================================
 
+def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
+    """
+    Push a received shipment's parts into inventory, bucketed by each part's
+    status: "assembly" parts -> inventory spare_parts, "purchase" and
+    "warranty" parts -> inventory service_parts (kept apart there via
+    part_category so the two never merge into one entry). Warranty parts
+    also get a warranty_until date computed from this product's warranty
+    duration + the shipment's received_date, so inventory can later show
+    them as "under warranty" / "over warranty".
+    Non-fatal: caller decides what to do if this raises / returns a failure.
+    """
+    spare_parts_needed = {}      # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}
+    purchase_parts_needed = {}   # (product_name, part_name) -> total qty
+    warranty_parts_needed = {}   # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}
+
+    for product in shipment.get("products", []):
+        parent_product_name = product.get("product_name", "")
+        product_warranty_until = compute_warranty_until(received_date, product.get("warranty", ""))
+        for part in product.get("parts", []):
+            name = (part.get("part_name") or "").strip()
+            qty = part.get("quantity", 0) or 0
+            if not name or qty <= 0:
+                continue
+            status = part.get("status", "assembly")
+            key = (parent_product_name, name)
+
+            if status == "assembly":
+                entry = spare_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
+                entry["quantity"] += qty
+                if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
+                    entry["warranty_until"] = product_warranty_until
+            elif status == "purchase":
+                purchase_parts_needed[key] = purchase_parts_needed.get(key, 0) + qty
+            else:  # "warranty"
+                entry = warranty_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
+                entry["quantity"] += qty
+                if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
+                    entry["warranty_until"] = product_warranty_until
+
+    if not (spare_parts_needed or purchase_parts_needed or warranty_parts_needed):
+        return "no_parts"
+
+    inv_db = inventory_manager()
+    sync_results = []
+    if spare_parts_needed:
+        sync_results += inv_db.add_from_shipment_parts(
+            collection_name=INVENTORY_COLLECTION,
+            parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"],
+                    "warranty_until": v["warranty_until"]}
+                   for (pn, n), v in spare_parts_needed.items()],
+            product_type="spare_parts",
+            supplier=shipment.get("company_name", ""),
+            supplier_address=shipment.get("company_address", ""),
+            purchase_date=received_date,
+        )
+    if purchase_parts_needed:
+        sync_results += inv_db.add_from_shipment_parts(
+            collection_name=INVENTORY_COLLECTION,
+            parts=[{"part_name": n, "parent_product_name": pn, "quantity": q, "part_category": "purchase"}
+                   for (pn, n), q in purchase_parts_needed.items()],
+            product_type="service_parts",
+            supplier=shipment.get("company_name", ""),
+            supplier_address=shipment.get("company_address", ""),
+            purchase_date=received_date,
+        )
+    if warranty_parts_needed:
+        sync_results += inv_db.add_from_shipment_parts(
+            collection_name=INVENTORY_COLLECTION,
+            parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"], "part_category": "warranty",
+                    "warranty_until": v["warranty_until"]}
+                   for (pn, n), v in warranty_parts_needed.items()],
+            product_type="service_parts",
+            supplier=shipment.get("company_name", ""),
+            supplier_address=shipment.get("company_address", ""),
+            purchase_date=received_date,
+        )
+    return sync_results
+
+
 @app.get("/shipment/")
 async def shipment(user: dict = Depends(require_role("admin", "employee"))):
     try:
@@ -930,17 +1009,35 @@ async def track_shipment(shipment_id: str, user: dict = Depends(require_role("ad
 @app.post("/shipment/create")
 async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "employee"))):
     try:
+        shipment_dict = {
+            "company_name": request.company_name,
+            "company_address": request.company_address,
+            "products": [product.dict() for product in request.products],
+        }
         shipment_item = shipment_manager(
             company_name=request.company_name,
             company_address=request.company_address,
             dispatch_date=request.dispatch_date,
             received_date=request.received_date or None,
-            products=[product.dict() for product in request.products],
+            products=shipment_dict["products"],
             created_by=user["username"],
         )
         _, shipment_id = shipment_item.add(collection_name=SHIPMENT_COLLECTION)
         logging.info("shipment created successfully")
-        return {"message": "shipment created successfully", "shipment_id": shipment_id}
+
+        inventory_sync = "skipped"
+        # if the received date was already filled in at creation time (the
+        # wizard's optional step-1 field), sync parts to inventory right away —
+        # otherwise the shipment shows as "received" but never gets the chance
+        # to run through mark_shipment_received, and its parts never land in inventory.
+        if request.received_date:
+            try:
+                inventory_sync = sync_shipment_parts_to_inventory(shipment_dict, request.received_date)
+            except Exception as inv_err:
+                logging.error(f"shipment {shipment_id} created received but parts->inventory sync failed: {inv_err}")
+                inventory_sync = f"failed: {inv_err}"
+
+        return {"message": "shipment created successfully", "shipment_id": shipment_id, "inventory_sync": inventory_sync}
 
     except HTTPException:
         raise
@@ -960,87 +1057,10 @@ async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequ
         shipment = existing[0]
         db.mark_received(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id, received_date=request.received_date)
 
-        # push this shipment's parts into inventory, bucketed by each part's
-        # status: "assembly" parts -> inventory spare_parts, "purchase" and
-        # "warranty" parts -> inventory service_parts (kept apart there via
-        # part_category so the two never merge into one entry). Warranty parts
-        # also get a warranty_until date computed from this product's warranty
-        # duration + the shipment's received_date, so inventory can later show
-        # them as "under warranty" / "over warranty".
         # Kept non-fatal: the shipment is already marked received above, so an
         # inventory hiccup here is reported back but doesn't roll that back.
-        inventory_sync = "skipped"
         try:
-            spare_parts_needed = {}      # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}   (status == "assembly")
-            purchase_parts_needed = {}   # (product_name, part_name) -> total qty   (status == "purchase")
-            warranty_parts_needed = {}   # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}
-
-            for product in shipment.get("products", []):
-                parent_product_name = product.get("product_name", "")
-                product_warranty_until = compute_warranty_until(request.received_date, product.get("warranty", ""))
-                for part in product.get("parts", []):
-                    name = (part.get("part_name") or "").strip()
-                    qty = part.get("quantity", 0) or 0
-                    if not name or qty <= 0:
-                        continue
-                    status = part.get("status", "assembly")
-                    key = (parent_product_name, name)
-
-                    if status == "assembly":
-                        # spare parts ship bundled with the product, so they're
-                        # covered under that same product's warranty window
-                        entry = spare_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
-                        entry["quantity"] += qty
-                        if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
-                            entry["warranty_until"] = product_warranty_until
-                    elif status == "purchase":
-                        purchase_parts_needed[key] = purchase_parts_needed.get(key, 0) + qty
-                    else:  # "warranty"
-                        entry = warranty_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
-                        entry["quantity"] += qty
-                        # if the same part shows up under multiple products, keep the
-                        # furthest-out expiry so the part stays covered the longest possible
-                        if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
-                            entry["warranty_until"] = product_warranty_until
-
-            if spare_parts_needed or purchase_parts_needed or warranty_parts_needed:
-                inv_db = inventory_manager()
-                sync_results = []
-                if spare_parts_needed:
-                    sync_results += inv_db.add_from_shipment_parts(
-                        collection_name=INVENTORY_COLLECTION,
-                        parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"],
-                                "warranty_until": v["warranty_until"]}
-                               for (pn, n), v in spare_parts_needed.items()],
-                        product_type="spare_parts",
-                        supplier=shipment.get("company_name", ""),
-                        supplier_address=shipment.get("company_address", ""),
-                        purchase_date=request.received_date,
-                    )
-                if purchase_parts_needed:
-                    sync_results += inv_db.add_from_shipment_parts(
-                        collection_name=INVENTORY_COLLECTION,
-                        parts=[{"part_name": n, "parent_product_name": pn, "quantity": q, "part_category": "purchase"}
-                               for (pn, n), q in purchase_parts_needed.items()],
-                        product_type="service_parts",
-                        supplier=shipment.get("company_name", ""),
-                        supplier_address=shipment.get("company_address", ""),
-                        purchase_date=request.received_date,
-                    )
-                if warranty_parts_needed:
-                    sync_results += inv_db.add_from_shipment_parts(
-                        collection_name=INVENTORY_COLLECTION,
-                        parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"], "part_category": "warranty",
-                                "warranty_until": v["warranty_until"]}
-                               for (pn, n), v in warranty_parts_needed.items()],
-                        product_type="service_parts",
-                        supplier=shipment.get("company_name", ""),
-                        supplier_address=shipment.get("company_address", ""),
-                        purchase_date=request.received_date,
-                    )
-                inventory_sync = sync_results
-            else:
-                inventory_sync = "no_parts"
+            inventory_sync = sync_shipment_parts_to_inventory(shipment, request.received_date)
         except Exception as inv_err:
             logging.error(f"shipment {shipment_id} received but parts->inventory sync failed: {inv_err}")
             inventory_sync = f"failed: {inv_err}"
@@ -1191,11 +1211,11 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
         # exactly one inventory part must be used at a 1:1 ratio with the assembly
         # quantity — that's the hologram-bearing part, and its hologram numbers
         # (one per unit) become each finished unit's hologram number
-        hologram_candidates = [name for name, qty in needed_from_inventory.items() if qty == request.quantity]
+        hologram_candidates = [name for name, qty in needed_from_inventory.items() if qty >= request.quantity]
         if len(hologram_candidates) != 1:
             raise HTTPException(
                 status_code=400,
-                detail="exactly one part from inventory must have quantity equal to the assembly quantity — "
+                detail="exactly one part from inventory must have quantity at least equal to the assembly quantity — "
                        "that part supplies the hologram number for each assembled unit",
             )
         hologram_part_name = hologram_candidates[0]
@@ -1218,10 +1238,10 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
                 hologram_have = inv_db.get_hologram_available_by_name(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts"
                 )
-                if hologram_have < qty:
+                if hologram_have < request.quantity:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"not enough hologram-tagged '{part_name}' in inventory (need {qty}, have {hologram_have})",
+                        detail=f"not enough hologram-tagged '{part_name}' in inventory (need {request.quantity}, have {hologram_have})",
                     )
 
         # stock confirmed for every part — now actually deduct
@@ -1230,8 +1250,15 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
             if part_name == hologram_part_name:
                 hologram_numbers = inv_db.allocate_hologram_numbers_by_name(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
-                    product_type="spare_parts", quantity=qty,
+                    product_type="spare_parts", quantity=request.quantity,
                 )
+                # any quantity of the hologram part beyond one-per-unit is
+                # consumed as plain (non-hologram) stock
+                if qty > request.quantity:
+                    inv_db.consume_quantity(
+                        collection_name=INVENTORY_COLLECTION, product_name=part_name,
+                        product_type="spare_parts", quantity=qty - request.quantity,
+                    )
             else:
                 inv_db.consume_quantity(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
@@ -2696,11 +2723,6 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
             if available < item.quantity:
                 raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}: only {available} available")
 
-        # No more partial returns: every allocated unit becomes its own
-        # allocation document (quantity=1, one serial number each) instead of
-        # bundling the whole quantity into a single row. A cart of ProductA x2
-        # therefore creates two separate rows on the Allocated page, each
-        # independently returnable.
         created_allocation_ids = []
         for item in request.items:
             allocated_serials = inventory_db.allocate_serials(
