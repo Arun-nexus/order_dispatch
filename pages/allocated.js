@@ -806,7 +806,7 @@ function renderProductCartStep() {
   const renderRows = (list) => {
     rowsBox.innerHTML = list.map(p => `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
+        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' · ' + p.model_no : ''}</small></td>
         <td>${p.quantity ?? 0}</td>
         <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${allocWiz.cart[p.product_id]?.quantity ?? 0}"
               data-id="${p.product_id}" class="allocQtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
@@ -822,7 +822,7 @@ function renderProductCartStep() {
   renderRows(products);
   document.getElementById('allocProdFilter').addEventListener('input', e => {
     const term = e.target.value.trim().toLowerCase();
-    renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term)));
+    renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term)));
   });
 
   document.getElementById('toDetailsBtn').addEventListener('click', () => {
