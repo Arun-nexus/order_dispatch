@@ -863,7 +863,7 @@ function renderProductsStep() {
     const qtyInCart = wiz.cart[p.product_id]?.quantity ?? '';
     return `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
+        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_number ? ' · ' + p.model_number : ''}</small></td>
         <td>${p.quantity ?? 0}</td>
         <td>₹${p.price ?? 0}</td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
@@ -957,7 +957,7 @@ function renderProductsStep() {
     const term = document.getElementById('prodFilter').value.trim().toLowerCase();
     const base = currentCategoryProducts();
     const filtered = term
-      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term))
+      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_number || '').toLowerCase().includes(term))
       : base;
     renderRows(filtered);
   }
