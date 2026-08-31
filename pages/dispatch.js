@@ -1,4 +1,4 @@
-const dispState = { pendingOrders: [], pendingSpare: [], dispatchedOrders: [], dispatchedSpare: [] };
+const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [] };
 let dispPage = 1;
 const DISP_PAGE_SIZE = 7;
 
@@ -32,8 +32,10 @@ async function loadDispatchQueue() {
     const data = await res.json();
     dispState.pendingOrders = data.pending_orders || [];
     dispState.pendingSpare = data.pending_spare_parts || [];
+    dispState.pendingProductAlloc = data.pending_product_allocations || [];
     dispState.dispatchedOrders = data.dispatched_orders || [];
     dispState.dispatchedSpare = data.dispatched_spare_parts || [];
+    dispState.dispatchedProductAlloc = data.dispatched_product_allocations || [];
     dispPage = 1;
     updateCards();
     renderTable(combinedRows());
@@ -46,28 +48,33 @@ async function loadDispatchQueue() {
 function combinedRows() {
   const orderRows = [...dispState.pendingOrders, ...dispState.dispatchedOrders].map(o => ({ kind: 'order', data: o }));
   const spareRows = [...dispState.pendingSpare, ...dispState.dispatchedSpare].map(a => ({ kind: 'spare_part', data: a }));
-  return [...orderRows, ...spareRows];
+  const productAllocRows = [...dispState.pendingProductAlloc, ...dispState.dispatchedProductAlloc].map(a => ({ kind: 'product_allocation', data: a }));
+  return [...orderRows, ...spareRows, ...productAllocRows];
 }
 
 function updateCards() {
   const today = new Date().toDateString();
-  const dispatchedToday = [...dispState.dispatchedOrders, ...dispState.dispatchedSpare]
+  const dispatchedToday = [...dispState.dispatchedOrders, ...dispState.dispatchedSpare, ...dispState.dispatchedProductAlloc]
     .filter(x => x.dispatch?.dispatched_at && new Date(x.dispatch.dispatched_at).toDateString() === today).length;
 
-  document.getElementById('cardTotalPending').textContent = dispState.pendingOrders.length + dispState.pendingSpare.length;
+  document.getElementById('cardTotalPending').textContent = dispState.pendingOrders.length + dispState.pendingSpare.length + dispState.pendingProductAlloc.length;
   document.getElementById('cardOrdersPending').textContent = dispState.pendingOrders.length;
   document.getElementById('cardSparePending').textContent = dispState.pendingSpare.length;
+  const productPendingCard = document.getElementById('cardProductAllocPending');
+  if (productPendingCard) productPendingCard.textContent = dispState.pendingProductAlloc.length;
   document.getElementById('cardDispatchedToday').textContent = dispatchedToday;
-  document.getElementById('cardTotalDispatched').textContent = dispState.dispatchedOrders.length + dispState.dispatchedSpare.length;
+  document.getElementById('cardTotalDispatched').textContent = dispState.dispatchedOrders.length + dispState.dispatchedSpare.length + dispState.dispatchedProductAlloc.length;
 }
 
 function referenceLabel(row) {
   if (row.kind === 'order') return `#${(row.data.order_id || '').slice(0, 8)}`;
+  if (row.kind === 'product_allocation') return `#${(row.data.allocation_id || '').slice(0, 8)}`;
   return `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)}`;
 }
 
 function productLabel(row) {
   if (row.kind === 'order') return (row.data.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+  if (row.kind === 'product_allocation') return (row.data.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
   return row.data.spare_part?.part_name || '';
 }
 
@@ -75,6 +82,9 @@ function billToLabel(row) {
   if (row.kind === 'order') {
     const c = row.data.customer || {};
     return c.company_name || '-';
+  }
+  if (row.kind === 'product_allocation') {
+    return row.data.sales_person?.name || row.data.company_name || '-';
   }
   return `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)}`;
 }
@@ -112,8 +122,9 @@ function renderTable(rows) {
     tr.dataset.id = row.kind === 'order' ? d.order_id : d.allocation_id;
     tr.dataset.kind = row.kind;
 
+    const typeLabel = row.kind === 'order' ? 'Order' : row.kind === 'product_allocation' ? 'Product' : 'Spare Part';
     tr.innerHTML = `
-      <td>${row.kind === 'order' ? 'Order' : 'Spare Part'}</td>
+      <td>${typeLabel}</td>
       <td>${referenceLabel(row)}</td>
       <td>${productLabel(row)}</td>
       <td>${billToLabel(row)}</td>
@@ -169,7 +180,9 @@ function openDispatchModal(row) {
   const existing = row.data.dispatch || null;
   const billTo = row.kind === 'order'
     ? `${row.data.customer?.company_name || ''}${row.data.customer?.company_address ? ', ' + row.data.customer.company_address : ''}`
-    : `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)} (technician location)`;
+    : row.kind === 'product_allocation'
+      ? `${row.data.sales_person?.name || ''}${row.data.address ? ', ' + row.data.address : ''}`
+      : `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)} (technician location)`;
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
