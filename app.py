@@ -139,6 +139,7 @@ class ServiceRequest(BaseModel):
 class OrderItem(BaseModel):
     product_id: str
     product_name: str
+    model_no: str = ""
     quantity: int
     price: float
     tax_rate: float = 0

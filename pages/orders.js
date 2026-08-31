@@ -106,9 +106,13 @@ function renderOrdersTable(orders) {
     const tr = document.createElement('tr');
     tr.dataset.orderId = o.order_id;
     const items = o.items || [];
+    const firstItem = items[0] || {};
     const productLabel = items.length
-      ? `${items[0].product_name ?? ''}${items.length > 1 ? ` +${items.length - 1} more` : ''}`
+      ? `${firstItem.product_name ?? ''}${items.length > 1 ? ` +${items.length - 1} more` : ''}`
       : (o.product_name ?? '');
+    const productSubLabel = items.length === 1
+      ? [firstItem.product_id, firstItem.model_no].filter(Boolean).join(' · ')
+      : (items.length > 1 ? '' : [o.product_id, o.model_no].filter(Boolean).join(' · '));
     const serialLabel = items.length
       ? (items.length === 1
           ? ((items[0].serial_numbers && items[0].serial_numbers.length) ? items[0].serial_numbers[0]: '-')
@@ -120,7 +124,7 @@ function renderOrdersTable(orders) {
     tr.innerHTML = `
       <td><input type="checkbox"></td>
       <td>${creatorLabel}</td>
-      <td>${productLabel}</td>
+      <td>${productLabel}${productSubLabel ? `<br><small style="color:#94a3b8;">${productSubLabel}</small>` : ''}</td>
       <td>${serialLabel}</td>
       <td>${companyName}</td>
       <td>${o.payment_mode ?? ''}</td>
@@ -891,6 +895,7 @@ function renderProductsStep() {
     wiz.cart[productId] = {
       product_id: p.product_id,
       product_name: p.product_name,
+      model_no: p.model_no || '',
       price: Number(p.price) || 0,
       tax_rate: Number(p.tax_rate) || 0,
       quantity: qty
@@ -1164,7 +1169,7 @@ async function submitOrder(modeSelect, extraBox) {
     customer_id: wiz.customerId || '',
     customer: wiz.customer || {},
     items: Object.values(wiz.cart).map(i => ({
-      product_id: i.product_id, product_name: i.product_name,
+      product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
       quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
     })),
     payment_mode: mode,

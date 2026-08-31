@@ -131,9 +131,20 @@ function renderTable(rows) {
       <td>${d.dispatch?.docket_no ?? '-'}</td>
       <td>${d.dispatch?.invoice_no ?? '-'}</td>
       <td>${statusHtml}</td>
-      <td>${actionHtml}</td>`;
+      <td>
+        <button class="icon-btn view-dispatch-btn" title="View Details"><i class="fa-solid fa-eye"></i></button>
+        ${actionHtml}
+      </td>`;
     tbody.appendChild(tr);
   });
+
+  tbody.querySelectorAll('.view-dispatch-btn').forEach(btn => btn.addEventListener('click', e => {
+    const tr = e.target.closest('tr');
+    const kind = tr.dataset.kind;
+    const id = tr.dataset.id;
+    const row = combinedRows().find(r => (kind === 'order' ? r.data.order_id : r.data.allocation_id) === id && r.kind === kind);
+    if (row) openViewDispatchModal(row);
+  }));
 
   tbody.querySelectorAll('.confirm-dispatch-btn').forEach(btn => btn.addEventListener('click', e => {
     const tr = e.target.closest('tr');
@@ -173,7 +184,81 @@ function wireFilter() {
   });
 }
 
-// ---------- Confirm Dispatch modal ----------
+// ---------- View Details modal ----------
+function openViewDispatchModal(row) {
+  const modal = document.getElementById('viewDispatchModal');
+  if (!modal) return;
+  const content = modal.querySelector('.modal-content');
+  const d = row.data;
+  const disp = d.dispatch || null;
+
+  let bodyHtml = '';
+  if (row.kind === 'order') {
+    const items = d.items || [];
+    const customer = d.customer || {};
+    const itemsRows = items.length
+      ? items.map(it => `<tr>
+          <td>${it.product_name ?? ''}<br><small style="color:#94a3b8;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
+          <td>${it.quantity ?? 0}</td>
+          <td>₹${it.price ?? 0}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+
+    bodyHtml = `
+      <div class="detail"><small>Order ID</small><p>${d.order_id ?? ''}</p></div>
+      <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
+      <div class="detail"><small>Status</small><p>${d.status ?? ''}</p></div>
+      <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Qty</th><th>Price</th></tr></thead>
+        <tbody>${itemsRows}</tbody>
+      </table>
+      <div class="detail"><small>Total Amount</small><p>₹${d.total_mrp ?? 0}</p></div>`;
+  } else if (row.kind === 'product_allocation') {
+    const items = d.items || [];
+    const itemsRows = items.length
+      ? items.map(it => `<tr>
+          <td>${it.product_name ?? ''}<br><small style="color:#94a3b8;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
+          <td>${it.quantity ?? 0}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="2" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+
+    bodyHtml = `
+      <div class="detail"><small>Allocation ID</small><p>${d.allocation_id ?? ''}</p></div>
+      <div class="detail"><small>Sales Person</small><p>${d.sales_person?.name ?? '-'}</p></div>
+      <div class="detail"><small>Address</small><p>${d.address ?? '-'}</p></div>
+      <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Qty</th></tr></thead>
+        <tbody>${itemsRows}</tbody>
+      </table>`;
+  } else {
+    bodyHtml = `
+      <div class="detail"><small>Allocation ID</small><p>${d.allocation_id ?? ''}</p></div>
+      <div class="detail"><small>Part Name</small><p>${d.spare_part?.part_name ?? '-'}</p></div>
+      <div class="detail"><small>Quantity</small><p>${d.spare_part?.quantity ?? '-'}</p></div>
+      <div class="detail"><small>Service ID</small><p>${d.spare_part?.service_id ?? '-'}</p></div>`;
+  }
+
+  const dispatchHtml = disp ? `
+    <div class="detail"><small>Docket No.</small><p>${disp.docket_no ?? '-'}</p></div>
+    <div class="detail"><small>Invoice No.</small><p>${disp.invoice_no ?? '-'}</p></div>
+    <div class="detail"><small>Invoice Date</small><p>${disp.invoice_date ? new Date(disp.invoice_date).toLocaleDateString('en-GB') : '-'}</p></div>
+    <div class="detail"><small>Mode of Delivery</small><p>${disp.mode_of_delivery ?? '-'}</p></div>
+    <div class="detail"><small>Ship To</small><p>${disp.ship_to_different ? `${disp.ship_to_address?.company_name ?? ''}, ${disp.ship_to_address?.address ?? ''}` : 'Same as bill to'}</p></div>
+    <div class="detail"><small>Dispatched At</small><p>${disp.dispatched_at ? new Date(disp.dispatched_at).toLocaleString('en-GB') : '-'}</p></div>
+  ` : `<div class="detail"><small>Dispatch</small><p>Not yet dispatched</p></div>`;
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Dispatch Details</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${bodyHtml}
+    <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
+    ${dispatchHtml}`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
 function openDispatchModal(row) {
   const modal = document.getElementById('dispatchModal');
   const content = modal.querySelector('.modal-content');
