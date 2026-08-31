@@ -1505,16 +1505,23 @@ async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))
         all_spare = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_type": "spare_part"})
         pending_spare = [a for a in all_spare if not a.get("dispatch")]
 
+        all_alloc = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={})
+        all_product_alloc = [a for a in all_alloc if a.get("allocation_type") != "spare_part" and a.get("sent_to_dispatch")]
+        pending_product_alloc = [a for a in all_product_alloc if not a.get("dispatch")]
+
         dispatched_orders = [o for o in all_orders if o.get("dispatch")]
         dispatched_spare = [a for a in all_spare if a.get("dispatch")]
+        dispatched_product_alloc = [a for a in all_product_alloc if a.get("dispatch")]
 
         logging.info("dispatch queue was fetched successfully")
         return {
             "message": "dispatch queue",
             "pending_orders": pending_orders,
             "pending_spare_parts": pending_spare,
+            "pending_product_allocations": pending_product_alloc,
             "dispatched_orders": dispatched_orders,
-            "dispatched_spare_parts": dispatched_spare
+            "dispatched_spare_parts": dispatched_spare,
+            "dispatched_product_allocations": dispatched_product_alloc
         }
     except Exception as e:
         logging.error("dispatch queue could not be fetched")
@@ -2243,6 +2250,33 @@ async def allocations(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("fetching allocations failed")
         raise HTTPException(status_code=500, detail="allocation dataset cannot be fetched")
+
+
+@app.post("/allocation/send_to_dispatch/{allocation_id}")
+async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "employee"))):
+    try:
+        db = allocation_manager()
+        matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="allocation not found")
+        allocation = matches[0]
+
+        if allocation.get("allocation_type") == "spare_part":
+            raise HTTPException(status_code=400, detail="spare part allocations already appear in the dispatch queue automatically")
+        if allocation.get("dispatch"):
+            raise HTTPException(status_code=400, detail="this allocation has already been dispatched")
+        if allocation.get("sent_to_dispatch"):
+            raise HTTPException(status_code=400, detail="this allocation is already in the dispatch queue")
+
+        db.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id},
+                        update_values={"sent_to_dispatch": True})
+        logging.info(f"allocation {allocation_id} sent to dispatch queue")
+        return {"message": "allocation sent to dispatch queue", "allocation_id": allocation_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("sending allocation to dispatch failed")
+        raise HTTPException(status_code=500, detail="could not send allocation to dispatch")
 
 
 @app.post("/allocation/report_damage/{allocation_id}")

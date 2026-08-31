@@ -313,6 +313,10 @@ function renderAllocationsTable(allocations) {
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
+        ${!isSpare && !a.dispatch && !a.sent_to_dispatch
+          ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}
+        ${!isSpare && a.sent_to_dispatch && !a.dispatch
+          ? '<span class="stock pending" title="Waiting to be dispatched" style="padding:4px 8px;">In Dispatch Queue</span>' : ''}
         ${!meta.complete ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
         ${a.damage_report?.reported
           ? '<button class="icon-btn damage-view-btn" title="Damage reported" style="color:#d62828;"><i class="fa-solid fa-triangle-exclamation"></i></button>'
@@ -322,6 +326,7 @@ function renderAllocationsTable(allocations) {
   });
 
   tbody.querySelectorAll('.view-alloc-btn').forEach(btn => btn.addEventListener('click', e => openViewAllocationModal(rowAllocation(e))));
+  tbody.querySelectorAll('.dispatch-alloc-btn').forEach(btn => btn.addEventListener('click', e => sendToDispatch(rowAllocation(e))));
   tbody.querySelectorAll('.return-alloc-btn').forEach(btn => btn.addEventListener('click', e => openReturnModal(rowAllocation(e))));
   tbody.querySelectorAll('.damage-report-btn').forEach(btn => btn.addEventListener('click', e => openDamageReportModal(rowAllocation(e))));
   tbody.querySelectorAll('.damage-view-btn').forEach(btn => btn.addEventListener('click', e => openDamageViewModal(rowAllocation(e))));
@@ -330,6 +335,21 @@ function renderAllocationsTable(allocations) {
     allocPage = p;
     renderAllocationsTable(allocations);
   });
+}
+
+// ---------- Send allocated product to Dispatch (mirrors how orders reach the dispatch queue) ----------
+async function sendToDispatch(a) {
+  if (!a) return;
+  const label = (a.items || []).map(itemLabel).join(', ');
+  if (!confirm(`Send "${label}" to the dispatch queue?`)) return;
+  try {
+    const res = await apiFetch(`/allocation/send_to_dispatch/${a.allocation_id}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'could not send to dispatch');
+    await loadAllocations();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }
 
 function rowAllocation(e) {
