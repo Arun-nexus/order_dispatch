@@ -446,16 +446,13 @@ function exportInventoryCSV() {
     dateLabel: 'Purchase Date',
     getRows: () => invState.products,
     onConfirm: (rows) => {
-      const header = ['Product Name / ID / Model No', 'Type', 'Lot No', 'Supplier', 'Purchase Date', 'Quantity', 'Price', 'Tax'];
+      const header = rows.map(p => `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`);
+      const columns = rows.map(p => p.serial_numbers || []);
+      const maxLen = Math.max(0, ...columns.map(c => c.length));
       const csvRows = [];
-      rows.forEach(p => {
-        csvRows.push([
-          `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`,
-          productTypeLabel(p.product_type),
-          p.lot_no, p.supplier, p.purchase_date, p.quantity, p.price, p.tax_rate
-        ]);
-        (p.serial_numbers || []).forEach(sn => csvRows.push([sn, '', '', '', '', '', '', '']));
-      });
+      for (let i = 0; i < maxLen; i++) {
+        csvRows.push(columns.map(col => col[i] ?? ''));
+      }
       downloadCSV(header, csvRows, 'inventory.csv');
     }
   });
