@@ -1353,7 +1353,8 @@ function wireModals() {
     const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
 
     // accessories: quantity and serial count don't have to match, so skip
-    // all the strict sync checks below
+    // all the strict sync checks below just for maintanance
+    
     if (!serialOptional) {
       if (targetQuantity > keptCount) {
         if (new_serial_numbers.some(v => !v)) {
