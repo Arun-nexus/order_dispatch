@@ -160,6 +160,8 @@ function getFilteredInventory() {
   if (q) {
     list = list.filter(p =>
       (p.product_name || '').toLowerCase().includes(q) ||
+      (p.product_id || '').toLowerCase().includes(q) ||
+      (p.model_no || '').toLowerCase().includes(q) ||
       (p.supplier || '').toLowerCase().includes(q) ||
       (p.serial_numbers || []).some(s => (s || '').toLowerCase().includes(q))
     );
@@ -446,7 +448,7 @@ function exportInventoryCSV() {
     onConfirm: (rows) => {
       const header = ['Product Name / ID / Model No', 'Type', 'Lot No', 'Supplier', 'Purchase Date', 'Quantity', 'Price', 'Tax', 'Serial Numbers'];
       const csvRows = rows.map(p => [
-        `${p.product_name} (${p.product_id}) - ${p.model_number || ''}`,
+        `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`,
         productTypeLabel(p.product_type),
         p.lot_no, p.supplier, p.purchase_date, p.quantity, p.price, p.tax_rate,
         (p.serial_numbers || []).join('; ')
@@ -1353,8 +1355,7 @@ function wireModals() {
     const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
 
     // accessories: quantity and serial count don't have to match, so skip
-    // all the strict sync checks below just for maintanance
-    
+    // all the strict sync checks below
     if (!serialOptional) {
       if (targetQuantity > keptCount) {
         if (new_serial_numbers.some(v => !v)) {
