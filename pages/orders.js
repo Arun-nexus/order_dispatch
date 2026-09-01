@@ -118,7 +118,7 @@ function renderOrdersTable(orders) {
           ? ((items[0].serial_numbers && items[0].serial_numbers.length) ? items[0].serial_numbers[0]: '-')
           : `${items.length} items`)
       : '-';
-    const companyName = o.customer?.company_name ?? o.company_name ?? '';
+    const companyName = o.customer?.contractor_person ?? o.customer?.company_name ?? o.company_name ?? '';
     const creatorLabel = orderCreatorLabel(o);
 
     tr.innerHTML = `
@@ -472,7 +472,7 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Order ID</small><p>${o.order_id ?? ''}</p></div>
     <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
     <div class="detail"><small>GST Number</small><p>${customer.gst_number ?? '-'}</p></div>
-    <div class="detail"><small>Contractor</small><p>${customer.contractor_person ?? '-'} (${customer.contractor_number ?? '-'})</p></div>
+    <div class="detail"><small>Contact name and number </small><p>${customer.contractor_person ?? '-'} (${customer.contractor_number ?? '-'})</p></div>
     <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
       <thead><tr style="text-align:left;color:#fff;">
         <th>Product</th><th>Qty</th><th>Price</th><th>Tax</th><th>Line Total</th>
