@@ -10,7 +10,7 @@ class order_manager(mongodbclient):
         """
         customer: dict -> {customer_id, company_name, company_address, gst_number,
                             contractor_person, contractor_number, contractor_email}
-        items: list of dicts -> {product_id, product_name, serial_no, quantity, price, tax_rate}
+        items: list of dicts -> {product_id, product_name, serial_numbers, quantity, price, tax_rate}
         creator: dict -> who created this order, one of:
             direct order  -> {"type": "direct", "created_by": "<username>"}
             approved req  -> {"type": "request", "raised_by": "<distributor>", "approved_by": "<admin/employee>"}

@@ -320,6 +320,69 @@ class inventory_manager(mongodbclient):
             logging.error("serial allocation failed!")
             raise Exception(e)
 
+    def allocate_units(self, collection_name, product_id, quantity):
+        """
+        Deducts `quantity` units of product_id from inventory (oldest lots first) —
+        for use anywhere a full quantity+serials list is recorded together (e.g. an
+        order line or a demo-unit allocation line), as opposed to allocate_serials'
+        one-record-per-serial callers which genuinely need every unit serialed.
+
+        Unlike allocate_serials, this does NOT require every lot to carry serial
+        numbers: accessories/spare_parts/service_parts are allowed to be stocked
+        with no serial numbers on file (see /inventory/create), so a lot with
+        quantity > 0 but an empty serial_numbers list is still valid stock and
+        must not raise "insufficient stock". Wherever a lot does have serials on
+        file, the matching number of serials is pulled and returned so the caller
+        can still record which units shipped for serialized products.
+
+        Returns the list of serial numbers collected — this may be SHORTER than
+        `quantity` (or empty) when the consumed lots weren't serial-tracked; that
+        is expected and not an error. Raises only if total on-file quantity across
+        all lots is insufficient.
+        """
+        try:
+            entries = self.get_data(
+                collection_name=collection_name,
+                query={"product_id": product_id, "quantity": {"$gt": 0}}
+            )
+            entries.sort(key=lambda e: e.get("purchase_date") or "")
+
+            remaining = quantity
+            allocated = []
+
+            for entry in entries:
+                if remaining <= 0:
+                    break
+
+                available_qty = int(entry.get("quantity", 0) or 0)
+                take = min(remaining, available_qty)
+                if take <= 0:
+                    continue
+
+                available_serials = entry.get("serial_numbers") or []
+                serial_take = min(take, len(available_serials))
+                taken_serials = available_serials[:serial_take]
+                leftover_serials = available_serials[serial_take:]
+
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"serial_numbers": leftover_serials, "quantity": available_qty - take}
+                )
+
+                allocated.extend(taken_serials)
+                remaining -= take
+
+            if remaining > 0:
+                raise Exception(f"insufficient stock for product {product_id}, short by {remaining}")
+
+            logging.info(f"allocated {quantity} unit(s) ({len(allocated)} serialed) for product {product_id}")
+            return allocated
+
+        except Exception as e:
+            logging.error("unit allocation failed!")
+            raise Exception(e)
+
     def add_from_assembly(self, collection_name, product_name, product_id, model_no, quantity,
                            serial_numbers, price=0, tax_rate=0, purchase_date=None,
                            supplier="In-house Assembly", supplier_address="", lot_no="",

@@ -153,6 +153,8 @@ class CreateOrderRequest(BaseModel):
     payment_mode: str
     payment_details: dict = {}     # credit_days / cheque_number+cheque_date / dd_number+dd_date etc.
     discount: float = 0
+    warranty_years: int = 1        # standard warranty is 1 year; > 1 means extended
+    warranty_charge: float = 0     # additional charge for the extended warranty (0 for standard)
 
 
 class CustomerRequest(BaseModel):
@@ -644,7 +646,7 @@ def _swap_faulty_part(service_id: str, parts_used: list):
     return mismatch
 
 
-def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None):
+def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None, warranty_years: int = 1, warranty_charge: float = 0):
     """Validates payment details, resolves/creates the customer, deducts stock + serials,
     and creates the order record. Shared by the direct /order/create_order/ endpoint and by
     /request/approve/{request_id} when a distributor's order request is approved."""
@@ -726,7 +728,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
     order_items = []
     for item in items:
-        allocated_serials = inventory_db.allocate_serials(
+        allocated_serials = inventory_db.allocate_units(
             collection_name=INVENTORY_COLLECTION,
             product_id=item["product_id"],
             quantity=item["quantity"]
@@ -741,7 +743,9 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
         payment_mode=payment_mode,
         payment_details=payment_details,
         discount=discount,
-        creator=creator or {}
+        creator=creator or {},
+        warranty_years=warranty_years,
+        warranty_charge=warranty_charge
     )
     order.add(collection_name=ORDERS_COLLECTION)
 
@@ -759,7 +763,9 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(require
             payment_mode=request.payment_mode,
             payment_details=request.payment_details,
             discount=request.discount,
-            creator={"type": "direct", "created_by": user["username"]}
+            creator={"type": "direct", "created_by": user["username"]},
+            warranty_years=request.warranty_years,
+            warranty_charge=request.warranty_charge
         )
         return {"message": "order created successfully", "order_id": order_id}
 
@@ -837,13 +843,22 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
         # UI never reflects the change.
         item_field_keys = {"product_name", "serial_no", "quantity", "price", "tax_rate"}
         touched_item_fields = item_field_keys & updated.keys()
-        if touched_item_fields:
+        # discount lives at the top level already, but total_mrp depends on it too,
+        # so a discount-only edit still needs to fall into the recompute branch below
+        # instead of leaving a stale total_mrp.
+        discount_touched = "discount" in updated
+        if touched_item_fields or discount_touched:
             items = order.get("items", [])
             if not items:
                 raise HTTPException(status_code=400, detail="order has no items to edit")
             item = dict(items[0])
             for key in touched_item_fields:
-                item[key] = updated.pop(key)
+                value = updated.pop(key)
+                # the item's actual field is the plural "serial_numbers" list, not "serial_no"
+                if key == "serial_no":
+                    item["serial_numbers"] = [value] if value else []
+                else:
+                    item[key] = value
 
             quantity = item.get("quantity", 0)
             price = item.get("price", 0)
@@ -2395,7 +2410,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
 
     demo_items = []
     for item in items:
-        allocated_serials = inventory_db.allocate_serials(
+        allocated_serials = inventory_db.allocate_units(
             collection_name=INVENTORY_COLLECTION, product_id=item["product_id"], quantity=item["quantity"]
         )
         demo_items.append({

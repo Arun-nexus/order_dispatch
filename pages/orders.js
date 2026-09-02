@@ -42,8 +42,10 @@ async function loadInventoryForOrders() {
 }
 
 function findStock(productId) {
-  const p = invLookup.products.find(p => p.product_id === productId.trim());
-  return p ? Number(p.quantity) || 0 : null;
+  const id = productId.trim();
+  return invLookup.products
+    .filter(p => p.product_id === id)
+    .reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
 }
 
 async function loadOrders() {
@@ -221,14 +223,16 @@ function openEditOrderModal(o) {
   if (!modal) return;
   const inputs = modal.querySelectorAll('input');
   const select = modal.querySelector('select');
-  inputs[0].value = o.product_name ?? '';
-  inputs[1].value = o.product_id ?? '';
-  inputs[2].value = o.quantity ?? (o.items?.[0]?.quantity ?? 1);
-  inputs[3].value = o.serial_no ?? '';
-  inputs[4].value = o.company_name ?? '';
-  inputs[5].value = o.gst_number ?? '';
-  inputs[6].value = o.price ?? '';
-  inputs[7].value = o.tax_rate ?? '';
+  const item = o.items?.[0] || {};
+  const customer = o.customer || {};
+  inputs[0].value = item.product_name ?? '';
+  inputs[1].value = item.product_id ?? '';
+  inputs[2].value = item.quantity ?? 1;
+  inputs[3].value = (item.serial_numbers && item.serial_numbers[0]) ?? '';
+  inputs[4].value = customer.company_name ?? '';
+  inputs[5].value = customer.gst_number ?? '';
+  inputs[6].value = item.price ?? '';
+  inputs[7].value = item.tax_rate ?? '';
   inputs[8].value = o.discount ?? 0;
   if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.payment_mode);
   modal.style.display = 'flex';
@@ -326,8 +330,7 @@ function wireFilter() {
 
     const filtered = orderState.orders.filter(o => {
       const statusOk = !wantedStatus || o.status === wantedStatus;
-      const paymentOk = !paymentVal || paymentVal.startsWith('All')
-        || (o.payment_mode || '').toLowerCase().replace(/\s/g, '').includes(paymentVal.toLowerCase().replace(/\s/g, ''));
+      const paymentOk = !paymentVal || o.payment_mode === paymentVal;
       const dateOk = !dateVal || (o.order_date && new Date(o.order_date).toISOString().slice(0, 10) === dateVal);
       return statusOk && paymentOk && dateOk;
     });
@@ -810,7 +813,27 @@ function renderNewCustomerStep() {
 // Step 3: product picker with quantity per row
 function renderProductsStep() {
   wizardTitle(`New Order — ${wiz.customer?.company_name ?? 'Products'}`);
-  const products = invLookup.products || [];
+  // Inventory stores one document per lot/purchase-batch, so the same
+  // product_id can appear as several separate rows in invLookup.products
+  // (e.g. 3 lots of 50+80+73 = 203 total). Showing/checking stock per-lot
+  // instead of per-product made the picker cap quantity (or say "out of
+  // stock") against a single lot's count while the true available total
+  // was much higher — the same total the backend actually checks against
+  // via get_available_quantity(). Aggregate by product_id here so the
+  // "Stock" column and the cap match what the server will accept.
+  const rawProducts = invLookup.products || [];
+  const byProductId = new Map();
+  for (const p of rawProducts) {
+    const key = p.product_id;
+    const existing = byProductId.get(key);
+    if (!existing) {
+      byProductId.set(key, { ...p, quantity: Number(p.quantity) || 0 });
+    } else {
+      existing.quantity += Number(p.quantity) || 0;
+      // keep the earliest-listed price/tax_rate/model_no as representative
+    }
+  }
+  const products = [...byProductId.values()];
 
   wizardBody().innerHTML = `
     <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
