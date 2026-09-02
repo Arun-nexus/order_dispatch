@@ -221,20 +221,109 @@ function openEditOrderModal(o) {
   orderState.activeOrderId = o.order_id;
   const modal = document.getElementById('editOrderModal');
   if (!modal) return;
-  const inputs = modal.querySelectorAll('input');
-  const select = modal.querySelector('select');
-  const item = o.items?.[0] || {};
+  const content = modal.querySelector('.modal-content');
+  const items = o.items || [];
   const customer = o.customer || {};
-  inputs[0].value = item.product_name ?? '';
-  inputs[1].value = item.product_id ?? '';
-  inputs[2].value = item.quantity ?? 1;
-  inputs[3].value = (item.serial_numbers && item.serial_numbers[0]) ?? '';
-  inputs[4].value = customer.company_name ?? '';
-  inputs[5].value = customer.gst_number ?? '';
-  inputs[6].value = item.price ?? '';
-  inputs[7].value = item.tax_rate ?? '';
-  inputs[8].value = o.discount ?? 0;
-  if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.payment_mode);
+
+  // Built fresh every time (like View Order) instead of reusing a single
+  // static form — that's what let this only ever edit items[0], only one
+  // combined price for the whole order, and only the first serial number.
+  // Now every item in the order gets its own row with its own qty/price/tax
+  // and its own full serial-number list.
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Edit Order</h3>
+      <button type="button" class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <form id="editOrderForm" style="display:flex;flex-direction:column;gap:14px;">
+      <div id="editItemsBox" style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow-y:auto;"></div>
+      <div style="border-top:1px solid #e2e8f0;padding-top:12px;display:flex;flex-direction:column;gap:10px;">
+        <input name="company_name" placeholder="Company Name" value="${customer.company_name ?? ''}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input name="gst_number" placeholder="GST Number" value="${customer.gst_number ?? ''}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input name="discount" type="number" min="0" placeholder="Discount" value="${o.discount ?? 0}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <select name="payment_mode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          ${PAYMENT_MODES.map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+      </div>
+    </form>`;
+
+  const itemsBox = content.querySelector('#editItemsBox');
+  itemsBox.innerHTML = items.map((it, idx) => `
+    <div class="editItemRow" data-idx="${idx}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">
+        ${it.product_name ?? ''}
+        <small style="color:#94a3b8;font-weight:400;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <label style="font-size:11px;color:#64748b;width:70px;">Qty
+          <input type="number" min="1" class="editQty" value="${it.quantity ?? 1}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        </label>
+        <label style="font-size:11px;color:#64748b;width:100px;">Price
+          <input type="number" min="0" class="editPrice" value="${it.price ?? 0}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        </label>
+        <label style="font-size:11px;color:#64748b;width:80px;">Tax %
+          <input type="number" min="0" class="editTax" value="${it.tax_rate ?? 0}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        </label>
+      </div>
+      <label style="font-size:11px;color:#64748b;display:block;margin-top:8px;">Serial Numbers (comma separated)
+        <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+      </label>
+    </div>`).join('');
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+
+  content.querySelector('#editOrderForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const rows = [...itemsBox.querySelectorAll('.editItemRow')];
+
+    const newItems = rows.map(row => {
+      const idx = Number(row.dataset.idx);
+      const original = items[idx] || {};
+      const quantity = Math.max(1, Math.floor(Number(row.querySelector('.editQty').value)) || 1);
+      const price = Number(row.querySelector('.editPrice').value) || 0;
+      const tax_rate = Number(row.querySelector('.editTax').value) || 0;
+      const serial_numbers = row.querySelector('.editSerials').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+      return {
+        product_id: original.product_id,
+        product_name: original.product_name,
+        model_no: original.model_no || '',
+        quantity,
+        price,
+        tax_rate,
+        serial_numbers
+      };
+    });
+
+    const updated_order_value = {
+      items: newItems,
+      company_name: fd.get('company_name'),
+      gst_number: fd.get('gst_number'),
+      discount: Number(fd.get('discount') || 0),
+      payment_mode: fd.get('payment_mode')
+    };
+
+    try {
+      const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updated_order_value })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'update failed');
+      modal.style.display = 'none';
+      await loadOrders();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+
   modal.style.display = 'flex';
 }
 
@@ -458,13 +547,16 @@ function openViewOrderModal(o) {
   const customer = o.customer || {};
 
   const itemsRows = items.length
-    ? items.map(it => `<tr>
-        <td>${it.product_name ?? ''}${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
+    ? items.map(it => {
+        const idModel = [it.product_id, it.model_no].filter(Boolean).join(' · ');
+        return `<tr>
+        <td>${it.product_name ?? ''}${idModel ? `<br><small style="color:#94a3b8;">${idModel}</small>` : ''}${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
         <td>${it.quantity ?? 0}</td>
         <td>₹${it.price ?? 0}</td>
         <td>${it.tax_rate ?? 0}%</td>
         <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
-      </tr>`).join('')
+      </tr>`;
+      }).join('')
     : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
 
   content.innerHTML = `
@@ -507,42 +599,10 @@ function wireDetailModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
-  const editForm = document.querySelector('#editOrderModal form');
-  if (editForm) {
-    editForm.addEventListener('submit', async e => {
-      e.preventDefault();
-      const inputs = editForm.querySelectorAll('input');
-      const select = editForm.querySelector('select');
-      const quantity = Math.max(1, Math.floor(Number(inputs[2].value)) || 1);
-      const price = Number(inputs[6].value);
-      const tax_rate = Number(inputs[7].value);
-      const discount = Number(inputs[8].value || 0);
-      const updated_order_value = {
-        product_name: inputs[0].value,
-        quantity,
-        serial_no: inputs[3].value.trim().toLowerCase(),
-        company_name: inputs[4].value,
-        gst_number: inputs[5].value,
-        price,
-        tax_rate,
-        discount,
-        payment_mode: select ? select.value : undefined
-      };
-      try {
-        const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updated_order_value })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'update failed');
-        document.getElementById('editOrderModal').style.display = 'none';
-        await loadOrders();
-      } catch (err) {
-        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-      }
-    });
-  }
+  // Edit Order's form is now built fresh (per-item rows) every time
+  // openEditOrderModal() runs, so its submit handler is wired there directly
+  // instead of once here against a static form that no longer exists after
+  // the first edit.
 
   const statusForm = document.querySelector('#orderStatusModal form');
   if (statusForm) {
@@ -814,26 +874,26 @@ function renderNewCustomerStep() {
 function renderProductsStep() {
   wizardTitle(`New Order — ${wiz.customer?.company_name ?? 'Products'}`);
   // Inventory stores one document per lot/purchase-batch, so the same
-  // product_id can appear as several separate rows in invLookup.products
-  // (e.g. 3 lots of 50+80+73 = 203 total). Showing/checking stock per-lot
-  // instead of per-product made the picker cap quantity (or say "out of
-  // stock") against a single lot's count while the true available total
-  // was much higher — the same total the backend actually checks against
-  // via get_available_quantity(). Aggregate by product_id here so the
-  // "Stock" column and the cap match what the server will accept.
-  const rawProducts = invLookup.products || [];
-  const byProductId = new Map();
-  for (const p of rawProducts) {
-    const key = p.product_id;
-    const existing = byProductId.get(key);
-    if (!existing) {
-      byProductId.set(key, { ...p, quantity: Number(p.quantity) || 0 });
-    } else {
-      existing.quantity += Number(p.quantity) || 0;
-      // keep the earliest-listed price/tax_rate/model_no as representative
-    }
+  // product_id can appear as several separate rows here (e.g. 3 lots of
+  // 50+80+73). Rows are still listed one-per-lot exactly as before (nothing
+  // that used to be visible disappears) — only the "Stock" number and the
+  // quantity cap are computed from the TOTAL across all of that product's
+  // lots, to match what the backend's get_available_quantity() actually
+  // checks against (it also sums across lots by product_id).
+  const products = invLookup.products || [];
+
+  // A row is only treated as "the same product" when product_id, product_name
+  // AND model_no all match — if even one of the three differs, it's a
+  // different product and gets its own row / cart line. This key is used
+  // everywhere below (dedupe, cart storage, lookup) so all three stay in sync.
+  const rowKey = (p) => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
+
+  const totalQtyByKey = new Map();
+  for (const p of products) {
+    const key = rowKey(p);
+    totalQtyByKey.set(key, (totalQtyByKey.get(key) || 0) + (Number(p.quantity) || 0));
   }
-  const products = [...byProductId.values()];
+  const stockFor = (p) => totalQtyByKey.get(rowKey(p)) ?? (Number(p.quantity) || 0);
 
   wizardBody().innerHTML = `
     <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
@@ -886,21 +946,45 @@ function renderProductsStep() {
 
   const rowsBox = document.getElementById('prodRows');
 
+  // BUG FIX: inventory stores one document per lot/purchase-batch, so the
+  // same product_id used to appear as several separate <tr> rows here. The
+  // cart was keyed ONLY by product_id, and the qty listeners looked the
+  // product back up with `products.find(x => x.product_id === productId)` —
+  // which always returns the FIRST lot in the array, not the row the user
+  // actually typed into. Net effect: typing a quantity into a different
+  // lot's row silently attached that other lot's data to the cart line, and
+  // typing into a second lot of the same product overwrote the first lot's
+  // cart entry.
+  //
+  // Fix: rows (and the cart) are keyed by rowKey() = product_id + product_name
+  // + model_no together. Two inventory docs collapse into ONE row only when
+  // all three match exactly; if even one differs, they're treated as
+  // different products and each keeps its own row and its own cart line.
+  function dedupeByRowKey(list) {
+    const seen = new Map();
+    for (const p of list) {
+      const key = rowKey(p);
+      if (!seen.has(key)) seen.set(key, p);
+    }
+    return [...seen.values()];
+  }
+
   function productRowHtml(p) {
-    const qtyInCart = wiz.cart[p.product_id]?.quantity ?? '';
+    const key = rowKey(p);
+    const qtyInCart = wiz.cart[key]?.quantity ?? '';
     return `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' · ' + p.model_no : ''}</small></td>
-        <td>${p.quantity ?? 0}</td>
+        <td>${stockFor(p)}</td>
         <td>₹${p.price ?? 0}</td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
-              placeholder="0" data-product-id="${p.product_id}" class="qtyInput"
+              placeholder="0" data-row-key="${key}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
       </tr>`;
   }
 
   function renderRows(list) {
-    rowsBox.innerHTML = list.map(productRowHtml).join('');
+    rowsBox.innerHTML = dedupeByRowKey(list).map(productRowHtml).join('');
   }
 
   function computeTypedQty(inp) {
@@ -910,12 +994,12 @@ function renderProductsStep() {
     return qty;
   }
 
-  function applyQtyToCart(productId, p, qty) {
+  function applyQtyToCart(key, p, qty) {
     if (qty === null || qty <= 0) {
-      delete wiz.cart[productId];
+      delete wiz.cart[key];
       return;
     }
-    wiz.cart[productId] = {
+    wiz.cart[key] = {
       product_id: p.product_id,
       product_name: p.product_name,
       model_no: p.model_no || '',
@@ -935,15 +1019,19 @@ function renderProductsStep() {
   // mobile keyboards made it impossible to type more than one digit (each
   // new digit landed in the wrong place or got wiped by the cap). The stock
   // cap is enforced separately, only once the user leaves the field.
+  //
+  // Since renderRows() now emits at most one row per rowKey (product_id +
+  // product_name + model_no), this find() is unambiguous — there is no
+  // other row sharing the exact same three fields it could match instead.
   rowsBox.addEventListener('input', (e) => {
     const inp = e.target.closest('.qtyInput');
     if (!inp) return;
 
-    const productId = inp.dataset.productId;
-    const p = products.find(x => x.product_id === productId);
+    const key = inp.dataset.rowKey;
+    const p = products.find(x => rowKey(x) === key);
     if (!p) return;
 
-    applyQtyToCart(productId, p, computeTypedQty(inp));
+    applyQtyToCart(key, p, computeTypedQty(inp));
   });
 
   // Enforce the stock cap once the user is done typing (blur doesn't bubble,
@@ -952,8 +1040,8 @@ function renderProductsStep() {
     const inp = e.target.closest('.qtyInput');
     if (!inp) return;
 
-    const productId = inp.dataset.productId;
-    const p = products.find(x => x.product_id === productId);
+    const key = inp.dataset.rowKey;
+    const p = products.find(x => rowKey(x) === key);
     if (!p) return;
 
     let qty = computeTypedQty(inp);
@@ -961,10 +1049,12 @@ function renderProductsStep() {
 
     // only enforce a cap when we actually have a real stock number for this
     // product — missing/undefined stock data should never silently zero out
-    // what the user is typing
-    const hasKnownStock = p.quantity !== undefined && p.quantity !== null && Number.isFinite(Number(p.quantity));
+    // what the user is typing. Use the TOTAL across all of this product's
+    // lots (stockFor), not just this one row's lot, so ordering more than a
+    // single lot but less than the true total isn't wrongly capped/rejected.
+    const stock = stockFor(p);
+    const hasKnownStock = Number.isFinite(stock);
     if (hasKnownStock) {
-      const stock = Number(p.quantity);
       if (qty > stock) {
         qty = stock;
         inp.value = qty || '';
@@ -974,7 +1064,7 @@ function renderProductsStep() {
       }
     }
 
-    applyQtyToCart(productId, p, qty);
+    applyQtyToCart(key, p, qty);
   }, true);
 
   function currentCategoryProducts() {

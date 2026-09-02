@@ -370,10 +370,16 @@ function renderNewCustomerStep() {
 // two different rows for "the same" product — since the cart is keyed by
 // product_id, only the last one edited would actually stick. Collapse them
 // into a single row per product_id.
+// A row is only "the same product" when product_id + product_name + model_no
+// ALL match — if even one differs, it's a different, independent product and
+// gets its own row and its own cart line. (Same rule as orders.js.)
+function rowKeyFor(p) { return `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`; }
+
 function dedupeProducts(rawProducts) {
   const map = new Map();
   for (const p of rawProducts) {
-    if (!map.has(p.product_id)) map.set(p.product_id, { ...p });
+    const key = rowKeyFor(p);
+    if (!map.has(key)) map.set(key, { ...p });
   }
   return Array.from(map.values());
 }
@@ -431,17 +437,18 @@ function renderProductsStep() {
   const rowsBox = document.getElementById('prodRows');
 
   function productRowHtml(p) {
-    const cartLine = orderWiz.cart[p.product_id];
+    const key = rowKeyFor(p);
+    const cartLine = orderWiz.cart[key];
     const qtyInCart = cartLine?.quantity ?? '';
     const priceInCart = cartLine?.price ?? '';
     return `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' — ' + p.model_no : ''}</small></td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
-              placeholder="0" data-product-id="${p.product_id}" class="qtyInput"
+              placeholder="0" data-row-key="${key}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
         <td><input type="number" min="0" inputmode="decimal" value="${priceInCart}"
-              placeholder="₹0" data-product-id="${p.product_id}" class="priceInput"
+              placeholder="₹0" data-row-key="${key}" class="priceInput"
               style="width:85px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
       </tr>`;
   }
@@ -465,17 +472,18 @@ function renderProductsStep() {
   // Price is entered manually here instead of being pulled from the catalog
   // — the cart line is only ever built (or updated) from whatever is
   // currently in the row's Qty and Price fields, not from p.price.
-  function syncRowToCart(productId, p) {
-    const qtyInp = rowsBox.querySelector(`.qtyInput[data-product-id="${productId}"]`);
-    const priceInp = rowsBox.querySelector(`.priceInput[data-product-id="${productId}"]`);
+  function syncRowToCart(key, p) {
+    const qtyInp = rowsBox.querySelector(`.qtyInput[data-row-key="${key}"]`);
+    const priceInp = rowsBox.querySelector(`.priceInput[data-row-key="${key}"]`);
     const qty = computeTypedQty(qtyInp);
 
-    if (qty === null || qty <= 0) { delete orderWiz.cart[productId]; return; }
+    if (qty === null || qty <= 0) { delete orderWiz.cart[key]; return; }
 
     const price = computeTypedPrice(priceInp) ?? 0;
-    orderWiz.cart[productId] = {
+    orderWiz.cart[key] = {
       product_id: p.product_id,
       product_name: p.product_name,
+      model_no: p.model_no || '',
       price,
       tax_rate: Number(p.tax_rate) || 0,
       quantity: qty
@@ -485,10 +493,10 @@ function renderProductsStep() {
   rowsBox.addEventListener('input', (e) => {
     const inp = e.target.closest('.qtyInput, .priceInput');
     if (!inp) return;
-    const productId = inp.dataset.productId;
-    const p = products.find(x => x.product_id === productId);
+    const key = inp.dataset.rowKey;
+    const p = products.find(x => rowKeyFor(x) === key);
     if (!p) return;
-    syncRowToCart(productId, p);
+    syncRowToCart(key, p);
   });
 
   function currentCategoryProducts() {
@@ -653,7 +661,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     customer_id: orderWiz.customerId || '',
     customer: orderWiz.customer || {},
     items: Object.values(orderWiz.cart).map(i => ({
-      product_id: i.product_id, product_name: i.product_name,
+      product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
       quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
     })),
     payment_mode: mode,

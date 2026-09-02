@@ -717,13 +717,23 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
     inventory_db = inventory_manager()
 
-    # pre-check availability for every line before mutating any inventory
+    # pre-check availability for every line before mutating any inventory.
+    # Two order lines can now share the same product_id (same product,
+    # different model_no lots), so check the SUMMED quantity per product_id
+    # against stock — not each line in isolation — otherwise two lines that
+    # individually look fine (e.g. 80 + 80 when only 100 are in stock) could
+    # both pass the check and only fail/oversell later during allocation.
+    qty_by_product_id = {}
     for item in items:
-        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item["product_id"])
-        if available < item["quantity"]:
+        qty_by_product_id[item["product_id"]] = qty_by_product_id.get(item["product_id"], 0) + item["quantity"]
+
+    for product_id, total_qty in qty_by_product_id.items():
+        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, product_id)
+        if available < total_qty:
+            sample_name = next((it.get("product_name", product_id) for it in items if it["product_id"] == product_id), product_id)
             raise HTTPException(
                 status_code=400,
-                detail=f"insufficient stock for {item.get('product_name', item['product_id'])}: only {available} available"
+                detail=f"insufficient stock for {sample_name}: only {available} available"
             )
 
     order_items = []
@@ -902,7 +912,38 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
         # so a discount-only edit still needs to fall into the recompute branch below
         # instead of leaving a stale total_mrp.
         discount_touched = "discount" in updated
-        if touched_item_fields or discount_touched:
+
+        if "items" in updated:
+            # Full multi-item replace from the Edit Order modal — every item
+            # in the order can now be edited (qty/price/tax/serials), not
+            # just items[0], and each item keeps its own price instead of
+            # sharing one combined price across the whole order.
+            new_items = updated.pop("items")
+            if not new_items:
+                raise HTTPException(status_code=400, detail="order must contain at least one product")
+
+            computed_items = []
+            for raw_item in new_items:
+                item = dict(raw_item)
+                quantity = item.get("quantity", 0)
+                price = item.get("price", 0)
+                tax_rate = item.get("tax_rate", 0)
+                line_amount = price * quantity
+                line_tax = line_amount * tax_rate / 100
+                item["line_amount"] = line_amount
+                item["line_tax"] = line_tax
+                item["line_total"] = line_amount + line_tax
+                computed_items.append(item)
+
+            updated["items"] = computed_items
+            discount = updated.get("discount", order.get("discount", 0))
+            subtotal = sum(i.get("line_amount", 0) for i in computed_items)
+            tax_total = sum(i.get("line_tax", 0) for i in computed_items)
+            updated["subtotal"] = subtotal
+            updated["tax_total"] = tax_total
+            updated["total_mrp"] = subtotal + tax_total - discount
+
+        elif touched_item_fields or discount_touched:
             items = order.get("items", [])
             if not items:
                 raise HTTPException(status_code=400, detail="order has no items to edit")

@@ -808,6 +808,28 @@ function renderProductCartStep() {
   const body = allocModalBody();
   allocWizTitle(`Products for ${allocWiz.salesPerson?.name ?? ''}`);
   const products = allocState.products;
+
+  // BUG FIX (same as orders.js): inventory keeps one document per lot, and
+  // the same product_id can appear on several rows with a different
+  // product_name/model_no. A row/cart-line is only "the same product" when
+  // product_id + product_name + model_no ALL match — otherwise it's a
+  // different, independent product and needs its own row + cart entry.
+  const rowKey = (p) => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
+  const totalQtyByKey = new Map();
+  for (const p of products) {
+    const key = rowKey(p);
+    totalQtyByKey.set(key, (totalQtyByKey.get(key) || 0) + (Number(p.quantity) || 0));
+  }
+  const stockFor = (p) => totalQtyByKey.get(rowKey(p)) ?? (Number(p.quantity) || 0);
+  function dedupeByRowKey(list) {
+    const seen = new Map();
+    for (const p of list) {
+      const key = rowKey(p);
+      if (!seen.has(key)) seen.set(key, p);
+    }
+    return [...seen.values()];
+  }
+
   body.innerHTML = `
     <input id="allocProdFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
@@ -824,19 +846,27 @@ function renderProductCartStep() {
 
   const rowsBox = document.getElementById('allocProdRows');
   const renderRows = (list) => {
-    rowsBox.innerHTML = list.map(p => `
+    const rows = dedupeByRowKey(list);
+    rowsBox.innerHTML = rows.map(p => {
+      const key = rowKey(p);
+      const stock = stockFor(p);
+      return `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' · ' + p.model_no : ''}</small></td>
-        <td>${p.quantity ?? 0}</td>
-        <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${allocWiz.cart[p.product_id]?.quantity ?? 0}"
-              data-id="${p.product_id}" class="allocQtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
-      </tr>`).join('');
+        <td>${stock}</td>
+        <td><input type="number" min="0" max="${stock}" value="${allocWiz.cart[key]?.quantity ?? 0}"
+              data-row-key="${key}" class="allocQtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+      </tr>`;
+    }).join('');
     rowsBox.querySelectorAll('.allocQtyInput').forEach(inp => inp.addEventListener('input', () => {
-      const p = list.find(x => x.product_id === inp.dataset.id);
-      const qty = Math.max(0, Math.min(Number(inp.value) || 0, Number(p.quantity) || 0));
+      const key = inp.dataset.rowKey;
+      const p = rows.find(x => rowKey(x) === key);
+      if (!p) return;
+      const stock = stockFor(p);
+      const qty = Math.max(0, Math.min(Number(inp.value) || 0, stock));
       inp.value = qty;
-      if (qty > 0) allocWiz.cart[p.product_id] = { product_id: p.product_id, product_name: p.product_name, quantity: qty };
-      else delete allocWiz.cart[p.product_id];
+      if (qty > 0) allocWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, quantity: qty };
+      else delete allocWiz.cart[key];
     }));
   };
   renderRows(products);
