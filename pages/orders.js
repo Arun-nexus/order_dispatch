@@ -82,6 +82,11 @@ function statusClass(status) {
   return map[status] || 'pending';
 }
 
+function statusLabel(status) {
+  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled' };
+  return map[status] || status || '';
+}
+
 function orderCreatorLabel(o) {
   const c = o.creator;
   if (!c) return '-';
@@ -102,7 +107,7 @@ function renderOrdersTable(orders) {
   tbody.innerHTML = '';
 
   const role = getRole();
-  const canManage = role === 'admin' || role === 'employee';
+  const canManage = role === 'admin' || role === 'accounts';
 
   pageRows.forEach(o => {
     const tr = document.createElement('tr');
@@ -131,7 +136,7 @@ function renderOrdersTable(orders) {
       <td>${companyName}</td>
       <td>${o.payment_mode ?? ''}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="${statusClass(o.status)}">${o.status ?? ''}</span></td>
+      <td><span class="${statusClass(o.status)}">${statusLabel(o.status)}</span></td>
       <td>₹${o.total_mrp ?? o.price ?? 0}</td>
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
@@ -333,10 +338,15 @@ function openOrderStatusModal(o) {
   if (!modal) return;
   const select = modal.querySelector('select');
   const reasonBox = modal.querySelector('.cancel-reason');
+  const remarkBox = modal.querySelector('.pending-remark');
   if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.status);
   if (reasonBox) {
     reasonBox.value = o.status === 'cancelled' ? (o.cancel_reason || '') : '';
     reasonBox.style.display = o.status === 'cancelled' ? 'block' : 'none';
+  }
+  if (remarkBox) {
+    remarkBox.value = o.status === 'placed' ? (o.remark || '') : '';
+    remarkBox.style.display = o.status === 'placed' ? 'block' : 'none';
   }
   modal.style.display = 'flex';
 }
@@ -585,8 +595,9 @@ function openViewOrderModal(o) {
       </tr>`).join('')}</tbody>
     </table>` : ''}
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
-    <div class="detail"><small>Status</small><p>${o.status ?? ''}</p></div>
+    <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
+    <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Warranty</small><p>${(o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +₹${o.warranty_charge ?? 0})` : 'Standard (1 Year)'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
@@ -608,9 +619,11 @@ function wireDetailModals() {
   if (statusForm) {
     const statusSelect = statusForm.querySelector('select');
     const reasonBox = statusForm.querySelector('.cancel-reason');
-    if (statusSelect && reasonBox) {
+    const remarkBox = statusForm.querySelector('.pending-remark');
+    if (statusSelect) {
       statusSelect.addEventListener('change', () => {
-        reasonBox.style.display = statusSelect.value === 'cancelled' ? 'block' : 'none';
+        if (reasonBox) reasonBox.style.display = statusSelect.value === 'cancelled' ? 'block' : 'none';
+        if (remarkBox) remarkBox.style.display = statusSelect.value === 'placed' ? 'block' : 'none';
       });
     }
     statusForm.addEventListener('submit', async e => {
@@ -618,12 +631,14 @@ function wireDetailModals() {
       const select = statusForm.querySelector('select');
       const newStatus = select.value;
       const reason = reasonBox ? reasonBox.value.trim() : '';
+      const remark = remarkBox ? remarkBox.value.trim() : '';
       if (newStatus === 'cancelled' && !reason) {
         alert('Please provide a reason for cancellation.');
         return;
       }
       const updated_order_value = { status: newStatus };
       if (newStatus === 'cancelled') updated_order_value.cancel_reason = reason;
+      if (newStatus === 'placed') updated_order_value.remark = remark;
       try {
         const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
           method: 'POST',
@@ -1314,7 +1329,7 @@ function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 // ---------- Order Requests (raised by distributors) ----------
 async function loadOrderRequests() {
   const role = getRole();
-  if (role !== 'admin' && role !== 'employee') return;
+  if (role !== 'admin' && role !== 'accounts') return;
   try {
     const res = await apiFetch('/request/');
     if (!res.ok) throw new Error('failed to fetch requests');

@@ -91,6 +91,11 @@ function statusClass(status) {
   return map[status] || 'pending';
 }
 
+function statusLabel(status) {
+  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled' };
+  return map[status] || status || '';
+}
+
 function renderTable(orders) {
   const sorted = [...orders].sort((a, b) =>
     new Date(b.order_date || b.created_at || 0) - new Date(a.order_date || a.created_at || 0));
@@ -123,7 +128,7 @@ function renderTable(orders) {
       <td>${o.payment_mode ?? ''}</td>
       <td>₹${o.total_mrp ?? 0}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="${statusClass(o.status)}">${o.status ?? ''}</span></td>
+      <td><span class="${statusClass(o.status)}">${statusLabel(o.status)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${o.remark}</small>` : ''}</td>
       <td><button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button></td>`;
     tbody.appendChild(tr);
   });
@@ -215,7 +220,8 @@ function openViewOrderModal(o) {
       <tbody>${itemsRows}</tbody>
     </table>
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
-    <div class="detail"><small>Status</small><p>${o.status ?? ''}</p></div>
+    <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
+    <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
 
@@ -679,7 +685,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     if (!res.ok) throw new Error(data.detail || 'request failed');
     document.getElementById('orderModal').style.display = 'none';
     resetOrderWiz();
-    alert('Order request sent — admin/employee will review and approve it.');
+    alert('Order request sent — admin/accounts will review and approve it.');
     await loadOrders();
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
