@@ -537,7 +537,7 @@ VALID_PAYMENT_MODES = {"Credit", "NetBanking", "UPI", "Cheque", "DemandDraft", "
 
 
 def _raise_media_review_request(service_id: str, raised_by: str):
-    """Creates a 'media_review' request so admin/employee get a bell notification
+    """Creates a 'media_review' request so admin/accounts get a bell notification
     to download the uploaded video. Approving it confirms the download and clears
     the video from the database; rejecting it discards the video without keeping it."""
     try:
@@ -764,7 +764,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
 
 @app.post("/order/create_order/")
-async def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         order_id = _fulfill_order(
             customer_id=request.customer_id,
@@ -804,7 +804,7 @@ async def track_order(order_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/order/confirm_delivery/{order_id}")
-async def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = order_manager()
         result = db.update(
@@ -862,7 +862,7 @@ async def delete_order(order_id: str, user: dict = Depends(require_role("admin")
 
 
 @app.post("/order/update/{order_id}")
-async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "employee"))):
+async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = order_manager()
         updated = dict(updated_value.updated_order_value)
@@ -1094,7 +1094,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
 
 
 @app.get("/shipment/")
-async def shipment(user: dict = Depends(require_role("admin", "employee"))):
+async def shipment(user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         dataset = db.get_data(collection_name=SHIPMENT_COLLECTION, query={})
@@ -1106,7 +1106,7 @@ async def shipment(user: dict = Depends(require_role("admin", "employee"))):
 
 
 @app.get("/shipment/{shipment_id}")
-async def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         result = db.shipment_tracking(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id)
@@ -1119,7 +1119,7 @@ async def track_shipment(shipment_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/shipment/create")
-async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         shipment_dict = {
             "company_name": request.company_name,
@@ -1159,7 +1159,7 @@ async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(r
 
 
 @app.post("/shipment/mark_received/{shipment_id}")
-async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1192,7 +1192,7 @@ async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequ
 
 
 @app.post("/shipment/update/{shipment_id}")
-async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1231,7 +1231,7 @@ async def delete_shipment(shipment_id: str, user: dict = Depends(require_role("a
 # =========================================================
 
 @app.get("/assembly/")
-async def assembly(user: dict = Depends(require_role("admin", "employee"))):
+async def assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         dataset = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={})
@@ -1243,7 +1243,7 @@ async def assembly(user: dict = Depends(require_role("admin", "employee"))):
 
 
 @app.get("/assembly/available_parts")
-async def available_parts_for_assembly(user: dict = Depends(require_role("admin", "employee"))):
+async def available_parts_for_assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     """
     Spare parts currently sitting in inventory — the pool an assembly's parts
     are pulled from. This stock is fed by shipments: a shipment part marked
@@ -1282,7 +1282,7 @@ async def available_parts_for_assembly(user: dict = Depends(require_role("admin"
 
 
 @app.get("/assembly/{assembly_id}")
-async def track_assembly(assembly_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def track_assembly(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         result = db.assembly_tracking(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
@@ -1295,7 +1295,7 @@ async def track_assembly(assembly_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/assembly/create")
-async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         parts_used = [part.dict() for part in request.parts_used]
 
@@ -1406,7 +1406,7 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
 
 
 @app.post("/assembly/mark_completed/{assembly_id}")
-async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1448,7 +1448,7 @@ async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require
 
 
 @app.post("/assembly/update/{assembly_id}")
-async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1606,7 +1606,7 @@ def migrate_stale_dispatch_media():
 
 
 @app.get("/dispatch/")
-async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))):
+async def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         migrate_stale_dispatch_media()
         odb = order_manager()
@@ -1641,7 +1641,7 @@ async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))
 
 
 @app.post("/dispatch/confirm/order/{order_id}")
-async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = order_manager()
         matches = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
@@ -1672,7 +1672,7 @@ async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest,
 
 
 @app.post("/dispatch/confirm/spare_part/{allocation_id}")
-async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -1712,7 +1712,7 @@ async def services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/services/create")
-async def create_service(request: ServiceRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_service(request: ServiceRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         service = service_detail(product_id=request.product_id, serial_no=request.serial_no)
         service.add_service(
@@ -1752,7 +1752,7 @@ async def delete_service(service_id: str, user: dict = Depends(require_role("adm
 
 
 @app.post("/service/update/{service_id}")
-async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.update_service_status(
@@ -1776,7 +1776,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
                 logging.error(f"service {service_id} completed but faulty-part swap failed: {swap_err}")
 
         # auto-resolve any pending status_update requests raised for this service,
-        # since admin/employee just applied the change directly from the Service page
+        # since admin/accounts just applied the change directly from the Service page
         req_db = request_manager()
         pending = req_db.get_data(collection_name=REQUESTS_COLLECTION,
                                    query={"request_type": "status_update", "status": "pending",
@@ -1793,7 +1793,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
 
 
 @app.post("/service/request_status_update/{service_id}")
-async def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+async def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         req = request_manager(
             request_type="status_update",
@@ -1828,7 +1828,7 @@ async def my_services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/service/update_charges/{service_id}")
-async def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail()
         db.set_service_charges(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, service_charges=request.service_charges)
@@ -1839,7 +1839,7 @@ async def update_service_charges(service_id: str, request: ServiceChargeRequest,
 
 
 @app.post("/service/upload_media/{service_id}")
-async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         db = service_detail()
         db.attach_media(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, image=request.image, video=request.video)
@@ -1854,7 +1854,7 @@ async def upload_service_media(service_id: str, request: ServiceMediaRequest, us
 
 
 @app.post("/service/request_spare_part/{service_id}")
-async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         db = service_detail()
         db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=request.note)
@@ -1873,7 +1873,7 @@ async def request_spare_part(service_id: str, request: SparePartRequest, user: d
 
 
 @app.post("/service/manager_confirm/{service_id}")
-async def manager_confirm(service_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def manager_confirm(service_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.manager_confirm_return(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -1884,7 +1884,7 @@ async def manager_confirm(service_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/service/extend_warranty/{service_id}")
-async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.extend_warranty(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, warranty_until=request.warranty_until)
@@ -1925,7 +1925,7 @@ async def inventory(user: dict = Depends(get_current_user)):
 
 
 @app.post("/inventory/create")
-async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
@@ -1962,7 +1962,7 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
 
 
 @app.post("/inventory/update/{product_id}")
-async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = inventory_manager()
         match_query = {"product_id": product_id}
@@ -2114,7 +2114,7 @@ async def delete_product(product_id: str, model_no: Optional[str] = None, user: 
 
 
 @app.post("/inventory/repair/{product_id}")
-async def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin", "employee"))):
+async def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,
@@ -2171,7 +2171,7 @@ async def repair_damaged_product(product_id: str, model_no: Optional[str] = None
 async def customers(user: dict = Depends(get_current_user)):
     try:
         db = customer_manager()
-        if user["role"] in ("admin", "employee"):
+        if user["role"] in ("admin", "accounts"):
             dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
         elif user["role"] == "distributor":
             acc_db = login()
@@ -2203,7 +2203,7 @@ async def search_customer(term: str = "", user: dict = Depends(get_current_user)
 
 
 @app.post("/customer/create")
-async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "employee", "distributor"))):
+async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
     try:
         new_customer = customer_manager(
             company_name=request.company_name,
@@ -2242,7 +2242,7 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
 
 
 @app.post("/customer/update/{customer_id}")
-async def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = customer_manager()
         result = db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
@@ -2283,7 +2283,7 @@ async def search_salesperson(term: str = "", user: dict = Depends(get_current_us
 
 
 @app.post("/salesperson/create")
-async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         new_sp = sales_person_manager(
             name=request.name,
@@ -2323,7 +2323,7 @@ async def active_services(user: dict = Depends(get_current_user)):
 
 
 @app.get("/service/available_hologram_parts")
-async def available_hologram_parts(user: dict = Depends(require_role("admin", "employee"))):
+async def available_hologram_parts(user: dict = Depends(require_role("admin", "accounts"))):
     """
     Powers the "Update Status" -> Completed -> spare part swap form on the
     Service page: instead of letting the technician type a free-text new
@@ -2365,7 +2365,7 @@ async def allocations(user: dict = Depends(get_current_user)):
 
 
 @app.post("/allocation/send_to_dispatch/{allocation_id}")
-async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -2392,7 +2392,7 @@ async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(r
 
 
 @app.post("/allocation/report_damage/{allocation_id}")
-async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "employee", "distributor"))):
+async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
     try:
         if not request.image:
             raise HTTPException(status_code=400, detail="a photo of the damaged product is required")
@@ -2460,7 +2460,7 @@ async def my_allocations(user: dict = Depends(require_role("distributor"))):
 
 def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_by: str):
     """Resolves/creates the customer, deducts stock + serials from inventory, and records
-    the demo_unit allocation. Shared by the direct admin/employee endpoint and by
+    the demo_unit allocation. Shared by the direct admin/accounts endpoint and by
     /request/approve/{request_id} when a distributor's request is approved."""
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product")
@@ -2523,7 +2523,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
 
 
 @app.post("/allocation/create_demo")
-async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         allocation_id = _fulfill_demo_unit(
             customer_id=request.customer_id,
@@ -2593,7 +2593,7 @@ async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = De
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
-        return {"message": "request raised successfully, waiting for admin/employee approval", "request_id": req.request_id}
+        return {"message": "request raised successfully, waiting for admin/accounts approval", "request_id": req.request_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -2624,7 +2624,7 @@ async def raise_order_request(request: OrderRequestModel, user: dict = Depends(r
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
-        return {"message": "request sent, waiting for admin/employee approval", "request_id": req.request_id}
+        return {"message": "request sent, waiting for admin/accounts approval", "request_id": req.request_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -2650,7 +2650,7 @@ async def raise_service_request(request: ServiceRequestModel, user: dict = Depen
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
-        return {"message": "service request sent, waiting for admin/employee approval", "request_id": req.request_id}
+        return {"message": "service request sent, waiting for admin/accounts approval", "request_id": req.request_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -2659,7 +2659,7 @@ async def raise_service_request(request: ServiceRequestModel, user: dict = Depen
 
 
 @app.get("/request/")
-async def all_requests(user: dict = Depends(require_role("admin", "employee"))):
+async def all_requests(user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = request_manager()
         dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={})
@@ -2681,7 +2681,7 @@ async def my_requests(user: dict = Depends(get_current_user)):
 
 
 @app.post("/request/approve/{request_id}")
-async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -2740,7 +2740,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and service created", "service_id": service.service_id}
 
-        # media_review: approving means admin/employee confirmed they downloaded the
+        # media_review: approving means admin/accounts confirmed they downloaded the
         # video — it's cleared from the database afterwards to free up storage.
         if req["request_type"] == "media_review":
             service_id = req["details"].get("service_id")
@@ -2752,7 +2752,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                            status="approved", resolved_by=user["username"])
             return {"message": "video download confirmed and removed from the database"}
 
-        # status_update: technician-raised status change, applied only on admin/employee approval
+        # status_update: technician-raised status change, applied only on admin/accounts approval
         if req["request_type"] == "status_update":
             details = req["details"]
             svc_db = service_detail(product_id="", serial_no="")
@@ -2804,7 +2804,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/request/reject/{request_id}")
-async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "employee"))):
+async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -2831,7 +2831,7 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
 
 
 @app.post("/allocation/create")
-async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         if not request.items and not request.spare_part:
             raise HTTPException(status_code=400, detail="add at least one product or a spare part")
@@ -2932,17 +2932,8 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
 
 @app.post("/allocation/return/{allocation_id}")
-async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "employee", "distributor"))):
-    """
-    Every allocation — product or spare part — now returns in one shot.
-    Partial returns were removed: since each product allocation document
-    represents a single allocated unit (quantity=1, one serial number),
-    there's nothing left to split — the row is either returned or it isn't.
+async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
 
-    If a damage report was filed on this allocation before it's returned,
-    the returned item(s) are also filed into inventory as "damaged" product
-    entries (kept non-fatal - a hiccup here doesn't roll back the return).
-    """
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -2993,14 +2984,7 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
                         if not product_name or qty <= 0:
                             continue
                         original_product_id = item.get("product_id") or ""
-                        # Damaged stock must NEVER be filed under the same product_id as
-                        # live sellable stock: get_available_quantity()/allocate_units()
-                        # sum and pull units purely by product_id, with no product_type
-                        # filter — reusing the original id here would let this damaged,
-                        # returned unit be counted as available and shipped out again on
-                        # a future order. Always mint a fresh DMG- id (same as the
-                        # spare_part branch above) and keep the original id in the reason
-                        # for traceability.
+
                         product_id = f"DMG-{uuid.uuid4().hex[:8].upper()}"
                         item_reason = reason + (f" (original product_id: {original_product_id})" if original_product_id else "")
                         inventory_manager(

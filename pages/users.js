@@ -25,15 +25,17 @@ function renderCards() {
   const users = userState.users;
   document.getElementById('cardTotal').textContent = users.length;
   document.getElementById('cardAdmins').textContent = users.filter(u => u.role === 'admin').length;
-  document.getElementById('cardEmployees').textContent = users.filter(u => u.role === 'employee').length;
+  document.getElementById('cardEmployees').textContent = users.filter(u => u.role === 'accounts').length;
   document.getElementById('cardTechnicians').textContent = users.filter(u => u.role === 'technician').length;
   document.getElementById('cardDistributors').textContent = users.filter(u => u.role === 'distributor').length;
 }
 
 function roleBadgeClass(role) {
   if (role === 'admin') return 'high';
-  if (role === 'employee') return 'medium';
+  if (role === 'accounts') return 'medium';
   if (role === 'technician') return 'medium';
+  if (role === 'service_manager') return 'medium';
+  if (role === 'assembly') return 'medium';
   return 'high';
 }
 
@@ -115,7 +117,9 @@ function openUserModal(existingUser) {
       <select name="role" id="roleSelect" required ${isEdit ? 'disabled style="background:#f3f4f6;"' : ''}>
         <option value="">Select Role</option>
         <option value="admin" ${existingUser?.role === 'admin' ? 'selected' : ''}>Admin</option>
-        <option value="employee" ${existingUser?.role === 'employee' ? 'selected' : ''}>Employee</option>
+        <option value="accounts" ${existingUser?.role === 'accounts' ? 'selected' : ''}>Accounts</option>
+        <option value="service_manager" ${existingUser?.role === 'service_manager' ? 'selected' : ''}>Service Manager</option>
+        <option value="assembly" ${existingUser?.role === 'assembly' ? 'selected' : ''}>Assembly</option>
         <option value="technician" ${existingUser?.role === 'technician' ? 'selected' : ''}>Technician</option>
         <option value="distributor" ${existingUser?.role === 'distributor' ? 'selected' : ''}>Distributor</option>
       </select>

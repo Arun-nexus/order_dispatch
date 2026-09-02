@@ -73,7 +73,9 @@
               <select id="role" required>
                 <option value="">Select Your User Type</option>
                 <option value="admin">Admin</option>
-                <option value="employee">Employee</option>
+                <option value="accounts">Accounts</option>
+                <option value="service_manager">Service Manager</option>
+                <option value="assembly">Assembly</option>
                 <option value="technician">Technician</option>
                 <option value="distributor">Distributor</option>
               </select>
@@ -103,7 +105,9 @@
       const role = localStorage.getItem('acer_role');
       const roleHome = {
         admin: 'main_dashboard.html',
-        employee: 'main_dashboard.html',
+        accounts: 'main_dashboard.html',
+        service_manager: 'pages/service.html',
+        assembly: 'pages/assembly.html',
         technician: 'pages/technician.html',
         distributor: 'pages/distributor.html'
       };
@@ -138,7 +142,9 @@
 
         const roleHome = {
           admin: 'main_dashboard.html',
-          employee: 'main_dashboard.html',
+          accounts: 'main_dashboard.html',
+          service_manager: 'pages/service.html',
+          assembly: 'pages/assembly.html',
           technician: 'pages/technician_dashboard.html',
           distributor: 'pages/distributor.html'
         };
