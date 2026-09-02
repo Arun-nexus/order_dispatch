@@ -819,6 +819,31 @@ async def confirm_delivery(order_id: str, user: dict = Depends(require_role("adm
 async def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = order_manager()
+        existing = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
+        # Deleting an order removes the record entirely, so — same reasoning as
+        # cancelling — the stock/serials it reserved at creation time must go
+        # back into inventory, or it's permanently lost from stock even though
+        # nothing physically shipped. Skip if it was already cancelled: that
+        # restock already happened via /order/update.
+        if existing and existing[0].get("status") != "cancelled" and not existing[0].get("dispatch"):
+            try:
+                for item in existing[0].get("items", []):
+                    product_id = item.get("product_id")
+                    qty = item.get("quantity", 0) or 0
+                    if not product_id or qty <= 0:
+                        continue
+                    inventory_manager(
+                        product_name=item.get("product_name", ""),
+                        product_id=product_id,
+                        quantity=qty,
+                        model_no=item.get("model_no", ""),
+                        price=item.get("price", 0),
+                        tax_rate=item.get("tax_rate", 0),
+                        serial_numbers=item.get("serial_numbers", []) or [],
+                    ).add_or_merge(collection_name=INVENTORY_COLLECTION)
+                logging.info(f"order {order_id} deleted — items restocked to inventory")
+            except Exception as restock_err:
+                logging.error(f"order {order_id} deleted but restocking inventory failed: {restock_err}")
         db.delete(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
         return {"message": "order deleted", "order_id": order_id}
     except Exception as e:
@@ -836,6 +861,36 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
         if not existing:
             raise HTTPException(status_code=404, detail="no order found with this order_id")
         order = existing[0]
+
+        # Cancelling an order releases the stock/serials it reserved at creation
+        # time (_fulfill_order deducts inventory immediately, before delivery)
+        # back into inventory — otherwise every cancelled order's units are
+        # permanently lost from stock even though nothing physically shipped.
+        # Guarded on the order's CURRENT status so re-saving an already-cancelled
+        # order (e.g. editing the cancel reason) never restocks twice.
+        if updated.get("status") == "cancelled" and order.get("status") != "cancelled":
+            if order.get("dispatch"):
+                # already physically dispatched — nothing to give back to inventory
+                logging.info(f"order {order_id} cancelled after dispatch — inventory left untouched")
+            else:
+                try:
+                    for item in order.get("items", []):
+                        product_id = item.get("product_id")
+                        qty = item.get("quantity", 0) or 0
+                        if not product_id or qty <= 0:
+                            continue
+                        inventory_manager(
+                            product_name=item.get("product_name", ""),
+                            product_id=product_id,
+                            quantity=qty,
+                            model_no=item.get("model_no", ""),
+                            price=item.get("price", 0),
+                            tax_rate=item.get("tax_rate", 0),
+                            serial_numbers=item.get("serial_numbers", []) or [],
+                        ).add_or_merge(collection_name=INVENTORY_COLLECTION)
+                    logging.info(f"order {order_id} cancelled — items restocked to inventory")
+                except Exception as restock_err:
+                    logging.error(f"order {order_id} cancelled but restocking inventory failed: {restock_err}")
 
         # These fields actually live inside order["items"][0], not at the
         # top level of the order document — editing them has to go through
@@ -2896,7 +2951,17 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
                         qty = item.get("quantity", 0) or 0
                         if not product_name or qty <= 0:
                             continue
-                        product_id = item.get("product_id") or f"DMG-{uuid.uuid4().hex[:8].upper()}"
+                        original_product_id = item.get("product_id") or ""
+                        # Damaged stock must NEVER be filed under the same product_id as
+                        # live sellable stock: get_available_quantity()/allocate_units()
+                        # sum and pull units purely by product_id, with no product_type
+                        # filter — reusing the original id here would let this damaged,
+                        # returned unit be counted as available and shipped out again on
+                        # a future order. Always mint a fresh DMG- id (same as the
+                        # spare_part branch above) and keep the original id in the reason
+                        # for traceability.
+                        product_id = f"DMG-{uuid.uuid4().hex[:8].upper()}"
+                        item_reason = reason + (f" (original product_id: {original_product_id})" if original_product_id else "")
                         inventory_manager(
                             product_name=product_name,
                             product_id=product_id,
@@ -2904,7 +2969,7 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
                             purchase_date=today,
                             serial_numbers=item.get("serial_numbers", []) or [],
                             product_type="damaged",
-                            reason=reason,
+                            reason=item_reason,
                         ).add(collection_name=INVENTORY_COLLECTION)
 
                 logging.info(f"allocation {allocation_id}'s damaged item(s) filed into inventory as damaged product")
