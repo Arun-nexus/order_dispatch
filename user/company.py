@@ -6,7 +6,9 @@ import enum
 
 class login_role(str, enum.Enum):
     admin = "admin"
-    employee = "employee"
+    accounts = "accounts"
+    service_manager = "service_manager"
+    assembly = "assembly"
     technician = "technician"
     distributor = "distributor"
 
