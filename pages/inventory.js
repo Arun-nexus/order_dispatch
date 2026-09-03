@@ -67,9 +67,13 @@ function warrantyBadgeHtml(p) {
 }
 
 // serial numbers are optional for these types — accessories are sometimes
-// unserialized, and spare/service parts are tracked purely by quantity
+// unserialized, and spare/service parts are tracked purely by quantity.
+// Normalized (trim + lowercase) so a stray casing/whitespace difference
+// coming from the DB (e.g. legacy "Accessories") never falls through to
+// the strict serial-count-must-match-quantity path.
 function isSerialOptionalType(type) {
-  return type === 'accessories' || type === 'spare_parts' || type === 'service_parts';
+  const t = (type || '').trim().toLowerCase();
+  return t === 'accessories' || t === 'spare_parts' || t === 'service_parts';
 }
 
 // ---------- Reading serial numbers out of an uploaded Excel/CSV file ----------
@@ -182,7 +186,10 @@ function getFilteredInventory() {
 
 function applyRolePermissions() {
   const role = getRole();
-  const canManage = role === 'admin' || role === 'employee';
+  // matches the backend's require_role("service_manager", "admin", "accounts")
+  // on /inventory/create and /inventory/update — 'employee' isn't a real role,
+  // it was leftover from before roles were split into accounts/service_manager/assembly
+  const canManage = role === 'admin' || role === 'accounts' || role === 'service_manager';
   const canDelete = role === 'admin';
   if (!canManage) {
     const addBtn = document.querySelector('.add-product');
@@ -617,7 +624,13 @@ function openEditModal(p) {
   inputs[7].value = p.tax_rate ?? '';
 
   const typeSelect = document.getElementById('editProductType');
-  if (typeSelect) typeSelect.value = p.product_type || 'product';
+  if (typeSelect) {
+    const normalizedType = (p.product_type || 'product').trim().toLowerCase();
+    // guard against a value that doesn't match any <option> (legacy casing,
+    // stray whitespace, or an unrecognized type) leaving the select with no
+    // selection at all, which would silently disable the serial-optional bypass
+    typeSelect.value = [...typeSelect.options].some(o => o.value === normalizedType) ? normalizedType : 'product';
+  }
 
   invState.editHolograms = [...hologramNumbersOf(p)];
   invState.editHologramQuantity = Number(p.quantity) || 0;
