@@ -719,21 +719,28 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
     # pre-check availability for every line before mutating any inventory.
     # Two order lines can now share the same product_id (same product,
-    # different model_no lots), so check the SUMMED quantity per product_id
-    # against stock — not each line in isolation — otherwise two lines that
-    # individually look fine (e.g. 80 + 80 when only 100 are in stock) could
-    # both pass the check and only fail/oversell later during allocation.
-    qty_by_product_id = {}
+    # different model_no lots), so check the SUMMED quantity per (product_id,
+    # model_no) against stock — not each line in isolation — otherwise two
+    # lines that individually look fine (e.g. 80 + 80 when only 100 are in
+    # stock) could both pass the check and only fail/oversell later during
+    # allocation. Keying by model_no too (not product_id alone) matters just
+    # as much: two different variants (e.g. black vs grey) can share the same
+    # product_id, and lumping their stock together would let an order for one
+    # variant silently pass a check backed by the other variant's stock — and
+    # then, during allocation, pull serials/units from the wrong variant's lot.
+    qty_by_variant = {}
     for item in items:
-        qty_by_product_id[item["product_id"]] = qty_by_product_id.get(item["product_id"], 0) + item["quantity"]
+        key = (item["product_id"], item.get("model_no") or "")
+        qty_by_variant[key] = qty_by_variant.get(key, 0) + item["quantity"]
 
-    for product_id, total_qty in qty_by_product_id.items():
-        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, product_id)
+    for (product_id, model_no), total_qty in qty_by_variant.items():
+        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, product_id, model_no=model_no or None)
         if available < total_qty:
             sample_name = next((it.get("product_name", product_id) for it in items if it["product_id"] == product_id), product_id)
+            variant_note = f" (model {model_no})" if model_no else ""
             raise HTTPException(
                 status_code=400,
-                detail=f"insufficient stock for {sample_name}: only {available} available"
+                detail=f"insufficient stock for {sample_name}{variant_note}: only {available} available"
             )
 
     order_items = []
@@ -741,7 +748,8 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
         allocated_serials = inventory_db.allocate_units(
             collection_name=INVENTORY_COLLECTION,
             product_id=item["product_id"],
-            quantity=item["quantity"]
+            quantity=item["quantity"],
+            model_no=item.get("model_no") or None
         )
         order_item = dict(item)
         order_item["serial_numbers"] = allocated_serials
@@ -1975,12 +1983,20 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         current_type = existing[0].get("product_type", "product")
 
         updated_values = dict(request.updated_values)
-        effective_type = updated_values.get("product_type", current_type)
+        raw_effective_type = updated_values.get("product_type", current_type)
+        # normalize (lowercase + strip) so a stray case/whitespace mismatch — or a
+        # request that omits product_type — can never make an accessories/spare_parts/
+        # service_parts lot fall through to the strict "quantity must equal serial
+        # count" check below. Falls back to the type already on file if the request's
+        # value doesn't normalize to anything meaningful.
+        effective_type = (str(raw_effective_type or "").strip().lower()) or str(current_type or "product").strip().lower()
+
+        SERIAL_OPTIONAL_TYPES = ("accessories", "spare_parts", "service_parts")
 
         # serial numbers are optional for accessories / spare_parts / service_parts,
         # so quantity is free to move independently of the serial list for those
         # types — only sync serials with quantity for product/damaged
-        if effective_type in ("accessories", "spare_parts", "service_parts"):
+        if effective_type in SERIAL_OPTIONAL_TYPES or str(current_type or "").strip().lower() in SERIAL_OPTIONAL_TYPES:
             if request.new_serial_numbers:
                 if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
                     raise HTTPException(status_code=400, detail="new serial numbers must be unique")

@@ -141,9 +141,15 @@ class inventory_manager(mongodbclient):
             logging.error("product deletion was unsuccessful")
             raise Exception(e)
 
-    def get_available_quantity(self, collection_name, product_id):
+    def get_available_quantity(self, collection_name, product_id, model_no=None):
         try:
-            entries = self.get_data(collection_name=collection_name, query={"product_id": product_id})
+            query = {"product_id": product_id}
+            # model_no disambiguates between variants sharing the same product_id
+            # (e.g. black vs grey) — only filter by it when one was actually given,
+            # so callers that intentionally want the product_id-wide total still can
+            if model_no is not None:
+                query["model_no"] = model_no
+            entries = self.get_data(collection_name=collection_name, query=query)
             return sum(int(e.get("quantity", 0) or 0) for e in entries)
         except Exception as e:
             logging.error("checking available quantity failed!")
@@ -320,12 +326,17 @@ class inventory_manager(mongodbclient):
             logging.error("serial allocation failed!")
             raise Exception(e)
 
-    def allocate_units(self, collection_name, product_id, quantity):
+    def allocate_units(self, collection_name, product_id, quantity, model_no=None):
         """
         Deducts `quantity` units of product_id from inventory (oldest lots first) —
         for use anywhere a full quantity+serials list is recorded together (e.g. an
         order line or a demo-unit allocation line), as opposed to allocate_serials'
         one-record-per-serial callers which genuinely need every unit serialed.
+
+        model_no disambiguates between variants that share the same product_id
+        (e.g. the same product in black vs grey, each its own model_no lot) — when
+        given, only lots for that exact model_no are eligible, so a line ordered
+        for one variant can never silently pull stock/serials from another.
 
         Unlike allocate_serials, this does NOT require every lot to carry serial
         numbers: accessories/spare_parts/service_parts are allowed to be stocked
@@ -338,12 +349,15 @@ class inventory_manager(mongodbclient):
         Returns the list of serial numbers collected — this may be SHORTER than
         `quantity` (or empty) when the consumed lots weren't serial-tracked; that
         is expected and not an error. Raises only if total on-file quantity across
-        all lots is insufficient.
+        all matching lots is insufficient.
         """
         try:
+            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            if model_no is not None:
+                query["model_no"] = model_no
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_id": product_id, "quantity": {"$gt": 0}}
+                query=query
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 
@@ -374,9 +388,10 @@ class inventory_manager(mongodbclient):
                 remaining -= take
 
             if remaining > 0:
-                raise Exception(f"insufficient stock for product {product_id}, short by {remaining}")
+                variant_note = f" (model {model_no})" if model_no else ""
+                raise Exception(f"insufficient stock for product {product_id}{variant_note}, short by {remaining}")
 
-            logging.info(f"allocated {quantity} unit(s) ({len(allocated)} serialed) for product {product_id}")
+            logging.info(f"allocated {quantity} unit(s) ({len(allocated)} serialed) for product {product_id}{' model ' + model_no if model_no else ''}")
             return allocated
 
         except Exception as e:

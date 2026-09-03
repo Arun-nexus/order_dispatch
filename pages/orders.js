@@ -1,7 +1,7 @@
 const orderState = { orders: [], activeOrderId: null };
 const invLookup = { products: [] };
 let ordersPage = 1;
-const ORDERS_PAGE_SIZE = 7;
+const ORDERS_PAGE_SIZE = 10;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
