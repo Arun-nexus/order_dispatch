@@ -865,7 +865,7 @@ function renderProductCartStep() {
       const stock = stockFor(p);
       const qty = Math.max(0, Math.min(Number(inp.value) || 0, stock));
       inp.value = qty;
-      if (qty > 0) allocWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, quantity: qty };
+      if (qty > 0) allocWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, model_no: p.model_no || '', quantity: qty };
       else delete allocWiz.cart[key];
     }));
   };

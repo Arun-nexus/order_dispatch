@@ -183,6 +183,7 @@ class AllocationItem(BaseModel):
     product_id: str
     product_name: str
     quantity: int
+    model_no: str = ""
 
 
 class SparePartAllocation(BaseModel):
@@ -2881,10 +2882,14 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                 }
 
         inventory_db = inventory_manager()
+        # keyed by (product_id, model_no): two variants sharing the same
+        # product_id (e.g. black vs grey) must be checked/allocated against
+        # their own lot, not each other's stock — same fix as order fulfillment
         for item in request.items:
-            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id)
+            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id, model_no=item.model_no or None)
             if available < item.quantity:
-                raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}: only {available} available")
+                variant_note = f" (model {item.model_no})" if item.model_no else ""
+                raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}{variant_note}: only {available} available")
 
         # No more partial returns: every allocated unit becomes its own
         # allocation document (quantity=1, one serial number each) instead of
@@ -2896,7 +2901,8 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
             allocated_serials = inventory_db.allocate_serials(
                 collection_name=INVENTORY_COLLECTION,
                 product_id=item.product_id,
-                quantity=item.quantity
+                quantity=item.quantity,
+                model_no=item.model_no or None
             )
             for serial in allocated_serials:
                 unit_allocation = allocation_manager(

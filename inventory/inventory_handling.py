@@ -278,16 +278,24 @@ class inventory_manager(mongodbclient):
             logging.error("hologram number allocation failed!")
             raise Exception(e)
 
-    def allocate_serials(self, collection_name, product_id, quantity):
+    def allocate_serials(self, collection_name, product_id, quantity, model_no=None):
         """
         Pulls `quantity` serial numbers out of inventory for product_id (oldest lots first),
         decrementing each lot's quantity and removing the used serials. Returns the list of
         serial numbers allocated. Raises if stock is insufficient.
+
+        model_no disambiguates between variants that share the same product_id
+        (e.g. the same product in black vs grey, each its own model_no lot) — when
+        given, only lots for that exact model_no are eligible, so a request for
+        one variant can never silently pull serials from another.
         """
         try:
+            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            if model_no is not None:
+                query["model_no"] = model_no
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_id": product_id, "quantity": {"$gt": 0}}
+                query=query
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 
@@ -317,7 +325,8 @@ class inventory_manager(mongodbclient):
                 remaining -= take
 
             if remaining > 0:
-                raise Exception(f"insufficient stock for product {product_id}, short by {remaining}")
+                variant_note = f" (model {model_no})" if model_no else ""
+                raise Exception(f"insufficient stock for product {product_id}{variant_note}, short by {remaining}")
 
             logging.info(f"allocated {len(allocated)} serials for product {product_id}")
             return allocated
