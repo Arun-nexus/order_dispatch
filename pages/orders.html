@@ -289,6 +289,8 @@
         <input type="number" placeholder="Price">
         <input type="number" placeholder="Tax Rate (%)">
         <input type="number" placeholder="Discount">
+        <textarea class="edit-remark" placeholder="Remark for this edit (required)" rows="2" required
+          style="padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
         <select>
           <option value="Credit">Credit</option>
           <option value="Cheque">Cheque</option>
@@ -304,6 +306,18 @@
             style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Order History Modal (who created + who edited, with remarks) -->
+  <div id="orderHistoryModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Order History</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <div class="history-list" style="display:flex;flex-direction:column;gap:12px;"></div>
     </div>
   </div>
 
@@ -323,8 +337,6 @@
           <option value="cancelled">Cancelled</option>
         </select>
         <textarea class="cancel-reason" placeholder="Reason for cancellation" rows="3"
-          style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
-        <textarea class="pending-remark" placeholder="Remark for distributor (optional)" rows="3"
           style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
           <button type="button" class="cancel-btn"
