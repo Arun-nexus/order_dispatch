@@ -662,9 +662,11 @@ const wiz = {
   customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
   cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
   paymentMode: '',
+  paymentDetails: {},
   discount: 0,
   warrantyYears: 1,
-  warrantyCharge: 0
+  warrantyCharge: 0,
+  serialChoices: {}     // rowKey (product_id||product_name||model_no) -> [serial1, serial2, ...] one per unit, in order
 };
 
 const PAYMENT_MODES = [
@@ -681,9 +683,11 @@ function resetWizard() {
   wiz.customer = null;
   wiz.cart = {};
   wiz.paymentMode = '';
+  wiz.paymentDetails = {};
   wiz.discount = 0;
   wiz.warrantyYears = 1;
   wiz.warrantyCharge = 0;
+  wiz.serialChoices = {};
 }
 
 function injectCreateModal() {
@@ -1190,7 +1194,180 @@ function renderPaymentStep() {
   if (warrantyChargeInput) warrantyChargeInput.addEventListener('input', e => { wiz.warrantyCharge = Number(e.target.value) || 0; refreshGrandTotal(); });
 
   refreshGrandTotal();
-  document.getElementById('placeOrderBtn').addEventListener('click', () => submitOrder(modeSelect, extraBox));
+  document.getElementById('placeOrderBtn').addEventListener('click', () => proceedToSerialReview(modeSelect, extraBox));
+}
+
+// Validates payment step inputs (same checks submitOrder used to do up front),
+// stashes them on wiz, then moves to the serial-number review step instead of
+// submitting immediately.
+function proceedToSerialReview(modeSelect, extraBox) {
+  const mode = modeSelect.value;
+  if (!mode) { alert('Please select a payment mode.'); return; }
+
+  if (wiz.warrantyYears > 1 && (!wiz.warrantyCharge || wiz.warrantyCharge <= 0)) {
+    alert('Please enter the additional charge for the extended warranty.');
+    return;
+  }
+
+  let payment_details;
+  try {
+    payment_details = buildPaymentDetails(mode);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+
+  wiz.paymentMode = mode;
+  wiz.paymentDetails = payment_details;
+  renderSerialReviewStep();
+}
+
+// Step 5: review auto-fetched serial numbers, optionally swap any of them for
+// a different available serial before the order is actually placed.
+async function renderSerialReviewStep() {
+  wizardTitle('New Order — Review Serial Numbers');
+  const body = wizardBody();
+  body.innerHTML = `<p style="color:#94a3b8;">Loading available serial numbers...</p>`;
+
+  const cartItems = Object.values(wiz.cart);
+  const rowKeyOf = (i) => `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+
+  // fetch available serials once per distinct product_id+model_no in the cart
+  const availableByVariant = {};
+  await Promise.all(cartItems.map(async (item) => {
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    if (availableByVariant[variantKey]) return;
+    try {
+      const params = new URLSearchParams({ product_id: item.product_id, model_no: item.model_no || '' });
+      const res = await apiFetch(`/inventory/available_serials?${params.toString()}`);
+      const data = await res.json();
+      availableByVariant[variantKey] = data.serial_numbers || [];
+    } catch (err) {
+      availableByVariant[variantKey] = [];
+    }
+  }));
+
+  let html = `<p style="color:#64748b;margin-bottom:12px;font-size:13px;">
+    Each unit is auto-assigned the oldest available serial number. Pick a different one below if needed — search by typing in the box.
+  </p>`;
+
+  cartItems.forEach((item) => {
+    const rowKey = rowKeyOf(item);
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    const available = availableByVariant[variantKey] || [];
+    const needed = item.quantity;
+    const slots = Math.min(needed, available.length);
+
+    html += `<div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <strong>${item.product_name}${item.model_no ? ' · ' + item.model_no : ''}</strong> × ${needed}`;
+
+    if (!available.length) {
+      html += `<p style="font-size:12px;color:#94a3b8;margin-top:4px;">No serial numbers on file for this item — will ship unserialized.</p></div>`;
+      return;
+    }
+    if (needed > available.length) {
+      html += `<p style="font-size:12px;color:#d62828;margin-top:4px;">Only ${available.length} serial number(s) on file — the remaining ${needed - available.length} unit(s) will ship unserialized.</p>`;
+    }
+
+    const existingChoices = wiz.serialChoices[rowKey] || [];
+    for (let slot = 0; slot < slots; slot++) {
+      const defaultSerial = available[slot]; // same order the backend auto-allocates in
+      const chosen = existingChoices[slot] || defaultSerial;
+      html += `
+        <div style="margin-top:8px;">
+          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <input list="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="serialPickInput"
+                 data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
+                 style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+          <datalist id="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}">
+            ${available.map(sn => `<option value="${sn}">`).join('')}
+          </datalist>
+        </div>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button type="button" id="backBtn5" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="confirmSerialsBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Confirm &amp; Place Order</button>
+    </div>`;
+
+  body.innerHTML = html;
+  document.getElementById('backBtn5').addEventListener('click', renderPaymentStep);
+
+  // seed defaults into wiz.serialChoices so submit works even if the user
+  // never touches an input, then keep it in sync as they edit
+  body.querySelectorAll('.serialPickInput').forEach(inp => {
+    const rowKey = inp.dataset.rowKey;
+    const slot = Number(inp.dataset.slot);
+    if (!wiz.serialChoices[rowKey]) wiz.serialChoices[rowKey] = [];
+    wiz.serialChoices[rowKey][slot] = inp.value;
+    inp.addEventListener('change', () => {
+      // a chosen serial can't be reused for a different unit of the same item
+      const siblings = [...body.querySelectorAll(`.serialPickInput[data-row-key="${rowKey}"]`)];
+      const dup = siblings.find(s => s !== inp && s.value === inp.value && inp.value.trim() !== '');
+      if (dup) {
+        alert('This serial number is already selected for another unit of this item — pick a different one.');
+        inp.value = wiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      const variantKey = `${item_for(rowKey)?.product_id}||${item_for(rowKey)?.model_no || ''}`;
+      const available = availableByVariant[variantKey] || [];
+      if (inp.value.trim() && !available.includes(inp.value.trim())) {
+        alert('That serial number isn\'t in the available list for this product.');
+        inp.value = wiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      wiz.serialChoices[rowKey][slot] = inp.value.trim();
+    });
+  });
+
+  function item_for(rowKey) {
+    return cartItems.find(i => rowKeyOf(i) === rowKey);
+  }
+
+  document.getElementById('confirmSerialsBtn').addEventListener('click', finalizeSubmitOrder);
+}
+
+async function finalizeSubmitOrder() {
+  const payload = {
+    customer_id: wiz.customerId || '',
+    customer: wiz.customer || {},
+    items: Object.values(wiz.cart).map(i => {
+      const rowKey = `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+      const chosen = (wiz.serialChoices[rowKey] || []).filter(Boolean);
+      return {
+        product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
+        quantity: i.quantity, price: i.price, tax_rate: i.tax_rate,
+        // only send serial_numbers when we actually have one per unit —
+        // otherwise (unserialized accessories etc.) leave it empty so the
+        // backend falls back to its normal auto-allocation
+        serial_numbers: chosen.length === i.quantity ? chosen : []
+      };
+    }),
+    payment_mode: wiz.paymentMode,
+    payment_details: wiz.paymentDetails,
+    discount: wiz.discount || 0,
+    warranty_years: wiz.warrantyYears || 1,
+    warranty_charge: wiz.warrantyYears > 1 ? (wiz.warrantyCharge || 0) : 0
+  };
+
+  try {
+    const res = await apiFetch('/order/create_order/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'order creation failed');
+    closeModal('createModal');
+    resetWizard();
+    await loadOrders();
+    await loadInventoryForOrders();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }
 
 function renderPaymentExtra(mode, extraBox) {
@@ -1274,54 +1451,6 @@ function buildPaymentDetails(mode) {
     return { received_by };
   }
   return {};
-}
-
-async function submitOrder(modeSelect, extraBox) {
-  const mode = modeSelect.value;
-  if (!mode) { alert('Please select a payment mode.'); return; }
-
-  if (wiz.warrantyYears > 1 && (!wiz.warrantyCharge || wiz.warrantyCharge <= 0)) {
-    alert('Please enter the additional charge for the extended warranty.');
-    return;
-  }
-
-  let payment_details;
-  try {
-    payment_details = buildPaymentDetails(mode);
-  } catch (err) {
-    alert(err.message);
-    return;
-  }
-
-  const payload = {
-    customer_id: wiz.customerId || '',
-    customer: wiz.customer || {},
-    items: Object.values(wiz.cart).map(i => ({
-      product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
-      quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
-    })),
-    payment_mode: mode,
-    payment_details,
-    discount: wiz.discount || 0,
-    warranty_years: wiz.warrantyYears || 1,
-    warranty_charge: wiz.warrantyYears > 1 ? (wiz.warrantyCharge || 0) : 0
-  };
-
-  try {
-    const res = await apiFetch('/order/create_order/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'order creation failed');
-    closeModal('createModal');
-    resetWizard();
-    await loadOrders();
-    await loadInventoryForOrders();
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-  }
 }
 
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }

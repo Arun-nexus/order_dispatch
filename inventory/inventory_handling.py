@@ -108,6 +108,63 @@ class inventory_manager(mongodbclient):
             logging.error("adding/merging inventory entry failed!")
             raise Exception(e)
 
+    def restock_returned_units(self, collection_name, product_id, product_name, model_no, quantity, serial_numbers=None):
+        """
+        Used when a previously allocated (undamaged) unit is returned and needs
+        to go back into inventory. Adds `quantity` back onto the lot that
+        matches product_id + product_name + model_no exactly — same matching
+        as add_or_merge — so a returned unit of one variant is never merged
+        into a different variant's stock, and appends `serial_numbers` back
+        onto that lot's serial list.
+
+        Deliberately does NOT touch lot_no/supplier/price/tax_rate/purchase_date
+        the way add_or_merge does: add_or_merge is for the "Add Existing
+        Product" restock flow, where the user is re-entering fresh purchase
+        info for a new physical lot, so overwriting those fields is correct
+        there. A return isn't a new purchase — the original lot's purchase
+        metadata must be left exactly as it was.
+
+        If the original lot document no longer exists (e.g. it was deleted
+        after being fully allocated out), falls back to creating a minimal new
+        entry so the returned stock isn't silently lost.
+        """
+        try:
+            query = {"product_id": product_id, "product_name": product_name, "model_no": model_no or ""}
+            existing = self.get_data(collection_name=collection_name, query=query)
+            if existing:
+                entry = existing[0]
+                current_serials = entry.get("serial_numbers") or []
+                merged_serials = current_serials + list(serial_numbers or [])
+                new_quantity = int(entry.get("quantity", 0) or 0) + int(quantity or 0)
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"serial_numbers": merged_serials, "quantity": new_quantity}
+                )
+                logging.info(f"restocked {quantity} returned unit(s) into existing inventory entry for {product_id}")
+                return {"mode": "merged", "product_id": product_id, "quantity_added": quantity}
+
+            from datetime import datetime, timezone
+            fallback = inventory_manager(
+                product_name=product_name,
+                product_id=product_id,
+                model_no=model_no or "",
+                quantity=quantity,
+                purchase_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                lot_no="",
+                supplier="",
+                price="",
+                tax_rate=0,
+                serial_numbers=list(serial_numbers or []),
+                product_type="product",
+            )
+            logging.info(f"original lot for {product_id} no longer exists — created fallback entry for returned stock")
+            return fallback.add(collection_name=collection_name)
+
+        except Exception as e:
+            logging.error("restocking returned unit(s) failed!")
+            raise Exception(e)
+
     def update(self, collection_name, query, update_values, many=False):
         try:
             data = super().update_data(collection_name=collection_name, query=query,
@@ -278,7 +335,78 @@ class inventory_manager(mongodbclient):
             logging.error("hologram number allocation failed!")
             raise Exception(e)
 
-    def allocate_serials(self, collection_name, product_id, quantity, model_no=None):
+    def list_available_serials(self, collection_name, product_id, model_no=None):
+        """
+        Returns every serial number currently on file for product_id (optionally
+        scoped to a single model_no variant), oldest lot first — the exact same
+        order allocate_serials/allocate_units would consume them in. Used to
+        populate the order review step's serial-number picker, so the "default"
+        selection shown to the user matches what auto-allocation would have
+        picked, and the rest of the list is what's available to switch to.
+        """
+        try:
+            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            if model_no is not None:
+                query["model_no"] = model_no
+            entries = self.get_data(collection_name=collection_name, query=query)
+            entries.sort(key=lambda e: e.get("purchase_date") or "")
+            serials = []
+            for entry in entries:
+                serials.extend(entry.get("serial_numbers") or [])
+            return serials
+        except Exception as e:
+            logging.error("listing available serial numbers failed!")
+            raise Exception(e)
+
+    def allocate_specific_serials(self, collection_name, product_id, serial_numbers, model_no=None):
+        """
+        Deducts exactly the given serial_numbers (a manual/reviewed selection
+        from the order UI, as opposed to allocate_serials' auto oldest-first
+        pick) — one unit per serial, decrementing whichever lot each serial
+        actually belongs to. model_no scopes the search to a single variant's
+        lots, same as allocate_serials/allocate_units, so a serial can't be
+        pulled from the wrong variant.
+
+        Every serial must currently exist in some matching lot's serial_numbers
+        list; if any one of them isn't found (already allocated to another
+        order in the meantime, mistyped, or belongs to a different product),
+        the whole call raises before anything is deducted for THAT serial —
+        serials already processed earlier in the same call are not rolled
+        back, matching this codebase's existing non-transactional style
+        elsewhere (e.g. allocate_serials/allocate_units).
+        """
+        try:
+            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            if model_no is not None:
+                query["model_no"] = model_no
+            entries = self.get_data(collection_name=collection_name, query=query)
+
+            allocated = []
+            for serial in serial_numbers:
+                match = next((e for e in entries if serial in (e.get("serial_numbers") or [])), None)
+                if not match:
+                    variant_note = f" (model {model_no})" if model_no else ""
+                    raise Exception(f"serial number {serial} is not available for product {product_id}{variant_note}")
+
+                leftover_serials = [s for s in (match.get("serial_numbers") or []) if s != serial]
+                new_quantity = int(match.get("quantity", 0) or 0) - 1
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(match["_id"])},
+                    update_values={"serial_numbers": leftover_serials, "quantity": new_quantity}
+                )
+                # keep our local view in sync so two requested serials from the
+                # same lot in one call don't both match the stale entry
+                match["serial_numbers"] = leftover_serials
+                match["quantity"] = new_quantity
+
+                allocated.append(serial)
+
+            logging.info(f"allocated {len(allocated)} specific serial(s) for product {product_id}")
+            return allocated
+        except Exception as e:
+            logging.error("allocating specific serial number(s) failed!")
+            raise Exception(e)
         """
         Pulls `quantity` serial numbers out of inventory for product_id (oldest lots first),
         decrementing each lot's quantity and removing the used serials. Returns the list of

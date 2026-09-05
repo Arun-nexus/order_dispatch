@@ -143,6 +143,11 @@ class OrderItem(BaseModel):
     quantity: int
     price: float
     tax_rate: float = 0
+    # manually reviewed/chosen serial numbers, one per unit, in order — when
+    # given (must have exactly `quantity` entries), these exact serials are
+    # deducted instead of auto-allocating oldest-lot-first. Left empty (the
+    # default) to keep the old fully-automatic behavior.
+    serial_numbers: list[str] = []
 
 
 class CreateOrderRequest(BaseModel):
@@ -746,12 +751,31 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
     order_items = []
     for item in items:
-        allocated_serials = inventory_db.allocate_units(
-            collection_name=INVENTORY_COLLECTION,
-            product_id=item["product_id"],
-            quantity=item["quantity"],
-            model_no=item.get("model_no") or None
-        )
+        chosen_serials = item.get("serial_numbers") or []
+        if chosen_serials:
+            if len(chosen_serials) != item["quantity"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{item.get('product_name', item['product_id'])}: {len(chosen_serials)} serial number(s) given but quantity is {item['quantity']}"
+                )
+            if len(set(chosen_serials)) != len(chosen_serials):
+                raise HTTPException(status_code=400, detail=f"{item.get('product_name', item['product_id'])}: duplicate serial numbers selected")
+            try:
+                allocated_serials = inventory_db.allocate_specific_serials(
+                    collection_name=INVENTORY_COLLECTION,
+                    product_id=item["product_id"],
+                    serial_numbers=chosen_serials,
+                    model_no=item.get("model_no") or None
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            allocated_serials = inventory_db.allocate_units(
+                collection_name=INVENTORY_COLLECTION,
+                product_id=item["product_id"],
+                quantity=item["quantity"],
+                model_no=item.get("model_no") or None
+            )
         order_item = dict(item)
         order_item["serial_numbers"] = allocated_serials
         order_items.append(order_item)
@@ -930,6 +954,88 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             new_items = updated.pop("items")
             if not new_items:
                 raise HTTPException(status_code=400, detail="order must contain at least one product")
+
+            # Reconcile inventory against whatever changed between the old and
+            # new item lists — this used to not happen at all: retyping the
+            # serial numbers field, or changing quantity, only ever rewrote the
+            # order document, so the old serials were never freed back to
+            # stock and the new ones were never actually deducted (or even
+            # checked for availability). Skipped once the order has already
+            # been dispatched — the physical units are gone, so editing the
+            # record afterwards shouldn't touch live stock (same guard the
+            # cancellation branch above uses).
+            old_items = order.get("items", [])
+            if not order.get("dispatch"):
+                inv_db = inventory_manager()
+                # process ALL restocks (freed-up serials/quantity) before ANY
+                # deductions, across every line — so a serial number moved
+                # from one line to another in the same edit is available
+                # again by the time we try to deduct it for its new line,
+                # instead of failing with "not available".
+                restores = []   # (product_id, product_name, model_no, qty, serials)
+                deductions = [] # (product_id, product_name, model_no, qty, serials)
+
+                for old_item, new_item in zip(old_items, new_items):
+                    product_id = old_item.get("product_id", "")
+                    product_name = old_item.get("product_name", "")
+                    model_no = old_item.get("model_no", "") or ""
+                    old_serials = set(old_item.get("serial_numbers", []) or [])
+                    new_serials = set(new_item.get("serial_numbers", []) or [])
+                    old_qty = int(old_item.get("quantity", 0) or 0)
+                    new_qty = int(new_item.get("quantity", 0) or 0)
+
+                    removed_serials = list(old_serials - new_serials)
+                    added_serials = list(new_serials - old_serials)
+                    if removed_serials:
+                        restores.append((product_id, product_name, model_no, len(removed_serials), removed_serials))
+                    if added_serials:
+                        deductions.append((product_id, product_name, model_no, len(added_serials), added_serials))
+
+                    # the portion of quantity NOT backed by a specific serial
+                    # (accessories/spare_parts can be stocked with fewer
+                    # serials on file than their quantity) — only this part
+                    # moves as a plain quantity adjustment; the serialed part
+                    # is already handled above via removed/added_serials.
+                    old_unserialized = max(0, old_qty - len(old_serials))
+                    new_unserialized = max(0, new_qty - len(new_serials))
+                    unserialized_delta = new_unserialized - old_unserialized
+                    if unserialized_delta > 0:
+                        deductions.append((product_id, product_name, model_no, unserialized_delta, []))
+                    elif unserialized_delta < 0:
+                        restores.append((product_id, product_name, model_no, -unserialized_delta, []))
+
+                for product_id, product_name, model_no, qty, serials in restores:
+                    if qty <= 0:
+                        continue
+                    inv_db.restock_returned_units(
+                        collection_name=INVENTORY_COLLECTION,
+                        product_id=product_id,
+                        product_name=product_name,
+                        model_no=model_no,
+                        quantity=qty,
+                        serial_numbers=serials,
+                    )
+
+                for product_id, product_name, model_no, qty, serials in deductions:
+                    if qty <= 0:
+                        continue
+                    try:
+                        if serials:
+                            inv_db.allocate_specific_serials(
+                                collection_name=INVENTORY_COLLECTION,
+                                product_id=product_id,
+                                serial_numbers=serials,
+                                model_no=model_no or None,
+                            )
+                        else:
+                            inv_db.allocate_units(
+                                collection_name=INVENTORY_COLLECTION,
+                                product_id=product_id,
+                                quantity=qty,
+                                model_no=model_no or None,
+                            )
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=f"{product_name or product_id}: {e}")
 
             computed_items = []
             for raw_item in new_items:
@@ -1933,6 +2039,24 @@ async def inventory(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="inventory dataset cannot be fetched")
 
 
+@app.get("/inventory/available_serials")
+async def available_serials(product_id: str, model_no: str = "", user: dict = Depends(require_role("admin", "accounts"))):
+    """
+    Lists every serial number currently on file for product_id (scoped to
+    model_no when one is given), oldest lot first — same order the allocator
+    uses. Powers the order review step's serial-number picker: the first
+    `quantity` entries are what auto-allocation would pick by default, and the
+    full list is what's available to switch to instead.
+    """
+    try:
+        db = inventory_manager()
+        serials = db.list_available_serials(INVENTORY_COLLECTION, product_id, model_no=model_no or None)
+        return {"message": "available serial numbers", "serial_numbers": serials}
+    except Exception as e:
+        logging.error("fetching available serial numbers failed!")
+        raise HTTPException(status_code=500, detail="available serial numbers cannot be fetched")
+
+
 @app.post("/inventory/create")
 async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
@@ -2910,6 +3034,7 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                     items=[{
                         "product_id": item.product_id,
                         "product_name": item.product_name,
+                        "model_no": item.model_no,
                         "quantity": 1,
                         "serial_numbers": [serial]
                     }],
@@ -3022,6 +3147,29 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
                 logging.info(f"allocation {allocation_id}'s damaged item(s) filed into inventory as damaged product")
             except Exception as inv_err:
                 logging.error(f"allocation {allocation_id} returned but filing damaged item(s) into inventory failed: {inv_err}")
+        elif allocation.get("allocation_type") != "spare_part":
+            # normal (undamaged) return of an allocated product: the units go
+            # back into live stock instead of the damaged bucket. Spare parts
+            # aren't restocked here — they were consumed by the service, not
+            # returned as a unit.
+            try:
+                inv_db = inventory_manager()
+                for item in allocation.get("items", []):
+                    product_name = item.get("product_name", "")
+                    qty = item.get("quantity", 0) or 0
+                    if not product_name or qty <= 0:
+                        continue
+                    inv_db.restock_returned_units(
+                        collection_name=INVENTORY_COLLECTION,
+                        product_id=item.get("product_id", ""),
+                        product_name=product_name,
+                        model_no=item.get("model_no", ""),
+                        quantity=qty,
+                        serial_numbers=item.get("serial_numbers", []) or [],
+                    )
+                logging.info(f"allocation {allocation_id}'s item(s) restocked into inventory on return")
+            except Exception as inv_err:
+                logging.error(f"allocation {allocation_id} returned but restocking inventory failed: {inv_err}")
 
         return {"message": "allocation marked as returned", "allocation_id": allocation_id}
 
