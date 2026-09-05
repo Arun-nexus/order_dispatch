@@ -143,6 +143,11 @@ class OrderItem(BaseModel):
     quantity: int
     price: float
     tax_rate: float = 0
+    # manually reviewed/chosen serial numbers, one per unit, in order — when
+    # given (must have exactly `quantity` entries), these exact serials are
+    # deducted instead of auto-allocating oldest-lot-first. Left empty (the
+    # default) to keep the old fully-automatic behavior.
+    serial_numbers: list[str] = []
 
 
 class CreateOrderRequest(BaseModel):
@@ -183,6 +188,7 @@ class AllocationItem(BaseModel):
     product_id: str
     product_name: str
     quantity: int
+    model_no: str = ""
 
 
 class SparePartAllocation(BaseModel):
@@ -537,7 +543,7 @@ VALID_PAYMENT_MODES = {"Credit", "NetBanking", "UPI", "Cheque", "DemandDraft", "
 
 
 def _raise_media_review_request(service_id: str, raised_by: str):
-    """Creates a 'media_review' request so admin/employee get a bell notification
+    """Creates a 'media_review' request so admin/accounts get a bell notification
     to download the uploaded video. Approving it confirms the download and clears
     the video from the database; rejecting it discards the video without keeping it."""
     try:
@@ -717,22 +723,59 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
     inventory_db = inventory_manager()
 
-    # pre-check availability for every line before mutating any inventory
+    # pre-check availability for every line before mutating any inventory.
+    # Two order lines can now share the same product_id (same product,
+    # different model_no lots), so check the SUMMED quantity per (product_id,
+    # model_no) against stock — not each line in isolation — otherwise two
+    # lines that individually look fine (e.g. 80 + 80 when only 100 are in
+    # stock) could both pass the check and only fail/oversell later during
+    # allocation. Keying by model_no too (not product_id alone) matters just
+    # as much: two different variants (e.g. black vs grey) can share the same
+    # product_id, and lumping their stock together would let an order for one
+    # variant silently pass a check backed by the other variant's stock — and
+    # then, during allocation, pull serials/units from the wrong variant's lot.
+    qty_by_variant = {}
     for item in items:
-        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item["product_id"])
-        if available < item["quantity"]:
+        key = (item["product_id"], item.get("model_no") or "")
+        qty_by_variant[key] = qty_by_variant.get(key, 0) + item["quantity"]
+
+    for (product_id, model_no), total_qty in qty_by_variant.items():
+        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, product_id, model_no=model_no or None)
+        if available < total_qty:
+            sample_name = next((it.get("product_name", product_id) for it in items if it["product_id"] == product_id), product_id)
+            variant_note = f" (model {model_no})" if model_no else ""
             raise HTTPException(
                 status_code=400,
-                detail=f"insufficient stock for {item.get('product_name', item['product_id'])}: only {available} available"
+                detail=f"insufficient stock for {sample_name}{variant_note}: only {available} available"
             )
 
     order_items = []
     for item in items:
-        allocated_serials = inventory_db.allocate_units(
-            collection_name=INVENTORY_COLLECTION,
-            product_id=item["product_id"],
-            quantity=item["quantity"]
-        )
+        chosen_serials = item.get("serial_numbers") or []
+        if chosen_serials:
+            if len(chosen_serials) != item["quantity"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{item.get('product_name', item['product_id'])}: {len(chosen_serials)} serial number(s) given but quantity is {item['quantity']}"
+                )
+            if len(set(chosen_serials)) != len(chosen_serials):
+                raise HTTPException(status_code=400, detail=f"{item.get('product_name', item['product_id'])}: duplicate serial numbers selected")
+            try:
+                allocated_serials = inventory_db.allocate_specific_serials(
+                    collection_name=INVENTORY_COLLECTION,
+                    product_id=item["product_id"],
+                    serial_numbers=chosen_serials,
+                    model_no=item.get("model_no") or None
+                )
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            allocated_serials = inventory_db.allocate_units(
+                collection_name=INVENTORY_COLLECTION,
+                product_id=item["product_id"],
+                quantity=item["quantity"],
+                model_no=item.get("model_no") or None
+            )
         order_item = dict(item)
         order_item["serial_numbers"] = allocated_serials
         order_items.append(order_item)
@@ -754,7 +797,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
 
 @app.post("/order/create_order/")
-async def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         order_id = _fulfill_order(
             customer_id=request.customer_id,
@@ -794,7 +837,7 @@ async def track_order(order_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/order/confirm_delivery/{order_id}")
-async def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = order_manager()
         result = db.update(
@@ -852,7 +895,7 @@ async def delete_order(order_id: str, user: dict = Depends(require_role("admin")
 
 
 @app.post("/order/update/{order_id}")
-async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "employee"))):
+async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = order_manager()
         updated = dict(updated_value.updated_order_value)
@@ -861,6 +904,25 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
         if not existing:
             raise HTTPException(status_code=404, detail="no order found with this order_id")
         order = existing[0]
+
+        # Any of these being present means this is a real edit made via the
+        # Edit Order modal (as opposed to a plain status change from the
+        # Update Status modal, which carries its own cancel_reason and none
+        # of these keys) — a remark is mandatory for those so the order
+        # history stays meaningful. Checked against the untouched `updated`
+        # dict, before any of the branches below start popping keys off it.
+        item_field_keys_check = {"product_name", "serial_no", "quantity", "price", "tax_rate"}
+        is_edit = bool(
+            (item_field_keys_check & updated.keys())
+            or "discount" in updated
+            or "items" in updated
+            or "payment_mode" in updated
+            or "company_name" in updated
+            or "gst_number" in updated
+        )
+        remark = (updated.pop("remark", "") or "").strip()
+        if is_edit and not remark:
+            raise HTTPException(status_code=400, detail="a remark is required when editing an order")
 
         # Cancelling an order releases the stock/serials it reserved at creation
         # time (_fulfill_order deducts inventory immediately, before delivery)
@@ -898,28 +960,124 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
         # UI never reflects the change.
         item_field_keys = {"product_name", "serial_no", "quantity", "price", "tax_rate"}
         touched_item_fields = item_field_keys & updated.keys()
-
-        # company_name / gst_number live under order["customer"], not at the
-        # top level either.
-        customer_field_keys = {"company_name", "gst_number"}
-        touched_customer_fields = customer_field_keys & updated.keys()
-
         # discount lives at the top level already, but total_mrp depends on it too,
         # so a discount-only edit still needs to fall into the recompute branch below
         # instead of leaving a stale total_mrp.
         discount_touched = "discount" in updated
-        payment_mode_touched = "payment_mode" in updated
 
-        # Any of the above is a real edit made via the Edit Order modal (as opposed
-        # to a plain status change from the Update Status modal, which carries its
-        # own cancel_reason and doesn't touch these fields at all) — a remark is
-        # mandatory for these so the order history stays meaningful.
-        is_edit = bool(touched_item_fields or touched_customer_fields or discount_touched or payment_mode_touched)
-        remark = (updated.pop("remark", "") or "").strip()
-        if is_edit and not remark:
-            raise HTTPException(status_code=400, detail="a remark is required when editing an order")
+        if "items" in updated:
+            # Full multi-item replace from the Edit Order modal — every item
+            # in the order can now be edited (qty/price/tax/serials), not
+            # just items[0], and each item keeps its own price instead of
+            # sharing one combined price across the whole order.
+            new_items = updated.pop("items")
+            if not new_items:
+                raise HTTPException(status_code=400, detail="order must contain at least one product")
 
-        if touched_item_fields or discount_touched:
+            # Reconcile inventory against whatever changed between the old and
+            # new item lists — this used to not happen at all: retyping the
+            # serial numbers field, or changing quantity, only ever rewrote the
+            # order document, so the old serials were never freed back to
+            # stock and the new ones were never actually deducted (or even
+            # checked for availability). Skipped once the order has already
+            # been dispatched — the physical units are gone, so editing the
+            # record afterwards shouldn't touch live stock (same guard the
+            # cancellation branch above uses).
+            old_items = order.get("items", [])
+            if not order.get("dispatch"):
+                inv_db = inventory_manager()
+                # process ALL restocks (freed-up serials/quantity) before ANY
+                # deductions, across every line — so a serial number moved
+                # from one line to another in the same edit is available
+                # again by the time we try to deduct it for its new line,
+                # instead of failing with "not available".
+                restores = []   # (product_id, product_name, model_no, qty, serials)
+                deductions = [] # (product_id, product_name, model_no, qty, serials)
+
+                for old_item, new_item in zip(old_items, new_items):
+                    product_id = old_item.get("product_id", "")
+                    product_name = old_item.get("product_name", "")
+                    model_no = old_item.get("model_no", "") or ""
+                    old_serials = set(old_item.get("serial_numbers", []) or [])
+                    new_serials = set(new_item.get("serial_numbers", []) or [])
+                    old_qty = int(old_item.get("quantity", 0) or 0)
+                    new_qty = int(new_item.get("quantity", 0) or 0)
+
+                    removed_serials = list(old_serials - new_serials)
+                    added_serials = list(new_serials - old_serials)
+                    if removed_serials:
+                        restores.append((product_id, product_name, model_no, len(removed_serials), removed_serials))
+                    if added_serials:
+                        deductions.append((product_id, product_name, model_no, len(added_serials), added_serials))
+
+                    # the portion of quantity NOT backed by a specific serial
+                    # (accessories/spare_parts can be stocked with fewer
+                    # serials on file than their quantity) — only this part
+                    # moves as a plain quantity adjustment; the serialed part
+                    # is already handled above via removed/added_serials.
+                    old_unserialized = max(0, old_qty - len(old_serials))
+                    new_unserialized = max(0, new_qty - len(new_serials))
+                    unserialized_delta = new_unserialized - old_unserialized
+                    if unserialized_delta > 0:
+                        deductions.append((product_id, product_name, model_no, unserialized_delta, []))
+                    elif unserialized_delta < 0:
+                        restores.append((product_id, product_name, model_no, -unserialized_delta, []))
+
+                for product_id, product_name, model_no, qty, serials in restores:
+                    if qty <= 0:
+                        continue
+                    inv_db.restock_returned_units(
+                        collection_name=INVENTORY_COLLECTION,
+                        product_id=product_id,
+                        product_name=product_name,
+                        model_no=model_no,
+                        quantity=qty,
+                        serial_numbers=serials,
+                    )
+
+                for product_id, product_name, model_no, qty, serials in deductions:
+                    if qty <= 0:
+                        continue
+                    try:
+                        if serials:
+                            inv_db.allocate_specific_serials(
+                                collection_name=INVENTORY_COLLECTION,
+                                product_id=product_id,
+                                serial_numbers=serials,
+                                model_no=model_no or None,
+                            )
+                        else:
+                            inv_db.allocate_units(
+                                collection_name=INVENTORY_COLLECTION,
+                                product_id=product_id,
+                                quantity=qty,
+                                model_no=model_no or None,
+                            )
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=f"{product_name or product_id}: {e}")
+
+            computed_items = []
+            for raw_item in new_items:
+                item = dict(raw_item)
+                quantity = item.get("quantity", 0)
+                price = item.get("price", 0)
+                tax_rate = item.get("tax_rate", 0)
+                line_amount = price * quantity
+                line_tax = line_amount * tax_rate / 100
+                item["line_amount"] = line_amount
+                item["line_tax"] = line_tax
+                item["line_total"] = line_amount + line_tax
+                computed_items.append(item)
+
+            updated["items"] = computed_items
+            discount = updated.get("discount", order.get("discount", 0))
+            subtotal = sum(i.get("line_amount", 0) for i in computed_items)
+            tax_total = sum(i.get("line_tax", 0) for i in computed_items)
+            updated["subtotal"] = subtotal
+            updated["tax_total"] = tax_total
+            updated["total_mrp"] = subtotal + tax_total - discount
+
+        elif touched_item_fields or discount_touched:
             items = order.get("items", [])
             if not items:
                 raise HTTPException(status_code=400, detail="order has no items to edit")
@@ -954,6 +1112,10 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             updated["tax_total"] = tax_total
             updated["total_mrp"] = subtotal + tax_total - discount
 
+        # company_name / gst_number live under order["customer"], not at the
+        # top level either.
+        customer_field_keys = {"company_name", "gst_number"}
+        touched_customer_fields = customer_field_keys & updated.keys()
         if touched_customer_fields:
             customer = dict(order.get("customer", {}))
             for key in touched_customer_fields:
@@ -1075,7 +1237,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
 
 
 @app.get("/shipment/")
-async def shipment(user: dict = Depends(require_role("admin", "employee"))):
+async def shipment(user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         dataset = db.get_data(collection_name=SHIPMENT_COLLECTION, query={})
@@ -1087,7 +1249,7 @@ async def shipment(user: dict = Depends(require_role("admin", "employee"))):
 
 
 @app.get("/shipment/{shipment_id}")
-async def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         result = db.shipment_tracking(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id)
@@ -1100,7 +1262,7 @@ async def track_shipment(shipment_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/shipment/create")
-async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         shipment_dict = {
             "company_name": request.company_name,
@@ -1140,7 +1302,7 @@ async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(r
 
 
 @app.post("/shipment/mark_received/{shipment_id}")
-async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1173,7 +1335,7 @@ async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequ
 
 
 @app.post("/shipment/update/{shipment_id}")
-async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1212,7 +1374,7 @@ async def delete_shipment(shipment_id: str, user: dict = Depends(require_role("a
 # =========================================================
 
 @app.get("/assembly/")
-async def assembly(user: dict = Depends(require_role("admin", "employee"))):
+async def assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         dataset = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={})
@@ -1224,7 +1386,7 @@ async def assembly(user: dict = Depends(require_role("admin", "employee"))):
 
 
 @app.get("/assembly/available_parts")
-async def available_parts_for_assembly(user: dict = Depends(require_role("admin", "employee"))):
+async def available_parts_for_assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     """
     Spare parts currently sitting in inventory — the pool an assembly's parts
     are pulled from. This stock is fed by shipments: a shipment part marked
@@ -1263,7 +1425,7 @@ async def available_parts_for_assembly(user: dict = Depends(require_role("admin"
 
 
 @app.get("/assembly/{assembly_id}")
-async def track_assembly(assembly_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def track_assembly(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         result = db.assembly_tracking(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
@@ -1276,7 +1438,7 @@ async def track_assembly(assembly_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/assembly/create")
-async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         parts_used = [part.dict() for part in request.parts_used]
 
@@ -1387,7 +1549,7 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
 
 
 @app.post("/assembly/mark_completed/{assembly_id}")
-async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1429,7 +1591,7 @@ async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require
 
 
 @app.post("/assembly/update/{assembly_id}")
-async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1587,7 +1749,7 @@ def migrate_stale_dispatch_media():
 
 
 @app.get("/dispatch/")
-async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))):
+async def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         migrate_stale_dispatch_media()
         odb = order_manager()
@@ -1622,7 +1784,7 @@ async def dispatch_queue(user: dict = Depends(require_role("admin", "employee"))
 
 
 @app.post("/dispatch/confirm/order/{order_id}")
-async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = order_manager()
         matches = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
@@ -1653,7 +1815,7 @@ async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest,
 
 
 @app.post("/dispatch/confirm/spare_part/{allocation_id}")
-async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -1693,7 +1855,7 @@ async def services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/services/create")
-async def create_service(request: ServiceRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_service(request: ServiceRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         service = service_detail(product_id=request.product_id, serial_no=request.serial_no)
         service.add_service(
@@ -1733,7 +1895,7 @@ async def delete_service(service_id: str, user: dict = Depends(require_role("adm
 
 
 @app.post("/service/update/{service_id}")
-async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.update_service_status(
@@ -1757,7 +1919,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
                 logging.error(f"service {service_id} completed but faulty-part swap failed: {swap_err}")
 
         # auto-resolve any pending status_update requests raised for this service,
-        # since admin/employee just applied the change directly from the Service page
+        # since admin/accounts just applied the change directly from the Service page
         req_db = request_manager()
         pending = req_db.get_data(collection_name=REQUESTS_COLLECTION,
                                    query={"request_type": "status_update", "status": "pending",
@@ -1774,7 +1936,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
 
 
 @app.post("/service/request_status_update/{service_id}")
-async def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+async def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         req = request_manager(
             request_type="status_update",
@@ -1809,7 +1971,7 @@ async def my_services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/service/update_charges/{service_id}")
-async def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail()
         db.set_service_charges(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, service_charges=request.service_charges)
@@ -1820,7 +1982,7 @@ async def update_service_charges(service_id: str, request: ServiceChargeRequest,
 
 
 @app.post("/service/upload_media/{service_id}")
-async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         db = service_detail()
         db.attach_media(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, image=request.image, video=request.video)
@@ -1835,7 +1997,7 @@ async def upload_service_media(service_id: str, request: ServiceMediaRequest, us
 
 
 @app.post("/service/request_spare_part/{service_id}")
-async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("admin", "employee", "technician", "distributor"))):
+async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         db = service_detail()
         db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=request.note)
@@ -1854,7 +2016,7 @@ async def request_spare_part(service_id: str, request: SparePartRequest, user: d
 
 
 @app.post("/service/manager_confirm/{service_id}")
-async def manager_confirm(service_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def manager_confirm(service_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.manager_confirm_return(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -1865,7 +2027,7 @@ async def manager_confirm(service_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/service/extend_warranty/{service_id}")
-async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.extend_warranty(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, warranty_until=request.warranty_until)
@@ -1905,8 +2067,26 @@ async def inventory(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="inventory dataset cannot be fetched")
 
 
+@app.get("/inventory/available_serials")
+async def available_serials(product_id: str, model_no: str = "", user: dict = Depends(require_role("admin", "accounts"))):
+    """
+    Lists every serial number currently on file for product_id (scoped to
+    model_no when one is given), oldest lot first — same order the allocator
+    uses. Powers the order review step's serial-number picker: the first
+    `quantity` entries are what auto-allocation would pick by default, and the
+    full list is what's available to switch to instead.
+    """
+    try:
+        db = inventory_manager()
+        serials = db.list_available_serials(INVENTORY_COLLECTION, product_id, model_no=model_no or None)
+        return {"message": "available serial numbers", "serial_numbers": serials}
+    except Exception as e:
+        logging.error("fetching available serial numbers failed!")
+        raise HTTPException(status_code=500, detail="available serial numbers cannot be fetched")
+
+
 @app.post("/inventory/create")
-async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
@@ -1943,7 +2123,7 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
 
 
 @app.post("/inventory/update/{product_id}")
-async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = inventory_manager()
         match_query = {"product_id": product_id}
@@ -1956,12 +2136,20 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         current_type = existing[0].get("product_type", "product")
 
         updated_values = dict(request.updated_values)
-        effective_type = updated_values.get("product_type", current_type)
+        raw_effective_type = updated_values.get("product_type", current_type)
+        # normalize (lowercase + strip) so a stray case/whitespace mismatch — or a
+        # request that omits product_type — can never make an accessories/spare_parts/
+        # service_parts lot fall through to the strict "quantity must equal serial
+        # count" check below. Falls back to the type already on file if the request's
+        # value doesn't normalize to anything meaningful.
+        effective_type = (str(raw_effective_type or "").strip().lower()) or str(current_type or "product").strip().lower()
+
+        SERIAL_OPTIONAL_TYPES = ("accessories", "spare_parts", "service_parts")
 
         # serial numbers are optional for accessories / spare_parts / service_parts,
         # so quantity is free to move independently of the serial list for those
         # types — only sync serials with quantity for product/damaged
-        if effective_type in ("accessories", "spare_parts", "service_parts"):
+        if effective_type in SERIAL_OPTIONAL_TYPES or str(current_type or "").strip().lower() in SERIAL_OPTIONAL_TYPES:
             if request.new_serial_numbers:
                 if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
                     raise HTTPException(status_code=400, detail="new serial numbers must be unique")
@@ -2095,7 +2283,7 @@ async def delete_product(product_id: str, model_no: Optional[str] = None, user: 
 
 
 @app.post("/inventory/repair/{product_id}")
-async def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin", "employee"))):
+async def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,
@@ -2152,7 +2340,7 @@ async def repair_damaged_product(product_id: str, model_no: Optional[str] = None
 async def customers(user: dict = Depends(get_current_user)):
     try:
         db = customer_manager()
-        if user["role"] in ("admin", "employee"):
+        if user["role"] in ("admin", "accounts"):
             dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
         elif user["role"] == "distributor":
             acc_db = login()
@@ -2184,7 +2372,7 @@ async def search_customer(term: str = "", user: dict = Depends(get_current_user)
 
 
 @app.post("/customer/create")
-async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "employee", "distributor"))):
+async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
     try:
         new_customer = customer_manager(
             company_name=request.company_name,
@@ -2223,7 +2411,7 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
 
 
 @app.post("/customer/update/{customer_id}")
-async def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = customer_manager()
         result = db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
@@ -2264,7 +2452,7 @@ async def search_salesperson(term: str = "", user: dict = Depends(get_current_us
 
 
 @app.post("/salesperson/create")
-async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         new_sp = sales_person_manager(
             name=request.name,
@@ -2304,7 +2492,7 @@ async def active_services(user: dict = Depends(get_current_user)):
 
 
 @app.get("/service/available_hologram_parts")
-async def available_hologram_parts(user: dict = Depends(require_role("admin", "employee"))):
+async def available_hologram_parts(user: dict = Depends(require_role("admin", "accounts"))):
     """
     Powers the "Update Status" -> Completed -> spare part swap form on the
     Service page: instead of letting the technician type a free-text new
@@ -2346,7 +2534,7 @@ async def allocations(user: dict = Depends(get_current_user)):
 
 
 @app.post("/allocation/send_to_dispatch/{allocation_id}")
-async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -2373,7 +2561,7 @@ async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(r
 
 
 @app.post("/allocation/report_damage/{allocation_id}")
-async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "employee", "distributor"))):
+async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
     try:
         if not request.image:
             raise HTTPException(status_code=400, detail="a photo of the damaged product is required")
@@ -2441,7 +2629,7 @@ async def my_allocations(user: dict = Depends(require_role("distributor"))):
 
 def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_by: str):
     """Resolves/creates the customer, deducts stock + serials from inventory, and records
-    the demo_unit allocation. Shared by the direct admin/employee endpoint and by
+    the demo_unit allocation. Shared by the direct admin/accounts endpoint and by
     /request/approve/{request_id} when a distributor's request is approved."""
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product")
@@ -2504,7 +2692,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
 
 
 @app.post("/allocation/create_demo")
-async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         allocation_id = _fulfill_demo_unit(
             customer_id=request.customer_id,
@@ -2574,7 +2762,7 @@ async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = De
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
-        return {"message": "request raised successfully, waiting for admin/employee approval", "request_id": req.request_id}
+        return {"message": "request raised successfully, waiting for admin/accounts approval", "request_id": req.request_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -2605,7 +2793,7 @@ async def raise_order_request(request: OrderRequestModel, user: dict = Depends(r
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
-        return {"message": "request sent, waiting for admin/employee approval", "request_id": req.request_id}
+        return {"message": "request sent, waiting for admin/accounts approval", "request_id": req.request_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -2631,7 +2819,7 @@ async def raise_service_request(request: ServiceRequestModel, user: dict = Depen
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
-        return {"message": "service request sent, waiting for admin/employee approval", "request_id": req.request_id}
+        return {"message": "service request sent, waiting for admin/accounts approval", "request_id": req.request_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -2640,7 +2828,7 @@ async def raise_service_request(request: ServiceRequestModel, user: dict = Depen
 
 
 @app.get("/request/")
-async def all_requests(user: dict = Depends(require_role("admin", "employee"))):
+async def all_requests(user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = request_manager()
         dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={})
@@ -2662,7 +2850,7 @@ async def my_requests(user: dict = Depends(get_current_user)):
 
 
 @app.post("/request/approve/{request_id}")
-async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "employee"))):
+async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -2721,7 +2909,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and service created", "service_id": service.service_id}
 
-        # media_review: approving means admin/employee confirmed they downloaded the
+        # media_review: approving means admin/accounts confirmed they downloaded the
         # video — it's cleared from the database afterwards to free up storage.
         if req["request_type"] == "media_review":
             service_id = req["details"].get("service_id")
@@ -2733,7 +2921,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
                            status="approved", resolved_by=user["username"])
             return {"message": "video download confirmed and removed from the database"}
 
-        # status_update: technician-raised status change, applied only on admin/employee approval
+        # status_update: technician-raised status change, applied only on admin/accounts approval
         if req["request_type"] == "status_update":
             details = req["details"]
             svc_db = service_detail(product_id="", serial_no="")
@@ -2785,7 +2973,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/request/reject/{request_id}")
-async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "employee"))):
+async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -2812,7 +3000,7 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
 
 
 @app.post("/allocation/create")
-async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "employee"))):
+async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         if not request.items and not request.spare_part:
             raise HTTPException(status_code=400, detail="add at least one product or a spare part")
@@ -2846,10 +3034,14 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                 }
 
         inventory_db = inventory_manager()
+        # keyed by (product_id, model_no): two variants sharing the same
+        # product_id (e.g. black vs grey) must be checked/allocated against
+        # their own lot, not each other's stock — same fix as order fulfillment
         for item in request.items:
-            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id)
+            available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, item.product_id, model_no=item.model_no or None)
             if available < item.quantity:
-                raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}: only {available} available")
+                variant_note = f" (model {item.model_no})" if item.model_no else ""
+                raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}{variant_note}: only {available} available")
 
         # No more partial returns: every allocated unit becomes its own
         # allocation document (quantity=1, one serial number each) instead of
@@ -2861,7 +3053,8 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
             allocated_serials = inventory_db.allocate_serials(
                 collection_name=INVENTORY_COLLECTION,
                 product_id=item.product_id,
-                quantity=item.quantity
+                quantity=item.quantity,
+                model_no=item.model_no or None
             )
             for serial in allocated_serials:
                 unit_allocation = allocation_manager(
@@ -2869,6 +3062,7 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                     items=[{
                         "product_id": item.product_id,
                         "product_name": item.product_name,
+                        "model_no": item.model_no,
                         "quantity": 1,
                         "serial_numbers": [serial]
                     }],
@@ -2913,17 +3107,8 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
 
 @app.post("/allocation/return/{allocation_id}")
-async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "employee", "distributor"))):
-    """
-    Every allocation — product or spare part — now returns in one shot.
-    Partial returns were removed: since each product allocation document
-    represents a single allocated unit (quantity=1, one serial number),
-    there's nothing left to split — the row is either returned or it isn't.
+async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
 
-    If a damage report was filed on this allocation before it's returned,
-    the returned item(s) are also filed into inventory as "damaged" product
-    entries (kept non-fatal - a hiccup here doesn't roll back the return).
-    """
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -2974,14 +3159,7 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
                         if not product_name or qty <= 0:
                             continue
                         original_product_id = item.get("product_id") or ""
-                        # Damaged stock must NEVER be filed under the same product_id as
-                        # live sellable stock: get_available_quantity()/allocate_units()
-                        # sum and pull units purely by product_id, with no product_type
-                        # filter — reusing the original id here would let this damaged,
-                        # returned unit be counted as available and shipped out again on
-                        # a future order. Always mint a fresh DMG- id (same as the
-                        # spare_part branch above) and keep the original id in the reason
-                        # for traceability.
+
                         product_id = f"DMG-{uuid.uuid4().hex[:8].upper()}"
                         item_reason = reason + (f" (original product_id: {original_product_id})" if original_product_id else "")
                         inventory_manager(
@@ -2997,6 +3175,29 @@ async def return_allocation(allocation_id: str, user: dict = Depends(require_rol
                 logging.info(f"allocation {allocation_id}'s damaged item(s) filed into inventory as damaged product")
             except Exception as inv_err:
                 logging.error(f"allocation {allocation_id} returned but filing damaged item(s) into inventory failed: {inv_err}")
+        elif allocation.get("allocation_type") != "spare_part":
+            # normal (undamaged) return of an allocated product: the units go
+            # back into live stock instead of the damaged bucket. Spare parts
+            # aren't restocked here — they were consumed by the service, not
+            # returned as a unit.
+            try:
+                inv_db = inventory_manager()
+                for item in allocation.get("items", []):
+                    product_name = item.get("product_name", "")
+                    qty = item.get("quantity", 0) or 0
+                    if not product_name or qty <= 0:
+                        continue
+                    inv_db.restock_returned_units(
+                        collection_name=INVENTORY_COLLECTION,
+                        product_id=item.get("product_id", ""),
+                        product_name=product_name,
+                        model_no=item.get("model_no", ""),
+                        quantity=qty,
+                        serial_numbers=item.get("serial_numbers", []) or [],
+                    )
+                logging.info(f"allocation {allocation_id}'s item(s) restocked into inventory on return")
+            except Exception as inv_err:
+                logging.error(f"allocation {allocation_id} returned but restocking inventory failed: {inv_err}")
 
         return {"message": "allocation marked as returned", "allocation_id": allocation_id}
 

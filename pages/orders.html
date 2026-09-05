@@ -289,8 +289,6 @@
         <input type="number" placeholder="Price">
         <input type="number" placeholder="Tax Rate (%)">
         <input type="number" placeholder="Discount">
-        <textarea class="edit-remark" placeholder="Remark for this edit (required)" rows="2" required
-          style="padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
         <select>
           <option value="Credit">Credit</option>
           <option value="Cheque">Cheque</option>
@@ -337,6 +335,8 @@
           <option value="cancelled">Cancelled</option>
         </select>
         <textarea class="cancel-reason" placeholder="Reason for cancellation" rows="3"
+          style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
+        <textarea class="pending-remark" placeholder="Remark for distributor (optional)" rows="3"
           style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
           <button type="button" class="cancel-btn"

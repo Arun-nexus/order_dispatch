@@ -1,7 +1,7 @@
 const orderState = { orders: [], activeOrderId: null };
 const invLookup = { products: [] };
 let ordersPage = 1;
-const ORDERS_PAGE_SIZE = 7;
+const ORDERS_PAGE_SIZE = 10;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
@@ -82,6 +82,11 @@ function statusClass(status) {
   return map[status] || 'pending';
 }
 
+function statusLabel(status) {
+  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled' };
+  return map[status] || status || '';
+}
+
 function orderCreatorLabel(o) {
   const c = o.creator;
   if (!c) return '-';
@@ -136,7 +141,7 @@ function renderOrdersTable(orders) {
   tbody.innerHTML = '';
 
   const role = getRole();
-  const canManage = role === 'admin' || role === 'employee';
+  const canManage = role === 'admin' || role === 'accounts';
 
   pageRows.forEach(o => {
     const tr = document.createElement('tr');
@@ -165,7 +170,7 @@ function renderOrdersTable(orders) {
       <td>${companyName}</td>
       <td>${o.payment_mode ?? ''}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="${statusClass(o.status)}">${o.status ?? ''}</span></td>
+      <td><span class="${statusClass(o.status)}">${statusLabel(o.status)}</span></td>
       <td>₹${o.total_mrp ?? o.price ?? 0}</td>
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
@@ -175,8 +180,8 @@ function renderOrdersTable(orders) {
   });
 
   tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewOrderModal(rowOrder(e))));
-  tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openOrderActionMenu(rowOrder(e), e)));
   tbody.querySelectorAll('.creator-cell').forEach(btn => btn.addEventListener('click', e => openOrderHistoryModal(rowOrder(e))));
+  tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openOrderActionMenu(rowOrder(e), e)));
 
   renderTablePagination(document.querySelector('.pagination'), ordersPage, totalPages, p => {
     ordersPage = p;
@@ -256,22 +261,119 @@ function openEditOrderModal(o) {
   orderState.activeOrderId = o.order_id;
   const modal = document.getElementById('editOrderModal');
   if (!modal) return;
-  const inputs = modal.querySelectorAll('input');
-  const select = modal.querySelector('select');
-  const remarkBox = modal.querySelector('.edit-remark');
-  const item = o.items?.[0] || {};
+  const content = modal.querySelector('.modal-content');
+  const items = o.items || [];
   const customer = o.customer || {};
-  inputs[0].value = item.product_name ?? '';
-  inputs[1].value = item.product_id ?? '';
-  inputs[2].value = item.quantity ?? 1;
-  inputs[3].value = (item.serial_numbers && item.serial_numbers[0]) ?? '';
-  inputs[4].value = customer.company_name ?? '';
-  inputs[5].value = customer.gst_number ?? '';
-  inputs[6].value = item.price ?? '';
-  inputs[7].value = item.tax_rate ?? '';
-  inputs[8].value = o.discount ?? 0;
-  if (remarkBox) remarkBox.value = ''; // every edit needs its own fresh remark
-  if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.payment_mode);
+
+  // Built fresh every time (like View Order) instead of reusing a single
+  // static form — that's what let this only ever edit items[0], only one
+  // combined price for the whole order, and only the first serial number.
+  // Now every item in the order gets its own row with its own qty/price/tax
+  // and its own full serial-number list.
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Edit Order</h3>
+      <button type="button" class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <form id="editOrderForm" style="display:flex;flex-direction:column;gap:14px;">
+      <div id="editItemsBox" style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow-y:auto;"></div>
+      <div style="border-top:1px solid #e2e8f0;padding-top:12px;display:flex;flex-direction:column;gap:10px;">
+        <input name="company_name" placeholder="Company Name" value="${customer.company_name ?? ''}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input name="gst_number" placeholder="GST Number" value="${customer.gst_number ?? ''}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input name="discount" type="number" min="0" placeholder="Discount" value="${o.discount ?? 0}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <select name="payment_mode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          ${PAYMENT_MODES.map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+        <textarea name="remark" class="edit-remark" placeholder="Remark for this edit (required)" rows="2" required
+          style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+      </div>
+    </form>`;
+
+  const itemsBox = content.querySelector('#editItemsBox');
+  itemsBox.innerHTML = items.map((it, idx) => `
+    <div class="editItemRow" data-idx="${idx}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">
+        ${it.product_name ?? ''}
+        <small style="color:#94a3b8;font-weight:400;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <label style="font-size:11px;color:#64748b;width:70px;">Qty
+          <input type="number" min="1" class="editQty" value="${it.quantity ?? 1}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        </label>
+        <label style="font-size:11px;color:#64748b;width:100px;">Price
+          <input type="number" min="0" class="editPrice" value="${it.price ?? 0}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        </label>
+        <label style="font-size:11px;color:#64748b;width:80px;">Tax %
+          <input type="number" min="0" class="editTax" value="${it.tax_rate ?? 0}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        </label>
+      </div>
+      <label style="font-size:11px;color:#64748b;display:block;margin-top:8px;">Serial Numbers (comma separated)
+        <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+      </label>
+    </div>`).join('');
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+
+  content.querySelector('#editOrderForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const rows = [...itemsBox.querySelectorAll('.editItemRow')];
+
+    const remark = (fd.get('remark') || '').trim();
+    if (!remark) {
+      alert('Please add a remark describing this edit.');
+      content.querySelector('.edit-remark')?.focus();
+      return;
+    }
+
+    const newItems = rows.map(row => {
+      const idx = Number(row.dataset.idx);
+      const original = items[idx] || {};
+      const quantity = Math.max(1, Math.floor(Number(row.querySelector('.editQty').value)) || 1);
+      const price = Number(row.querySelector('.editPrice').value) || 0;
+      const tax_rate = Number(row.querySelector('.editTax').value) || 0;
+      const serial_numbers = row.querySelector('.editSerials').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+      return {
+        product_id: original.product_id,
+        product_name: original.product_name,
+        model_no: original.model_no || '',
+        quantity,
+        price,
+        tax_rate,
+        serial_numbers
+      };
+    });
+
+    const updated_order_value = {
+      items: newItems,
+      company_name: fd.get('company_name'),
+      gst_number: fd.get('gst_number'),
+      discount: Number(fd.get('discount') || 0),
+      payment_mode: fd.get('payment_mode'),
+      remark
+    };
+
+    try {
+      const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updated_order_value })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'update failed');
+      modal.style.display = 'none';
+      await loadOrders();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+
   modal.style.display = 'flex';
 }
 
@@ -281,10 +383,15 @@ function openOrderStatusModal(o) {
   if (!modal) return;
   const select = modal.querySelector('select');
   const reasonBox = modal.querySelector('.cancel-reason');
+  const remarkBox = modal.querySelector('.pending-remark');
   if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.status);
   if (reasonBox) {
     reasonBox.value = o.status === 'cancelled' ? (o.cancel_reason || '') : '';
     reasonBox.style.display = o.status === 'cancelled' ? 'block' : 'none';
+  }
+  if (remarkBox) {
+    remarkBox.value = o.status === 'placed' ? (o.remark || '') : '';
+    remarkBox.style.display = o.status === 'placed' ? 'block' : 'none';
   }
   modal.style.display = 'flex';
 }
@@ -495,13 +602,16 @@ function openViewOrderModal(o) {
   const customer = o.customer || {};
 
   const itemsRows = items.length
-    ? items.map(it => `<tr>
-        <td>${it.product_name ?? ''}${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
+    ? items.map(it => {
+        const idModel = [it.product_id, it.model_no].filter(Boolean).join(' · ');
+        return `<tr>
+        <td>${it.product_name ?? ''}${idModel ? `<br><small style="color:#94a3b8;">${idModel}</small>` : ''}${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
         <td>${it.quantity ?? 0}</td>
         <td>₹${it.price ?? 0}</td>
         <td>${it.tax_rate ?? 0}%</td>
         <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
-      </tr>`).join('')
+      </tr>`;
+      }).join('')
     : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
 
   content.innerHTML = `
@@ -530,8 +640,9 @@ function openViewOrderModal(o) {
       </tr>`).join('')}</tbody>
     </table>` : ''}
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
-    <div class="detail"><small>Status</small><p>${o.status ?? ''}</p></div>
+    <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
+    <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Warranty</small><p>${(o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +₹${o.warranty_charge ?? 0})` : 'Standard (1 Year)'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
@@ -544,58 +655,20 @@ function wireDetailModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
-  const editForm = document.querySelector('#editOrderModal form');
-  if (editForm) {
-    editForm.addEventListener('submit', async e => {
-      e.preventDefault();
-      const inputs = editForm.querySelectorAll('input');
-      const select = editForm.querySelector('select');
-      const quantity = Math.max(1, Math.floor(Number(inputs[2].value)) || 1);
-      const price = Number(inputs[6].value);
-      const tax_rate = Number(inputs[7].value);
-      const discount = Number(inputs[8].value || 0);
-      const remarkBox = editForm.querySelector('.edit-remark');
-      const remark = remarkBox ? remarkBox.value.trim() : '';
-      if (!remark) {
-        alert('Please add a remark describing this edit.');
-        remarkBox?.focus();
-        return;
-      }
-      const updated_order_value = {
-        product_name: inputs[0].value,
-        quantity,
-        serial_no: inputs[3].value.trim().toLowerCase(),
-        company_name: inputs[4].value,
-        gst_number: inputs[5].value,
-        price,
-        tax_rate,
-        discount,
-        payment_mode: select ? select.value : undefined,
-        remark
-      };
-      try {
-        const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updated_order_value })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'update failed');
-        document.getElementById('editOrderModal').style.display = 'none';
-        await loadOrders();
-      } catch (err) {
-        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-      }
-    });
-  }
+  // Edit Order's form is now built fresh (per-item rows) every time
+  // openEditOrderModal() runs, so its submit handler is wired there directly
+  // instead of once here against a static form that no longer exists after
+  // the first edit.
 
   const statusForm = document.querySelector('#orderStatusModal form');
   if (statusForm) {
     const statusSelect = statusForm.querySelector('select');
     const reasonBox = statusForm.querySelector('.cancel-reason');
-    if (statusSelect && reasonBox) {
+    const remarkBox = statusForm.querySelector('.pending-remark');
+    if (statusSelect) {
       statusSelect.addEventListener('change', () => {
-        reasonBox.style.display = statusSelect.value === 'cancelled' ? 'block' : 'none';
+        if (reasonBox) reasonBox.style.display = statusSelect.value === 'cancelled' ? 'block' : 'none';
+        if (remarkBox) remarkBox.style.display = statusSelect.value === 'placed' ? 'block' : 'none';
       });
     }
     statusForm.addEventListener('submit', async e => {
@@ -603,12 +676,14 @@ function wireDetailModals() {
       const select = statusForm.querySelector('select');
       const newStatus = select.value;
       const reason = reasonBox ? reasonBox.value.trim() : '';
+      const remark = remarkBox ? remarkBox.value.trim() : '';
       if (newStatus === 'cancelled' && !reason) {
         alert('Please provide a reason for cancellation.');
         return;
       }
       const updated_order_value = { status: newStatus };
       if (newStatus === 'cancelled') updated_order_value.cancel_reason = reason;
+      if (newStatus === 'placed') updated_order_value.remark = remark;
       try {
         const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
           method: 'POST',
@@ -632,9 +707,11 @@ const wiz = {
   customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
   cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
   paymentMode: '',
+  paymentDetails: {},
   discount: 0,
   warrantyYears: 1,
-  warrantyCharge: 0
+  warrantyCharge: 0,
+  serialChoices: {}     // rowKey (product_id||product_name||model_no) -> [serial1, serial2, ...] one per unit, in order
 };
 
 const PAYMENT_MODES = [
@@ -651,9 +728,11 @@ function resetWizard() {
   wiz.customer = null;
   wiz.cart = {};
   wiz.paymentMode = '';
+  wiz.paymentDetails = {};
   wiz.discount = 0;
   wiz.warrantyYears = 1;
   wiz.warrantyCharge = 0;
+  wiz.serialChoices = {};
 }
 
 function injectCreateModal() {
@@ -866,12 +945,19 @@ function renderProductsStep() {
   // lots, to match what the backend's get_available_quantity() actually
   // checks against (it also sums across lots by product_id).
   const products = invLookup.products || [];
-  const totalQtyByProductId = new Map();
+
+  // A row is only treated as "the same product" when product_id, product_name
+  // AND model_no all match — if even one of the three differs, it's a
+  // different product and gets its own row / cart line. This key is used
+  // everywhere below (dedupe, cart storage, lookup) so all three stay in sync.
+  const rowKey = (p) => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
+
+  const totalQtyByKey = new Map();
   for (const p of products) {
-    const key = p.product_id;
-    totalQtyByProductId.set(key, (totalQtyByProductId.get(key) || 0) + (Number(p.quantity) || 0));
+    const key = rowKey(p);
+    totalQtyByKey.set(key, (totalQtyByKey.get(key) || 0) + (Number(p.quantity) || 0));
   }
-  const stockFor = (p) => totalQtyByProductId.get(p.product_id) ?? (Number(p.quantity) || 0);
+  const stockFor = (p) => totalQtyByKey.get(rowKey(p)) ?? (Number(p.quantity) || 0);
 
   wizardBody().innerHTML = `
     <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
@@ -924,21 +1010,45 @@ function renderProductsStep() {
 
   const rowsBox = document.getElementById('prodRows');
 
+  // BUG FIX: inventory stores one document per lot/purchase-batch, so the
+  // same product_id used to appear as several separate <tr> rows here. The
+  // cart was keyed ONLY by product_id, and the qty listeners looked the
+  // product back up with `products.find(x => x.product_id === productId)` —
+  // which always returns the FIRST lot in the array, not the row the user
+  // actually typed into. Net effect: typing a quantity into a different
+  // lot's row silently attached that other lot's data to the cart line, and
+  // typing into a second lot of the same product overwrote the first lot's
+  // cart entry.
+  //
+  // Fix: rows (and the cart) are keyed by rowKey() = product_id + product_name
+  // + model_no together. Two inventory docs collapse into ONE row only when
+  // all three match exactly; if even one differs, they're treated as
+  // different products and each keeps its own row and its own cart line.
+  function dedupeByRowKey(list) {
+    const seen = new Map();
+    for (const p of list) {
+      const key = rowKey(p);
+      if (!seen.has(key)) seen.set(key, p);
+    }
+    return [...seen.values()];
+  }
+
   function productRowHtml(p) {
-    const qtyInCart = wiz.cart[p.product_id]?.quantity ?? '';
+    const key = rowKey(p);
+    const qtyInCart = wiz.cart[key]?.quantity ?? '';
     return `
       <tr>
         <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' · ' + p.model_no : ''}</small></td>
         <td>${stockFor(p)}</td>
         <td>₹${p.price ?? 0}</td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
-              placeholder="0" data-product-id="${p.product_id}" class="qtyInput"
+              placeholder="0" data-row-key="${key}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
       </tr>`;
   }
 
   function renderRows(list) {
-    rowsBox.innerHTML = list.map(productRowHtml).join('');
+    rowsBox.innerHTML = dedupeByRowKey(list).map(productRowHtml).join('');
   }
 
   function computeTypedQty(inp) {
@@ -948,12 +1058,12 @@ function renderProductsStep() {
     return qty;
   }
 
-  function applyQtyToCart(productId, p, qty) {
+  function applyQtyToCart(key, p, qty) {
     if (qty === null || qty <= 0) {
-      delete wiz.cart[productId];
+      delete wiz.cart[key];
       return;
     }
-    wiz.cart[productId] = {
+    wiz.cart[key] = {
       product_id: p.product_id,
       product_name: p.product_name,
       model_no: p.model_no || '',
@@ -973,15 +1083,19 @@ function renderProductsStep() {
   // mobile keyboards made it impossible to type more than one digit (each
   // new digit landed in the wrong place or got wiped by the cap). The stock
   // cap is enforced separately, only once the user leaves the field.
+  //
+  // Since renderRows() now emits at most one row per rowKey (product_id +
+  // product_name + model_no), this find() is unambiguous — there is no
+  // other row sharing the exact same three fields it could match instead.
   rowsBox.addEventListener('input', (e) => {
     const inp = e.target.closest('.qtyInput');
     if (!inp) return;
 
-    const productId = inp.dataset.productId;
-    const p = products.find(x => x.product_id === productId);
+    const key = inp.dataset.rowKey;
+    const p = products.find(x => rowKey(x) === key);
     if (!p) return;
 
-    applyQtyToCart(productId, p, computeTypedQty(inp));
+    applyQtyToCart(key, p, computeTypedQty(inp));
   });
 
   // Enforce the stock cap once the user is done typing (blur doesn't bubble,
@@ -990,8 +1104,8 @@ function renderProductsStep() {
     const inp = e.target.closest('.qtyInput');
     if (!inp) return;
 
-    const productId = inp.dataset.productId;
-    const p = products.find(x => x.product_id === productId);
+    const key = inp.dataset.rowKey;
+    const p = products.find(x => rowKey(x) === key);
     if (!p) return;
 
     let qty = computeTypedQty(inp);
@@ -1014,7 +1128,7 @@ function renderProductsStep() {
       }
     }
 
-    applyQtyToCart(productId, p, qty);
+    applyQtyToCart(key, p, qty);
   }, true);
 
   function currentCategoryProducts() {
@@ -1125,7 +1239,180 @@ function renderPaymentStep() {
   if (warrantyChargeInput) warrantyChargeInput.addEventListener('input', e => { wiz.warrantyCharge = Number(e.target.value) || 0; refreshGrandTotal(); });
 
   refreshGrandTotal();
-  document.getElementById('placeOrderBtn').addEventListener('click', () => submitOrder(modeSelect, extraBox));
+  document.getElementById('placeOrderBtn').addEventListener('click', () => proceedToSerialReview(modeSelect, extraBox));
+}
+
+// Validates payment step inputs (same checks submitOrder used to do up front),
+// stashes them on wiz, then moves to the serial-number review step instead of
+// submitting immediately.
+function proceedToSerialReview(modeSelect, extraBox) {
+  const mode = modeSelect.value;
+  if (!mode) { alert('Please select a payment mode.'); return; }
+
+  if (wiz.warrantyYears > 1 && (!wiz.warrantyCharge || wiz.warrantyCharge <= 0)) {
+    alert('Please enter the additional charge for the extended warranty.');
+    return;
+  }
+
+  let payment_details;
+  try {
+    payment_details = buildPaymentDetails(mode);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+
+  wiz.paymentMode = mode;
+  wiz.paymentDetails = payment_details;
+  renderSerialReviewStep();
+}
+
+// Step 5: review auto-fetched serial numbers, optionally swap any of them for
+// a different available serial before the order is actually placed.
+async function renderSerialReviewStep() {
+  wizardTitle('New Order — Review Serial Numbers');
+  const body = wizardBody();
+  body.innerHTML = `<p style="color:#94a3b8;">Loading available serial numbers...</p>`;
+
+  const cartItems = Object.values(wiz.cart);
+  const rowKeyOf = (i) => `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+
+  // fetch available serials once per distinct product_id+model_no in the cart
+  const availableByVariant = {};
+  await Promise.all(cartItems.map(async (item) => {
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    if (availableByVariant[variantKey]) return;
+    try {
+      const params = new URLSearchParams({ product_id: item.product_id, model_no: item.model_no || '' });
+      const res = await apiFetch(`/inventory/available_serials?${params.toString()}`);
+      const data = await res.json();
+      availableByVariant[variantKey] = data.serial_numbers || [];
+    } catch (err) {
+      availableByVariant[variantKey] = [];
+    }
+  }));
+
+  let html = `<p style="color:#64748b;margin-bottom:12px;font-size:13px;">
+    Each unit is auto-assigned the oldest available serial number. Pick a different one below if needed — search by typing in the box.
+  </p>`;
+
+  cartItems.forEach((item) => {
+    const rowKey = rowKeyOf(item);
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    const available = availableByVariant[variantKey] || [];
+    const needed = item.quantity;
+    const slots = Math.min(needed, available.length);
+
+    html += `<div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <strong>${item.product_name}${item.model_no ? ' · ' + item.model_no : ''}</strong> × ${needed}`;
+
+    if (!available.length) {
+      html += `<p style="font-size:12px;color:#94a3b8;margin-top:4px;">No serial numbers on file for this item — will ship unserialized.</p></div>`;
+      return;
+    }
+    if (needed > available.length) {
+      html += `<p style="font-size:12px;color:#d62828;margin-top:4px;">Only ${available.length} serial number(s) on file — the remaining ${needed - available.length} unit(s) will ship unserialized.</p>`;
+    }
+
+    const existingChoices = wiz.serialChoices[rowKey] || [];
+    for (let slot = 0; slot < slots; slot++) {
+      const defaultSerial = available[slot]; // same order the backend auto-allocates in
+      const chosen = existingChoices[slot] || defaultSerial;
+      html += `
+        <div style="margin-top:8px;">
+          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <input list="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="serialPickInput"
+                 data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
+                 style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+          <datalist id="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}">
+            ${available.map(sn => `<option value="${sn}">`).join('')}
+          </datalist>
+        </div>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button type="button" id="backBtn5" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="confirmSerialsBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Confirm &amp; Place Order</button>
+    </div>`;
+
+  body.innerHTML = html;
+  document.getElementById('backBtn5').addEventListener('click', renderPaymentStep);
+
+  // seed defaults into wiz.serialChoices so submit works even if the user
+  // never touches an input, then keep it in sync as they edit
+  body.querySelectorAll('.serialPickInput').forEach(inp => {
+    const rowKey = inp.dataset.rowKey;
+    const slot = Number(inp.dataset.slot);
+    if (!wiz.serialChoices[rowKey]) wiz.serialChoices[rowKey] = [];
+    wiz.serialChoices[rowKey][slot] = inp.value;
+    inp.addEventListener('change', () => {
+      // a chosen serial can't be reused for a different unit of the same item
+      const siblings = [...body.querySelectorAll(`.serialPickInput[data-row-key="${rowKey}"]`)];
+      const dup = siblings.find(s => s !== inp && s.value === inp.value && inp.value.trim() !== '');
+      if (dup) {
+        alert('This serial number is already selected for another unit of this item — pick a different one.');
+        inp.value = wiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      const variantKey = `${item_for(rowKey)?.product_id}||${item_for(rowKey)?.model_no || ''}`;
+      const available = availableByVariant[variantKey] || [];
+      if (inp.value.trim() && !available.includes(inp.value.trim())) {
+        alert('That serial number isn\'t in the available list for this product.');
+        inp.value = wiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      wiz.serialChoices[rowKey][slot] = inp.value.trim();
+    });
+  });
+
+  function item_for(rowKey) {
+    return cartItems.find(i => rowKeyOf(i) === rowKey);
+  }
+
+  document.getElementById('confirmSerialsBtn').addEventListener('click', finalizeSubmitOrder);
+}
+
+async function finalizeSubmitOrder() {
+  const payload = {
+    customer_id: wiz.customerId || '',
+    customer: wiz.customer || {},
+    items: Object.values(wiz.cart).map(i => {
+      const rowKey = `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+      const chosen = (wiz.serialChoices[rowKey] || []).filter(Boolean);
+      return {
+        product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
+        quantity: i.quantity, price: i.price, tax_rate: i.tax_rate,
+        // only send serial_numbers when we actually have one per unit —
+        // otherwise (unserialized accessories etc.) leave it empty so the
+        // backend falls back to its normal auto-allocation
+        serial_numbers: chosen.length === i.quantity ? chosen : []
+      };
+    }),
+    payment_mode: wiz.paymentMode,
+    payment_details: wiz.paymentDetails,
+    discount: wiz.discount || 0,
+    warranty_years: wiz.warrantyYears || 1,
+    warranty_charge: wiz.warrantyYears > 1 ? (wiz.warrantyCharge || 0) : 0
+  };
+
+  try {
+    const res = await apiFetch('/order/create_order/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'order creation failed');
+    closeModal('createModal');
+    resetWizard();
+    await loadOrders();
+    await loadInventoryForOrders();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }
 
 function renderPaymentExtra(mode, extraBox) {
@@ -1211,60 +1498,12 @@ function buildPaymentDetails(mode) {
   return {};
 }
 
-async function submitOrder(modeSelect, extraBox) {
-  const mode = modeSelect.value;
-  if (!mode) { alert('Please select a payment mode.'); return; }
-
-  if (wiz.warrantyYears > 1 && (!wiz.warrantyCharge || wiz.warrantyCharge <= 0)) {
-    alert('Please enter the additional charge for the extended warranty.');
-    return;
-  }
-
-  let payment_details;
-  try {
-    payment_details = buildPaymentDetails(mode);
-  } catch (err) {
-    alert(err.message);
-    return;
-  }
-
-  const payload = {
-    customer_id: wiz.customerId || '',
-    customer: wiz.customer || {},
-    items: Object.values(wiz.cart).map(i => ({
-      product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
-      quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
-    })),
-    payment_mode: mode,
-    payment_details,
-    discount: wiz.discount || 0,
-    warranty_years: wiz.warrantyYears || 1,
-    warranty_charge: wiz.warrantyYears > 1 ? (wiz.warrantyCharge || 0) : 0
-  };
-
-  try {
-    const res = await apiFetch('/order/create_order/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'order creation failed');
-    closeModal('createModal');
-    resetWizard();
-    await loadOrders();
-    await loadInventoryForOrders();
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-  }
-}
-
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 // ---------- Order Requests (raised by distributors) ----------
 async function loadOrderRequests() {
   const role = getRole();
-  if (role !== 'admin' && role !== 'employee') return;
+  if (role !== 'admin' && role !== 'accounts') return;
   try {
     const res = await apiFetch('/request/');
     if (!res.ok) throw new Error('failed to fetch requests');
