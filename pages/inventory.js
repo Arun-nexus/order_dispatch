@@ -61,7 +61,7 @@ function partCategoryBadgeHtml(p) {
 // warranty badge for service_parts entries synced from a shipment's
 // "warranty" parts — server computes warranty_status fresh on every fetch
 function warrantyBadgeHtml(p) {
-  if (p.part_category !== 'warranty' || !p.warranty_until) return '';
+  if (!['warranty', 'purchase'].includes(p.part_category) || !p.warranty_until) return '';
   const over = p.warranty_status === 'over warranty';
   return `<span class="stock ${over ? 'low' : 'high'}" style="margin-left:4px;">${over ? 'Over Warranty' : 'Under Warranty'}</span>`;
 }
@@ -591,9 +591,10 @@ function openViewModal(p) {
       warrantyStatus.textContent = `${label} (until ${p.warranty_until})`;
       warrantyRow.style.display = '';
     } else if (p.product_type === 'service_parts' && p.part_category) {
-      if (p.part_category === 'warranty' && p.warranty_until) {
+      if (p.warranty_until) {
         const label = p.warranty_status === 'over warranty' ? 'Over Warranty' : 'Under Warranty';
-        warrantyStatus.textContent = `Warranty — ${label} (until ${p.warranty_until})`;
+        const prefix = p.part_category === 'warranty' ? 'Warranty' : 'Purchase';
+        warrantyStatus.textContent = `${prefix} — ${label} (until ${p.warranty_until})`;
       } else {
         warrantyStatus.textContent = 'Purchase';
       }

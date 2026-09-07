@@ -999,9 +999,19 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                     product_name = old_item.get("product_name", "")
                     model_no = old_item.get("model_no", "") or ""
                     old_serials = set(old_item.get("serial_numbers", []) or [])
-                    new_serials = set(new_item.get("serial_numbers", []) or [])
                     old_qty = int(old_item.get("quantity", 0) or 0)
                     new_qty = int(new_item.get("quantity", 0) or 0)
+
+                    # If quantity was reduced below the number of serials still
+                    # listed (admin only touched the qty field, not the serial
+                    # list), auto-trim the extra serials from the end and let
+                    # them fall into removed_serials below — otherwise those
+                    # units silently vanish from stock instead of being restocked.
+                    new_serial_list = list(dict.fromkeys(new_item.get("serial_numbers", []) or []))
+                    if len(new_serial_list) > new_qty:
+                        new_serial_list = new_serial_list[:new_qty]
+                        new_item["serial_numbers"] = new_serial_list
+                    new_serials = set(new_serial_list)
 
                     removed_serials = list(old_serials - new_serials)
                     added_serials = list(new_serials - old_serials)
@@ -1189,7 +1199,10 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
                 if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
                     entry["warranty_until"] = product_warranty_until
             elif status == "purchase":
-                purchase_parts_needed[key] = purchase_parts_needed.get(key, 0) + qty
+                entry = purchase_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
+                entry["quantity"] += qty
+                if product_warranty_until and (not entry["warranty_until"] or product_warranty_until > entry["warranty_until"]):
+                    entry["warranty_until"] = product_warranty_until
             else:  # "warranty"
                 entry = warranty_parts_needed.setdefault(key, {"quantity": 0, "warranty_until": None})
                 entry["quantity"] += qty
@@ -1215,8 +1228,9 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
     if purchase_parts_needed:
         sync_results += inv_db.add_from_shipment_parts(
             collection_name=INVENTORY_COLLECTION,
-            parts=[{"part_name": n, "parent_product_name": pn, "quantity": q, "part_category": "purchase"}
-                   for (pn, n), q in purchase_parts_needed.items()],
+            parts=[{"part_name": n, "parent_product_name": pn, "quantity": v["quantity"],
+                    "part_category": "purchase", "warranty_until": v["warranty_until"]}
+                   for (pn, n), v in purchase_parts_needed.items()],
             product_type="service_parts",
             supplier=shipment.get("company_name", ""),
             supplier_address=shipment.get("company_address", ""),
