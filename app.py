@@ -205,6 +205,8 @@ class CreateAllocationRequest(BaseModel):
     spare_part: SparePartAllocation | None = None
     company_name: str = ""
     address: str = ""
+    gst_number: str = ""
+    phone_number: str = ""
 
 
 class CreateDemoUnitRequest(BaseModel):
@@ -3092,7 +3094,9 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                         "serial_numbers": [serial] if serial else []
                     }],
                     company_name=request.company_name,
-                    address=request.address
+                    address=request.address,
+                    gst_number=request.gst_number,
+                    phone_number=request.phone_number
                 )
                 unit_allocation.add(collection_name=ALLOCATION_COLLECTION)
                 created_allocation_ids.append(unit_allocation.allocation_id)
@@ -3116,7 +3120,9 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
             spare_allocation = allocation_manager(
                 spare_part=spare_part_dict,
                 company_name=request.company_name,
-                address=request.address
+                address=request.address,
+                gst_number=request.gst_number,
+                phone_number=request.phone_number
             )
             spare_allocation.add(collection_name=ALLOCATION_COLLECTION)
             created_allocation_ids.append(spare_allocation.allocation_id)

@@ -298,7 +298,7 @@ function renderAllocationsTable(allocations) {
       : (a.sales_person?.name ?? '');
     const addressLabel = isSpare
       ? (a.spare_part?.service_id || '').slice(0, 8) || '-'
-      : (a.address ?? '-');
+      : ([a.company_name, a.address].filter(Boolean).join(', ') || '-');
 
     const tr = document.createElement('tr');
     tr.dataset.id = a.allocation_id;
@@ -981,7 +981,38 @@ async function renderAllocSerialReviewStep() {
     });
   });
 
-  document.getElementById('toDetailsBtn2').addEventListener('click', renderAllotmentDetailsStep);
+  document.getElementById('toDetailsBtn2').addEventListener('click', renderCompanyDetailsStep);
+}
+
+// Step: optional company details — none of these fields are required, so the
+// admin can skip straight through if there's nothing to record here.
+function renderCompanyDetailsStep() {
+  const body = allocModalBody();
+  allocWizTitle('Company Details (Optional)');
+  const c = allocWiz.companyDetails || {};
+  body.innerHTML = `
+    <form id="companyDetailsForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="company_name" placeholder="Company Name" value="${c.company_name ?? ''}">
+      <input name="address" placeholder="Address" value="${c.address ?? ''}">
+      <input name="gst_number" placeholder="GST No." value="${c.gst_number ?? ''}">
+      <input name="phone_number" placeholder="Phone No." value="${c.phone_number ?? ''}">
+      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+        <button type="button" id="backCompanyDetails" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+      </div>
+    </form>`;
+  document.getElementById('backCompanyDetails').addEventListener('click', renderAllocSerialReviewStep);
+  document.getElementById('companyDetailsForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    allocWiz.companyDetails = {
+      company_name: fd.get('company_name') || '',
+      address: fd.get('address') || '',
+      gst_number: fd.get('gst_number') || '',
+      phone_number: fd.get('phone_number') || ''
+    };
+    renderAllotmentDetailsStep();
+  });
 }
 
 function renderAllotmentDetailsStep() {
@@ -994,8 +1025,6 @@ function renderAllotmentDetailsStep() {
       ${cartItems.map(i => `${i.product_name} × ${i.quantity}`).join('<br>')}
     </div>
     <form id="allotmentForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="company_name" placeholder="Company Name" value="${allocWiz.salesPerson?.company_name ?? ''}" required>
-      <input name="address" placeholder="Address" value="${allocWiz.salesPerson?.address ?? ''}" required>
       <div>
         <label style="font-size:13px;color:#64748b;">Allotment Date</label>
         <input value="${today}" disabled style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f3f4f6;">
@@ -1006,10 +1035,10 @@ function renderAllotmentDetailsStep() {
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Create Allotment</button>
       </div>
     </form>`;
-  document.getElementById('backDetails').addEventListener('click', renderAllocSerialReviewStep);
+  document.getElementById('backDetails').addEventListener('click', renderCompanyDetailsStep);
   document.getElementById('allotmentForm').addEventListener('submit', async e => {
     e.preventDefault();
-    const fd = new FormData(e.target);
+    const c = allocWiz.companyDetails || {};
     const payload = {
       sales_person_id: allocWiz.salesPersonId || '',
       sales_person: allocWiz.salesPerson || {},
@@ -1023,8 +1052,10 @@ function renderAllotmentDetailsStep() {
           serial_numbers: chosen.length === i.quantity ? chosen : []
         };
       }),
-      company_name: fd.get('company_name'),
-      address: fd.get('address')
+      company_name: c.company_name || '',
+      address: c.address || '',
+      gst_number: c.gst_number || '',
+      phone_number: c.phone_number || ''
     };
     try {
       const res = await apiFetch('/allocation/create', {

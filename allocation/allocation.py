@@ -9,7 +9,7 @@ class allocation_manager(mongodbclient):
     RETURN_WINDOW_DAYS = 7
 
     def __init__(self, sales_person=None, items=None, spare_part=None, company_name=None, address=None,
-                 customer=None, allocated_by=None):
+                 customer=None, allocated_by=None, gst_number=None, phone_number=None):
         """
         sales_person: dict snapshot -> {sales_person_id, name, company_name, address, contact_number, email}
                        (used for allocation_type='product': admin/employee allotting stock to a sales person)
@@ -22,6 +22,8 @@ class allocation_manager(mongodbclient):
         customer: dict snapshot -> {customer_id, company_name, ...} (allocation_type='demo_unit': a
                   distributor allotting a demo unit to a customer)
         allocated_by: username of the distributor who created a demo_unit allocation
+        gst_number / phone_number: optional company details captured alongside company_name/address
+                                    when allocating a product to a sales person
         """
         super().__init__()
 
@@ -33,6 +35,8 @@ class allocation_manager(mongodbclient):
         self.allocated_by = allocated_by
         self.company_name = company_name
         self.address = address
+        self.gst_number = gst_number or ""
+        self.phone_number = phone_number or ""
         self.allotment_date = datetime.now(timezone.utc)
         self.return_due_date = self.allotment_date + timedelta(days=self.RETURN_WINDOW_DAYS)
         self.return_status = "pending"
@@ -59,6 +63,8 @@ class allocation_manager(mongodbclient):
                 "spare_part": self.spare_part,
                 "company_name": self.company_name,
                 "address": self.address,
+                "gst_number": self.gst_number,
+                "phone_number": self.phone_number,
                 "allotment_date": self.allotment_date.isoformat(),
                 "return_due_date": self.return_due_date.isoformat(),
                 "return_status": self.return_status
