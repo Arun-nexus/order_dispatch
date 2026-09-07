@@ -641,6 +641,7 @@ const allocWiz = {
   salesPersonId: '',
   salesPerson: null,
   cart: {},               // product_id -> {product_id, product_name, quantity}
+  serialChoices: {},      // rowKey (product_id||product_name||model_no) -> [serial1, serial2, ...] one per unit
   service: null,
   partName: '',
   partQuantity: 1,
@@ -653,6 +654,7 @@ function resetAllocWiz() {
   allocWiz.salesPersonId = '';
   allocWiz.salesPerson = null;
   allocWiz.cart = {};
+  allocWiz.serialChoices = {};
   allocWiz.service = null;
   allocWiz.partName = '';
   allocWiz.partQuantity = 1;
@@ -877,8 +879,109 @@ function renderProductCartStep() {
 
   document.getElementById('toDetailsBtn').addEventListener('click', () => {
     if (!Object.keys(allocWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
-    renderAllotmentDetailsStep();
+    renderAllocSerialReviewStep();
   });
+}
+
+// Step: review auto-fetched serial numbers for the cart, optionally swap any
+// of them for a different available serial before allotment details.
+async function renderAllocSerialReviewStep() {
+  allocWizTitle('Review Serial Numbers');
+  const body = allocModalBody();
+  body.innerHTML = `<p style="color:#94a3b8;">Loading available serial numbers...</p>`;
+
+  const cartItems = Object.values(allocWiz.cart);
+  const rowKeyOf = (i) => `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+
+  const availableByVariant = {};
+  await Promise.all(cartItems.map(async (item) => {
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    if (availableByVariant[variantKey]) return;
+    try {
+      const params = new URLSearchParams({ product_id: item.product_id, model_no: item.model_no || '' });
+      const res = await apiFetch(`/inventory/available_serials?${params.toString()}`);
+      const data = await res.json();
+      availableByVariant[variantKey] = data.serial_numbers || [];
+    } catch (err) {
+      availableByVariant[variantKey] = [];
+    }
+  }));
+
+  let html = `<p style="color:#64748b;margin-bottom:12px;font-size:13px;">
+    Each unit is auto-assigned the oldest available serial number. Pick a different one below if needed — search by typing in the box.
+  </p>`;
+
+  cartItems.forEach((item) => {
+    const rowKey = rowKeyOf(item);
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    const available = availableByVariant[variantKey] || [];
+    const needed = item.quantity;
+    const slots = Math.min(needed, available.length);
+
+    html += `<div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <strong>${item.product_name}${item.model_no ? ' · ' + item.model_no : ''}</strong> × ${needed}`;
+
+    if (!available.length) {
+      html += `<p style="font-size:12px;color:#94a3b8;margin-top:4px;">No serial numbers on file for this item — will allocate unserialized.</p></div>`;
+      return;
+    }
+    if (needed > available.length) {
+      html += `<p style="font-size:12px;color:#d62828;margin-top:4px;">Only ${available.length} serial number(s) on file — the remaining ${needed - available.length} unit(s) will allocate unserialized.</p>`;
+    }
+
+    const existingChoices = allocWiz.serialChoices[rowKey] || [];
+    for (let slot = 0; slot < slots; slot++) {
+      const defaultSerial = available[slot];
+      const chosen = existingChoices[slot] || defaultSerial;
+      html += `
+        <div style="margin-top:8px;">
+          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <input list="allocSerialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="allocSerialPickInput"
+                 data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
+                 style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+          <datalist id="allocSerialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}">
+            ${available.map(sn => `<option value="${sn}">`).join('')}
+          </datalist>
+        </div>`;
+    }
+    html += `</div>`;
+  });
+
+  html += `
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button type="button" id="backSerialReview" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="toDetailsBtn2" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+    </div>`;
+
+  body.innerHTML = html;
+  document.getElementById('backSerialReview').addEventListener('click', renderProductCartStep);
+
+  body.querySelectorAll('.allocSerialPickInput').forEach(inp => {
+    const rowKey = inp.dataset.rowKey;
+    const slot = Number(inp.dataset.slot);
+    if (!allocWiz.serialChoices[rowKey]) allocWiz.serialChoices[rowKey] = [];
+    allocWiz.serialChoices[rowKey][slot] = inp.value;
+    inp.addEventListener('change', () => {
+      const siblings = [...body.querySelectorAll(`.allocSerialPickInput[data-row-key="${rowKey}"]`)];
+      const dup = siblings.find(s => s !== inp && s.value === inp.value && inp.value.trim() !== '');
+      if (dup) {
+        alert('This serial number is already selected for another unit of this item — pick a different one.');
+        inp.value = allocWiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      const item = cartItems.find(i => rowKeyOf(i) === rowKey);
+      const variantKey = `${item?.product_id}||${item?.model_no || ''}`;
+      const available = availableByVariant[variantKey] || [];
+      if (inp.value.trim() && !available.includes(inp.value.trim())) {
+        alert('That serial number isn\'t in the available list for this product.');
+        inp.value = allocWiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      allocWiz.serialChoices[rowKey][slot] = inp.value.trim();
+    });
+  });
+
+  document.getElementById('toDetailsBtn2').addEventListener('click', renderAllotmentDetailsStep);
 }
 
 function renderAllotmentDetailsStep() {
@@ -903,14 +1006,23 @@ function renderAllotmentDetailsStep() {
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Create Allotment</button>
       </div>
     </form>`;
-  document.getElementById('backDetails').addEventListener('click', renderProductCartStep);
+  document.getElementById('backDetails').addEventListener('click', renderAllocSerialReviewStep);
   document.getElementById('allotmentForm').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const payload = {
       sales_person_id: allocWiz.salesPersonId || '',
       sales_person: allocWiz.salesPerson || {},
-      items: Object.values(allocWiz.cart),
+      items: Object.values(allocWiz.cart).map(i => {
+        const rowKey = `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+        const chosen = (allocWiz.serialChoices[rowKey] || []).filter(Boolean);
+        return {
+          ...i,
+          // only send serial_numbers when we have exactly one per unit —
+          // otherwise leave empty so the backend falls back to auto-allocation
+          serial_numbers: chosen.length === i.quantity ? chosen : []
+        };
+      }),
       company_name: fd.get('company_name'),
       address: fd.get('address')
     };
