@@ -2691,7 +2691,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
     return allocation.allocation_id
 
 
-@app.post("/allocation/create_demo")
+@app.post("/allocation/create_demo_unit")
 async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         allocation_id = _fulfill_demo_unit(
@@ -3048,15 +3048,31 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
         # bundling the whole quantity into a single row. A cart of ProductA x2
         # therefore creates two separate rows on the Allocated page, each
         # independently returnable.
+        #
+        # allocate_serials() (strict) requires every unit to already have a
+        # serial number on file — but accessories/spare_parts are legitimately
+        # allowed to be stocked with NO serial numbers at all (see
+        # /inventory/create), even though get_available_quantity() above
+        # correctly counts their quantity as available. That mismatch meant
+        # allocating any such product here failed with "insufficient stock"
+        # right after the precheck said stock WAS available — allocation
+        # would never go through. allocate_units() is the tolerant version
+        # used everywhere else in this file (order fulfillment, order edits):
+        # it decrements quantity regardless of serial coverage and returns
+        # whatever serials it did find, which may be fewer than requested
+        # (or none). We still create one allocation row per unit as before —
+        # rows for units with no serial on file just carry an empty
+        # serial_numbers list instead of failing the whole allocation.
         created_allocation_ids = []
         for item in request.items:
-            allocated_serials = inventory_db.allocate_serials(
+            allocated_serials = inventory_db.allocate_units(
                 collection_name=INVENTORY_COLLECTION,
                 product_id=item.product_id,
                 quantity=item.quantity,
                 model_no=item.model_no or None
             )
-            for serial in allocated_serials:
+            for i in range(item.quantity):
+                serial = allocated_serials[i] if i < len(allocated_serials) else None
                 unit_allocation = allocation_manager(
                     sales_person=sales_person_snapshot,
                     items=[{
@@ -3064,7 +3080,7 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
                         "product_name": item.product_name,
                         "model_no": item.model_no,
                         "quantity": 1,
-                        "serial_numbers": [serial]
+                        "serial_numbers": [serial] if serial else []
                     }],
                     company_name=request.company_name,
                     address=request.address
