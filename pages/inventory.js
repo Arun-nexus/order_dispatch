@@ -378,6 +378,7 @@ function renderInventoryTable(products) {
     const tr = document.createElement('tr');
     tr.dataset.productId = p.product_id;
     tr.dataset.modelNo = p.model_no || '';
+    tr.dataset.productType = p.product_type || 'product';
     const isDamaged = p.product_type === 'damaged';
     tr.innerHTML = `
       <td><input type="checkbox"></td>
@@ -405,7 +406,11 @@ function renderInventoryTable(products) {
 
 function rowProduct(e) {
   const tr = e.target.closest('tr');
-  return invState.products.find(p => p.product_id === tr.dataset.productId && (p.model_no || '') === tr.dataset.modelNo);
+  return invState.products.find(p =>
+    p.product_id === tr.dataset.productId &&
+    (p.model_no || '') === tr.dataset.modelNo &&
+    (p.product_type || 'product') === tr.dataset.productType
+  );
 }
 
 // Repair action on a Damaged Product row (replaces Delete there):
