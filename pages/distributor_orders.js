@@ -155,6 +155,7 @@ function wireHeaderButtons() {
       const filtered = doState.orders.filter(o =>
         (o.order_id || '').toLowerCase().includes(term) ||
         (o.items || []).some(it => (it.product_name || '').toLowerCase().includes(term)) ||
+        (o.items || []).some(it => (it.serial_numbers || []).some(sn => (sn || '').toLowerCase().includes(term))) ||
         (o.customer?.company_name || '').toLowerCase().includes(term)
       );
       doPage = 1;
