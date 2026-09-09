@@ -62,25 +62,68 @@ class inventory_manager(mongodbclient):
     def add_or_merge(self, collection_name):
         """
         Used by the "Add Existing Product" restock flow. If an entry already
-        exists for this exact product_name + product_id + model_no, the new
-        serial numbers are appended to it and its quantity is increased —
-        instead of creating a second, separate document for the same product
-        (which used to make the table/eye-view ambiguous about which lot's
-        quantity/serials belong to which row). Otherwise a fresh entry is
-        created, same as add().
+        exists for this exact product_name + product_id + model_no +
+        product_type, the new serial numbers are appended to it and its
+        quantity is increased — instead of creating a second, separate
+        document for the same product (which used to make the table/eye-view
+        ambiguous about which lot's quantity/serials belong to which row).
+        Otherwise a fresh entry is created, same as add().
+
+        Category-change-by-serial: if a serial number being added here is
+        already on file under a *different* product_type entry anywhere in
+        inventory, that unit is pulled out of its old entry (1 unit + that
+        serial removed, entry deleted if it hits zero) and lands in the
+        product_type being added now. This is how a unit gets flagged
+        faulty (product_type="damaged") when it's re-added as damaged even
+        though it was previously a product/spare_parts/service_parts/
+        accessories entry, and how it comes back OUT of "damaged" once it's
+        re-added under its real category. A serial found on the exact same
+        product_id + model_no + product_type is a genuine duplicate, not a
+        category change, and still raises.
         """
         try:
-            existing = self.get_data(
-                collection_name=collection_name,
-                query={"product_name": self.product_name, "product_id": self.product_id, "model_no": self.model_no}
-            )
+            target_key = {
+                "product_id": self.product_id,
+                "model_no": self.model_no,
+                "product_type": self.product_type,
+            }
+
+            duplicates = []
+            for serial in list(self.serial_numbers):
+                owners = self.get_data(collection_name=collection_name, query={"serial_numbers": serial})
+                for owner in owners:
+                    same_lot = (
+                        owner.get("product_id") == target_key["product_id"]
+                        and owner.get("model_no") == target_key["model_no"]
+                        and owner.get("product_type") == target_key["product_type"]
+                    )
+                    if same_lot:
+                        duplicates.append(serial)
+                        continue
+
+                    owner_serials = owner.get("serial_numbers") or []
+                    remaining_serials = [s for s in owner_serials if s != serial]
+                    new_owner_quantity = max(int(owner.get("quantity", 0) or 0) - 1, 0)
+                    if remaining_serials or new_owner_quantity > 0:
+                        self.update_data(
+                            collection_name=collection_name,
+                            query={"_id": ObjectId(owner["_id"])},
+                            update_values={"serial_numbers": remaining_serials, "quantity": new_owner_quantity}
+                        )
+                    else:
+                        self.delete_data(collection_name=collection_name, query={"_id": ObjectId(owner["_id"])})
+                    logging.info(
+                        f"serial {serial} moved out of '{owner.get('product_type', 'product')}' "
+                        f"into '{self.product_type}'"
+                    )
+
+            if duplicates:
+                raise Exception(f"serial number(s) already exist on this product: {', '.join(duplicates)}")
+
+            existing = self.get_data(collection_name=collection_name, query=target_key)
             if existing:
                 entry = existing[0]
                 current_serials = entry.get("serial_numbers") or []
-                duplicates = [s for s in self.serial_numbers if s in current_serials]
-                if duplicates:
-                    raise Exception(f"serial number(s) already exist on this product: {', '.join(duplicates)}")
-
                 merged_serials = current_serials + list(self.serial_numbers)
                 new_quantity = int(entry.get("quantity", 0) or 0) + int(self.quantity or 0)
 
@@ -99,7 +142,7 @@ class inventory_manager(mongodbclient):
                     query={"_id": ObjectId(entry["_id"])},
                     update_values=update_values
                 )
-                logging.info(f"merged {self.quantity} unit(s) into existing inventory entry for {self.product_id}")
+                logging.info(f"merged {self.quantity} unit(s) into existing '{self.product_type}' inventory entry for {self.product_id}")
                 return {"mode": "merged", "product_id": self.product_id, "quantity_added": self.quantity}
 
             return self.add(collection_name=collection_name)
