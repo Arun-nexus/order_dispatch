@@ -95,6 +95,16 @@ function wireNotifBell() {
 }
 
 async function loadPendingRequests() {
+  const role = getRole();
+  const section = document.getElementById('pendingRequestsSection');
+  // Requests panel is visible to admin/accounts/service_manager — matches
+  // backend's require_role() on /request/. Other roles get their own
+  // request status via the notification bell (common_auth.js) instead.
+  const canView = role === 'admin' || role === 'accounts' || role === 'service_manager';
+  if (!canView) {
+    if (section) section.style.display = 'none';
+    return;
+  }
   try {
     const res = await apiFetch('/request/');
     if (!res.ok) throw new Error('failed to fetch requests');
@@ -367,14 +377,14 @@ function renderAllocationsTable(allocations) {
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
-        ${!isSpare && !a.dispatch && !a.sent_to_dispatch
+        ${!isSpare && !a.dispatch && !a.sent_to_dispatch && window.__allocCanCreate
           ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}
         ${!isSpare && a.sent_to_dispatch && !a.dispatch
           ? '<span class="stock pending" title="Waiting to be dispatched" style="padding:4px 8px;">In Dispatch Queue</span>' : ''}
-        ${!meta.complete ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
-        ${a.damage_report?.reported
+        ${!meta.complete && window.__allocCanReturnOrDamage ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
+        ${window.__allocCanReturnOrDamage ? (a.damage_report?.reported
           ? '<button class="icon-btn damage-view-btn" title="Damage reported" style="color:#d62828;"><i class="fa-solid fa-triangle-exclamation"></i></button>'
-          : '<button class="icon-btn damage-report-btn" title="Report damaged product"><i class="fa-regular fa-triangle-exclamation"></i></button>'}
+          : '<button class="icon-btn damage-report-btn" title="Report damaged product"><i class="fa-regular fa-triangle-exclamation"></i></button>') : ''}
       </td>`;
     tbody.appendChild(tr);
   });
@@ -566,6 +576,17 @@ function wireTopActions() {
   const exportBtn = document.querySelector('.top-actions .export');
   if (exportBtn) exportBtn.addEventListener('click', exportAllocationsCSV);
   // Allocate button is wired inside injectAllocateModal()
+
+  // Matches backend: admin/accounts/service_manager can create & send to
+  // dispatch; admin/accounts/distributor/service_manager can return or
+  // report damage.
+  const role = getRole();
+  window.__allocCanCreate = role === 'admin' || role === 'accounts' || role === 'service_manager';
+  window.__allocCanReturnOrDamage = role === 'admin' || role === 'accounts' || role === 'distributor' || role === 'service_manager';
+  if (!window.__allocCanCreate) {
+    const addBtn = document.querySelector('.top-actions .add-product');
+    if (addBtn) addBtn.style.display = 'none';
+  }
 }
 
 function exportAllocationsCSV() {
@@ -1195,4 +1216,3 @@ function renderSparePartFormStep() {
     }
   });
 }
-// pushing

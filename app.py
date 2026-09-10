@@ -2537,7 +2537,7 @@ async def allocations(user: dict = Depends(get_current_user)):
 
 
 @app.post("/allocation/send_to_dispatch/{allocation_id}")
-async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "accounts"))):
+async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -2564,7 +2564,7 @@ async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(r
 
 
 @app.post("/allocation/report_damage/{allocation_id}")
-async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
+async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
     try:
         if not request.image:
             raise HTTPException(status_code=400, detail="a photo of the damaged product is required")
@@ -2831,7 +2831,7 @@ async def raise_service_request(request: ServiceRequestModel, user: dict = Depen
 
 
 @app.get("/request/")
-async def all_requests(user: dict = Depends(require_role("admin", "accounts"))):
+async def all_requests(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={})
@@ -2853,7 +2853,7 @@ async def my_requests(user: dict = Depends(get_current_user)):
 
 
 @app.post("/request/approve/{request_id}")
-async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "accounts"))):
+async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -2976,7 +2976,7 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/request/reject/{request_id}")
-async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts"))):
+async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -3003,7 +3003,7 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
 
 
 @app.post("/allocation/create")
-async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts"))):
+async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         if not request.items and not request.spare_part:
             raise HTTPException(status_code=400, detail="add at least one product or a spare part")
@@ -3138,7 +3138,7 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
 
 @app.post("/allocation/return/{allocation_id}")
-async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
+async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
 
     try:
         db = allocation_manager()
