@@ -957,6 +957,57 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                 except Exception as restock_err:
                     logging.error(f"order {order_id} cancelled but restocking inventory failed: {restock_err}")
 
+        # Marking an order "returned" needs to know exactly which product(s)
+        # came back (an order can have multiple/coupled products) and, for
+        # each, whether it came back in working condition or faulty — sent
+        # by the caller as "returned_items": [{product_id, product_name,
+        # model_no, quantity, serial_numbers, condition: "ok"|"faulty"}].
+        # OK units go back into whatever category they were already stocked
+        # under (restock_returned_units — merges into the matching
+        # product_id+product_name+model_no lot, or creates one). Faulty
+        # units are instead pushed into the "damaged" inventory category
+        # (add_or_merge — merges into an existing damaged entry for the same
+        # product_id+model_no, quantity bumped up, or creates a new one).
+        if updated.get("status") == "returned" and order.get("status") != "returned":
+            return_reason = (updated.get("return_reason") or "").strip()
+            returned_items = updated.get("returned_items") or []
+            if not return_reason:
+                raise HTTPException(status_code=400, detail="a reason is required when marking an order as returned")
+            if not returned_items:
+                raise HTTPException(status_code=400, detail="select at least one product that was returned")
+
+            inv_db = inventory_manager()
+            for ret_item in returned_items:
+                product_id = ret_item.get("product_id")
+                product_name = ret_item.get("product_name", "")
+                model_no = ret_item.get("model_no", "") or ""
+                quantity = int(ret_item.get("quantity", 0) or 0)
+                serials = ret_item.get("serial_numbers") or []
+                condition = ret_item.get("condition")  # "ok" | "faulty"
+                if not product_id or quantity <= 0:
+                    continue
+
+                if condition == "faulty":
+                    inventory_manager(
+                        product_name=product_name,
+                        product_id=product_id,
+                        quantity=quantity,
+                        model_no=model_no,
+                        serial_numbers=serials,
+                        product_type="damaged",
+                        reason=f"returned faulty from order {order_id}: {return_reason}",
+                    ).add_or_merge(collection_name=INVENTORY_COLLECTION)
+                else:
+                    inv_db.restock_returned_units(
+                        collection_name=INVENTORY_COLLECTION,
+                        product_id=product_id,
+                        product_name=product_name,
+                        model_no=model_no,
+                        quantity=quantity,
+                        serial_numbers=serials,
+                    )
+            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) processed back into inventory")
+
         # These fields actually live inside order["items"][0], not at the
         # top level of the order document — editing them has to go through
         # the item, or they silently land as an unused stray field and the

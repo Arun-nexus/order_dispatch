@@ -78,12 +78,12 @@ function updateCards(orders) {
 }
 
 function statusClass(status) {
-  const map = { placed: 'pending', delivered: 'delivered', cancelled: 'cancel' };
+  const map = { placed: 'pending', delivered: 'delivered', cancelled: 'cancel', returned: 'cancel' };
   return map[status] || 'pending';
 }
 
 function statusLabel(status) {
-  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled' };
+  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled', returned: 'Returned' };
   return map[status] || status || '';
 }
 
@@ -384,6 +384,8 @@ function openOrderStatusModal(o) {
   const select = modal.querySelector('select');
   const reasonBox = modal.querySelector('.cancel-reason');
   const remarkBox = modal.querySelector('.pending-remark');
+  const returnReasonBox = modal.querySelector('.return-reason');
+  const returnItemsBox = modal.querySelector('.return-items-box');
   if (select) [...select.options].forEach(opt => opt.selected = opt.value === o.status);
   if (reasonBox) {
     reasonBox.value = o.status === 'cancelled' ? (o.cancel_reason || '') : '';
@@ -393,7 +395,80 @@ function openOrderStatusModal(o) {
     remarkBox.value = o.status === 'placed' ? (o.remark || '') : '';
     remarkBox.style.display = o.status === 'placed' ? 'block' : 'none';
   }
+  if (returnReasonBox) {
+    returnReasonBox.value = o.status === 'returned' ? (o.return_reason || '') : '';
+    returnReasonBox.style.display = o.status === 'returned' ? 'block' : 'none';
+  }
+  if (returnItemsBox) {
+    returnItemsBox.style.display = o.status === 'returned' ? 'flex' : 'none';
+    if (o.status === 'returned') renderReturnItemsBox(returnItemsBox, o);
+  }
   modal.style.display = 'flex';
+}
+
+// ---------- Return items picker (which product(s), which serial(s), what condition) ----------
+function renderReturnItemsBox(box, o) {
+  const items = o.items || [];
+  box.innerHTML = items.map((it, idx) => {
+    const serials = it.serial_numbers || [];
+    return `
+    <div class="returnItemRow" data-idx="${idx}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;">
+        <input type="checkbox" class="returnItemCheck">
+        ${it.product_name ?? ''} <small style="color:#94a3b8;font-weight:400;">(qty ${it.quantity ?? 0})</small>
+      </label>
+      <div class="returnItemDetails" style="display:none;margin-top:8px;padding-left:22px;">
+        ${serials.length ? `
+        <p style="font-size:11px;color:#64748b;margin-bottom:4px;">Which unit(s) came back?</p>
+        ${serials.map(sn => `
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;">
+            <input type="checkbox" class="returnSerialCheck" value="${sn}"> ${sn}
+          </label>`).join('')}
+        ` : ''}
+        <p style="font-size:11px;color:#64748b;margin:6px 0 4px;">Condition</p>
+        <div style="display:flex;gap:14px;font-size:12px;">
+          <label><input type="radio" name="condition-${idx}" class="returnConditionOk" value="ok" checked> OK — restock</label>
+          <label><input type="radio" name="condition-${idx}" class="returnConditionFaulty" value="faulty"> Faulty — mark damaged</label>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  box.querySelectorAll('.returnItemCheck').forEach(chk => {
+    chk.addEventListener('change', () => {
+      chk.closest('.returnItemRow').querySelector('.returnItemDetails').style.display = chk.checked ? 'block' : 'none';
+    });
+  });
+}
+
+function collectReturnedItems(o, box) {
+  const items = o.items || [];
+  const rows = [...box.querySelectorAll('.returnItemRow')];
+  const returned = [];
+  for (const row of rows) {
+    const checked = row.querySelector('.returnItemCheck').checked;
+    if (!checked) continue;
+    const idx = Number(row.dataset.idx);
+    const original = items[idx] || {};
+    const serialChecks = [...row.querySelectorAll('.returnSerialCheck')];
+    const selectedSerials = serialChecks.filter(c => c.checked).map(c => c.value);
+    // if the item has serials on file, at least one must be picked so we know
+    // exactly which unit came back; if it has none, the whole line quantity returns.
+    if (serialChecks.length && !selectedSerials.length) {
+      throw new Error(`Select which serial number(s) came back for ${original.product_name}.`);
+    }
+    const condition = row.querySelector('.returnConditionFaulty').checked ? 'faulty' : 'ok';
+    returned.push({
+      product_id: original.product_id,
+      product_name: original.product_name,
+      model_no: original.model_no || '',
+      quantity: selectedSerials.length || original.quantity || 1,
+      serial_numbers: selectedSerials,
+      condition
+    });
+  }
+  if (!returned.length) throw new Error('Select at least one product that was returned.');
+  return returned;
 }
 
 function wireHeaderButtons() {
@@ -469,7 +544,7 @@ function wireFilter() {
     const paymentVal = selects[1]?.value || '';
     const dateVal = dateInput?.value || '';
 
-    const statusMap = { 'Pending': 'placed', 'Processing': 'processing', 'Delivered': 'delivered', 'Cancelled': 'cancelled' };
+    const statusMap = { 'Pending': 'placed', 'Processing': 'processing', 'Delivered': 'delivered', 'Cancelled': 'cancelled', 'Returned': 'returned' };
     const wantedStatus = statusMap[statusVal];
 
     const filtered = orderState.orders.filter(o => {
@@ -488,7 +563,7 @@ function wireFilter() {
 function exportOrdersCSV() {
   openExportWizard({
     title: 'Export Orders',
-    statusOptions: ['placed', 'processing', 'delivered', 'cancelled'],
+    statusOptions: ['placed', 'processing', 'delivered', 'cancelled', 'returned'],
     dateField: 'order_date',
     dateLabel: 'Order Date',
     getRows: () => orderState.orders,
@@ -642,6 +717,7 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
     <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
+    <div class="detail"><small>Return Reason</small><p>${o.status === 'returned' ? (o.return_reason || '-') : '-'}</p></div>
     <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Warranty</small><p>${(o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +₹${o.warranty_charge ?? 0})` : 'Standard (1 Year)'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
@@ -665,10 +741,20 @@ function wireDetailModals() {
     const statusSelect = statusForm.querySelector('select');
     const reasonBox = statusForm.querySelector('.cancel-reason');
     const remarkBox = statusForm.querySelector('.pending-remark');
+    const returnReasonBox = statusForm.querySelector('.return-reason');
+    const returnItemsBox = statusForm.querySelector('.return-items-box');
     if (statusSelect) {
       statusSelect.addEventListener('change', () => {
         if (reasonBox) reasonBox.style.display = statusSelect.value === 'cancelled' ? 'block' : 'none';
         if (remarkBox) remarkBox.style.display = statusSelect.value === 'placed' ? 'block' : 'none';
+        if (returnReasonBox) returnReasonBox.style.display = statusSelect.value === 'returned' ? 'block' : 'none';
+        if (returnItemsBox) {
+          returnItemsBox.style.display = statusSelect.value === 'returned' ? 'flex' : 'none';
+          if (statusSelect.value === 'returned') {
+            const o = orderState.orders.find(x => x.order_id === orderState.activeOrderId);
+            if (o) renderReturnItemsBox(returnItemsBox, o);
+          }
+        }
       });
     }
     statusForm.addEventListener('submit', async e => {
@@ -684,6 +770,22 @@ function wireDetailModals() {
       const updated_order_value = { status: newStatus };
       if (newStatus === 'cancelled') updated_order_value.cancel_reason = reason;
       if (newStatus === 'placed') updated_order_value.remark = remark;
+      if (newStatus === 'returned') {
+        const returnReason = returnReasonBox ? returnReasonBox.value.trim() : '';
+        if (!returnReason) {
+          alert('Please provide a reason for return.');
+          returnReasonBox?.focus();
+          return;
+        }
+        const o = orderState.orders.find(x => x.order_id === orderState.activeOrderId);
+        try {
+          updated_order_value.return_reason = returnReason;
+          updated_order_value.returned_items = collectReturnedItems(o, returnItemsBox);
+        } catch (err) {
+          alert(err.message);
+          return;
+        }
+      }
       try {
         const res = await apiFetch(`/order/update/${orderState.activeOrderId}`, {
           method: 'POST',
@@ -694,6 +796,7 @@ function wireDetailModals() {
         if (!res.ok) throw new Error(data.detail || 'status update failed');
         document.getElementById('orderStatusModal').style.display = 'none';
         await loadOrders();
+        await loadInventoryForOrders();
       } catch (err) {
         if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
       }

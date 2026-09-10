@@ -143,6 +143,7 @@
             <option>Processing</option>
             <option>Delivered</option>
             <option>Cancelled</option>
+            <option>Returned</option>
           </select>
         </div>
         <div class="filter-box">
@@ -322,7 +323,7 @@
   <!-- Update Order Status Modal -->
   <div id="orderStatusModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Update Order Status</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
@@ -333,11 +334,15 @@
           <option value="processing">Processing</option>
           <option value="delivered">Delivered</option>
           <option value="cancelled">Cancelled</option>
+          <option value="returned">Returned</option>
         </select>
         <textarea class="cancel-reason" placeholder="Reason for cancellation" rows="3"
           style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
         <textarea class="pending-remark" placeholder="Remark for distributor (optional)" rows="3"
           style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
+        <textarea class="return-reason" placeholder="Reason for return" rows="3" required
+          style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
+        <div class="return-items-box" style="display:none;flex-direction:column;gap:10px;max-height:280px;overflow-y:auto;"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
           <button type="button" class="cancel-btn"
             style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
