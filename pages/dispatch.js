@@ -1,4 +1,4 @@
-const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [] };
+const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [], searchQuery: '', activeFilters: null };
 let dispPage = 1;
 const DISP_PAGE_SIZE = 7;
 
@@ -22,8 +22,59 @@ function renderTablePagination(container, page, totalPages, onChange) {
 document.addEventListener('DOMContentLoaded', () => {
   loadDispatchQueue();
   wireFilter();
+  wireHeaderSearch();
   setInterval(loadDispatchQueue, 60 * 1000);
 });
+
+// ---------- Header search (docket, invoice, product, serial number) ----------
+function wireHeaderSearch() {
+  const input = document.querySelector('.search input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    dispState.searchQuery = input.value.trim().toLowerCase();
+    dispPage = 1;
+    renderTable(getFilteredRows());
+  });
+}
+
+function rowSerialNumbers(row) {
+  if (row.kind === 'spare_part') return [];
+  return (row.data.items || []).flatMap(i => i.serial_numbers || []);
+}
+
+// Combines the header search box with whatever the type/status "Apply
+// Filter" bar last set, so any action that reloads data (confirm dispatch,
+// add docket, etc.) re-renders the SAME filtered/searched view.
+function getFilteredRows() {
+  let rows = combinedRows();
+
+  const q = dispState.searchQuery;
+  if (q) {
+    rows = rows.filter(row => {
+      const d = row.data;
+      const docket = (d.dispatch?.docket_no || '').toLowerCase();
+      const invoice = (d.dispatch?.invoice_no || '').toLowerCase();
+      const product = productLabel(row).toLowerCase();
+      const serials = rowSerialNumbers(row).map(s => (s || '').toLowerCase());
+      return docket.includes(q) || invoice.includes(q) || product.includes(q) ||
+        serials.some(s => s.includes(q));
+    });
+  }
+
+  const f = dispState.activeFilters;
+  if (f) {
+    rows = rows.filter(row => {
+      const typeOk = !f.type || row.kind === f.type;
+      const hasDispatch = !!row.data.dispatch;
+      const hasDocket = hasDispatch && !!row.data.dispatch.docket_no;
+      const state = !hasDispatch ? 'pending' : hasDocket ? 'dispatched' : 'in_progress';
+      const statusOk = !f.status || f.status === state;
+      return typeOk && statusOk;
+    });
+  }
+
+  return rows;
+}
 
 async function loadDispatchQueue() {
   try {
@@ -38,7 +89,7 @@ async function loadDispatchQueue() {
     dispState.dispatchedProductAlloc = data.dispatched_product_allocations || [];
     dispPage = 1;
     updateCards();
-    renderTable(combinedRows());
+    renderTable(getFilteredRows());
   } catch (err) {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load dispatch queue.');
@@ -172,15 +223,9 @@ function wireFilter() {
   document.querySelector('.filter-btn').addEventListener('click', () => {
     const type = document.getElementById('typeFilter').value;
     const status = document.getElementById('statusFilter').value;
-    const filtered = combinedRows().filter(row => {
-      const typeOk = !type || row.kind === type;
-      const hasDispatch = !!row.data.dispatch;
-      const hasDocket = hasDispatch && !!row.data.dispatch.docket_no;
-      const state = !hasDispatch ? 'pending' : hasDocket ? 'dispatched' : 'in_progress';
-      const statusOk = !status || status === state;
-      return typeOk && statusOk;
-    });
-    renderTable(filtered);
+    dispState.activeFilters = (type || status) ? { type, status } : null;
+    dispPage = 1;
+    renderTable(getFilteredRows());
   });
 }
 
@@ -206,6 +251,7 @@ function openViewDispatchModal(row) {
 
     bodyHtml = `
       <div class="detail"><small>Order ID</small><p>${d.order_id ?? ''}</p></div>
+      <div class="detail"><small>Order Date</small><p>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-GB') : '-'}</p></div>
       <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
       <div class="detail"><small>Status</small><p>${d.status ?? ''}</p></div>
       <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
@@ -243,6 +289,7 @@ function openViewDispatchModal(row) {
     <div class="detail"><small>Invoice No.</small><p>${disp.invoice_no ?? '-'}</p></div>
     <div class="detail"><small>Invoice Date</small><p>${disp.invoice_date ? new Date(disp.invoice_date).toLocaleDateString('en-GB') : '-'}</p></div>
     <div class="detail"><small>Mode of Delivery</small><p>${disp.mode_of_delivery ?? '-'}</p></div>
+    <div class="detail"><small>Dispatched By</small><p>${disp.dispatched_by ?? '-'}</p></div>
     <div class="detail"><small>Ship To</small><p>${disp.ship_to_different ? `${disp.ship_to_address?.company_name ?? ''}, ${disp.ship_to_address?.address ?? ''}` : 'Same as bill to'}</p></div>
     <div class="detail"><small>Dispatched At</small><p>${disp.dispatched_at ? new Date(disp.dispatched_at).toLocaleString('en-GB') : '-'}</p></div>
   ` : `<div class="detail"><small>Dispatch</small><p>Not yet dispatched</p></div>`;

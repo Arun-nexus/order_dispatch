@@ -26,8 +26,91 @@ document.addEventListener('DOMContentLoaded', () => {
   wireCategoryFilter();
   wireHeaderSearch();
   wireModals();
+  wireCardClicks();
   applyRolePermissions();
 });
+
+// ---------- Cards -> click to see details ----------
+function wireCardClicks() {
+  document.querySelectorAll('.card-clickable').forEach(card => {
+    card.addEventListener('click', () => openCardDetailModal(card.dataset.card));
+  });
+}
+
+function openCardDetailModal(cardType) {
+  const modal = document.getElementById('cardDetailModal');
+  if (!modal) return;
+  const content = modal.querySelector('.modal-content');
+  const products = invState.products;
+
+  const rowsHtml = (list, cols) => list.length
+    ? `<table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead><tr style="text-align:left;">${cols.map(c => `<th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">${c.label}</th>`).join('')}</tr></thead>
+        <tbody>${list.map(p => `<tr>${cols.map(c => `<td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${c.cell(p)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>`
+    : '<p style="color:#94a3b8;text-align:center;padding:16px;">No items to show.</p>';
+
+  let title = '';
+  let bodyHtml = '';
+
+  if (cardType === 'total_products') {
+    title = 'All Products';
+    bodyHtml = rowsHtml(products, [
+      { label: 'Product Name', cell: p => p.product_name ?? '' },
+      { label: 'Product ID', cell: p => p.product_id ?? '' },
+      { label: 'Quantity', cell: p => p.quantity ?? 0 }
+    ]);
+  } else if (cardType === 'total_stock') {
+    title = 'Stock by Product';
+    const sorted = [...products].sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
+    bodyHtml = rowsHtml(sorted, [
+      { label: 'Product Name', cell: p => p.product_name ?? '' },
+      { label: 'Quantity', cell: p => `<span class="stock ${stockClass(Number(p.quantity) || 0)}">${p.quantity ?? 0}</span>` }
+    ]);
+  } else if (cardType === 'low_stock') {
+    title = 'Low Stock Items (≤ 10 units)';
+    const lowItems = products.filter(p => (Number(p.quantity) || 0) <= 10);
+    bodyHtml = rowsHtml(lowItems, [
+      { label: 'Product Name', cell: p => p.product_name ?? '' },
+      { label: 'Product ID', cell: p => p.product_id ?? '' },
+      { label: 'Quantity', cell: p => `<span class="stock low">${p.quantity ?? 0}</span>` },
+      { label: 'Supplier', cell: p => p.supplier ?? '-' }
+    ]);
+  } else if (cardType === 'suppliers') {
+    title = 'Suppliers';
+    const bySupplier = {};
+    products.forEach(p => {
+      const s = p.supplier || 'Unknown';
+      bySupplier[s] = (bySupplier[s] || 0) + 1;
+    });
+    const list = Object.keys(bySupplier).sort().map(s => ({ supplier: s, count: bySupplier[s] }));
+    bodyHtml = rowsHtml(list, [
+      { label: 'Supplier', cell: p => p.supplier },
+      { label: 'Products Supplied', cell: p => p.count }
+    ]);
+  } else if (cardType === 'inventory_value') {
+    title = 'Inventory Value by Product';
+    const withValue = products.map(p => ({ ...p, __value: (Number(p.price) || 0) * (Number(p.quantity) || 0) }))
+      .sort((a, b) => b.__value - a.__value);
+    bodyHtml = rowsHtml(withValue, [
+      { label: 'Product Name', cell: p => p.product_name ?? '' },
+      { label: 'Quantity', cell: p => p.quantity ?? 0 },
+      { label: 'Price', cell: p => `₹${p.price ?? 0}` },
+      { label: 'Value', cell: p => `₹${p.__value}` }
+    ]);
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>${title}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${bodyHtml}`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
+  modal.style.display = 'flex';
+}
 
 // ---------- Product type (Product / Spare Parts / Damaged Product) helpers ----------
 const PRODUCT_TYPE_LABELS = {

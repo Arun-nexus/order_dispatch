@@ -2495,7 +2495,7 @@ async def active_services(user: dict = Depends(get_current_user)):
 
 
 @app.get("/service/available_hologram_parts")
-async def available_hologram_parts(user: dict = Depends(require_role("admin", "accounts"))):
+async def available_hologram_parts(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     """
     Powers the "Update Status" -> Completed -> spare part swap form on the
     Service page: instead of letting the technician type a free-text new

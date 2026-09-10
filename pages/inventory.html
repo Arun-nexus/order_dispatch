@@ -79,7 +79,7 @@
 
       <!-- CARDS -->
       <section class="cards">
-        <div class="card">
+        <div class="card card-clickable" data-card="total_products" style="cursor:pointer;">
           <div>
             <span>Total Products</span>
             <h2>0</h2>
@@ -87,7 +87,7 @@
           </div>
           <i class="fa-solid fa-box"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="total_stock" style="cursor:pointer;">
           <div>
             <span>Total Stock</span>
             <h2>0</h2>
@@ -95,7 +95,7 @@
           </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="low_stock" style="cursor:pointer;">
           <div>
             <span>Low Stock</span>
             <h2>0</h2>
@@ -103,7 +103,7 @@
           </div>
           <i class="fa-solid fa-triangle-exclamation"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="suppliers" style="cursor:pointer;">
           <div>
             <span>Suppliers</span>
             <h2>0</h2>
@@ -111,7 +111,7 @@
           </div>
           <i class="fa-solid fa-truck-field"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="inventory_value" style="cursor:pointer;">
           <div>
             <span>Inventory Value</span>
             <h2>₹0</h2>
@@ -120,6 +120,12 @@
           <i class="fa-solid fa-indian-rupee-sign"></i>
         </div>
       </section>
+
+      <!-- Card Detail Modal (built dynamically by inventory.js) -->
+      <div id="cardDetailModal" class="modal"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:80vh;overflow-y:auto;"></div>
+      </div>
 
       <!-- TOP ACTIONS -->
       <div class="top-actions">

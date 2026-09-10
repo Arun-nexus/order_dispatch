@@ -1,4 +1,4 @@
-const allocState = { allocations: [], products: [], requests: [] };
+const allocState = { allocations: [], products: [], requests: [], searchQuery: '', activeFilters: null };
 let allocPage = 1;
 const ALLOC_PAGE_SIZE = 7;
 
@@ -27,11 +27,65 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPendingRequests();
   wireTopActions();
   wireFilter();
+  wireHeaderSearch();
   injectAllocateModal();
   wireNotifBell();
-  setInterval(() => renderAllocationsTable(allocState.allocations), 60 * 1000); // keep countdowns fresh
+  setInterval(() => renderAllocationsTable(getFilteredAllocations()), 60 * 1000); // keep countdowns fresh
   setInterval(loadPendingRequests, 60 * 1000);
 });
+
+// ---------- Header search (by serial number, product name or sales person) ----------
+function wireHeaderSearch() {
+  const input = document.querySelector('.search input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    allocState.searchQuery = input.value.trim().toLowerCase();
+    allocPage = 1;
+    renderAllocationsTable(getFilteredAllocations());
+  });
+}
+
+// Combines the header search box with whatever the "Apply Filter" bar last
+// set, so any action that re-fetches data (approve, return, allocate, etc.)
+// can re-render the SAME filtered/searched view instead of snapping back to
+// the full unfiltered list.
+function getFilteredAllocations() {
+  let list = allocState.allocations;
+
+  const q = allocState.searchQuery;
+  if (q) {
+    list = list.filter(a => {
+      const isSpare = a.allocation_type === 'spare_part';
+      const serials = isSpare ? [] : (a.items || []).flatMap(i => i.serial_numbers || []);
+      const products = isSpare
+        ? [a.spare_part?.part_name || '']
+        : (a.items || []).map(i => i.product_name || '');
+      const who = isSpare
+        ? `service #${(a.spare_part?.service_id || '').slice(0, 8)}`
+        : (a.sales_person?.name || '');
+      return serials.some(s => (s || '').toLowerCase().includes(q)) ||
+        products.some(p => p.toLowerCase().includes(q)) ||
+        who.toLowerCase().includes(q) ||
+        (a.company_name || '').toLowerCase().includes(q) ||
+        (a.allocation_id || '').toLowerCase().includes(q);
+    });
+  }
+
+  const f = allocState.activeFilters;
+  if (f) {
+    list = list.filter(a => {
+      const meta = returnMeta(a);
+      const statusOk = !f.status
+        || (f.status === 'Pending' && a.return_status !== 'returned' && !meta.overdue)
+        || (f.status === 'Overdue' && meta.overdue && a.return_status !== 'returned')
+        || (f.status === 'Returned' && a.return_status === 'returned');
+      const dateOk = !f.date || (a.allotment_date || '').startsWith(f.date);
+      return statusOk && dateOk;
+    });
+  }
+
+  return list;
+}
 
 function wireNotifBell() {
   const bell = document.getElementById('notifBell');
@@ -218,7 +272,7 @@ async function loadAllocations() {
     const data = await res.json();
     allocState.allocations = (data.dataset || []).slice().reverse();
     allocPage = 1;
-    renderAllocationsTable(allocState.allocations);
+    renderAllocationsTable(getFilteredAllocations());
     updateAllocationCards(allocState.allocations);
   } catch (err) {
     console.error(err);
@@ -621,20 +675,12 @@ function wireFilter() {
   filterBtn.addEventListener('click', () => {
     const [statusSel] = document.querySelectorAll('.filter-box select');
     const [dateBox] = document.querySelectorAll('.filter-box input[type="date"]');
-    const status = statusSel.value;
+    const status = statusSel.value === 'All Status' ? '' : statusSel.value;
     const date = dateBox.value;
 
-    const filtered = allocState.allocations.filter(a => {
-      const meta = returnMeta(a);
-      const statusOk = status === 'All Status' || !status
-        || (status === 'Pending' && a.return_status !== 'returned' && !meta.overdue)
-        || (status === 'Overdue' && meta.overdue && a.return_status !== 'returned')
-        || (status === 'Returned' && a.return_status === 'returned');
-      const dateOk = !date || (a.allotment_date || '').startsWith(date);
-      return statusOk && dateOk;
-    });
+    allocState.activeFilters = (status || date) ? { status, date } : null;
     allocPage = 1;
-    renderAllocationsTable(filtered);
+    renderAllocationsTable(getFilteredAllocations());
   });
 }
 
