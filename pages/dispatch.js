@@ -117,10 +117,9 @@ function updateCards() {
   document.getElementById('cardTotalDispatched').textContent = dispState.dispatchedOrders.length + dispState.dispatchedSpare.length + dispState.dispatchedProductAlloc.length;
 }
 
-function referenceLabel(row) {
-  if (row.kind === 'order') return `#${(row.data.order_id || '').slice(0, 8)}`;
-  if (row.kind === 'product_allocation') return `#${(row.data.allocation_id || '').slice(0, 8)}`;
-  return `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)}`;
+function dateLabel(row) {
+  const dt = rowBestDate(row.data);
+  return dt ? new Date(dt).toLocaleDateString('en-GB') : '-';
 }
 
 function productLabel(row) {
@@ -176,7 +175,7 @@ function renderTable(rows) {
     const typeLabel = row.kind === 'order' ? 'Order' : row.kind === 'product_allocation' ? 'Product' : 'Spare Part';
     tr.innerHTML = `
       <td>${typeLabel}</td>
-      <td>${referenceLabel(row)}</td>
+      <td>${dateLabel(row)}</td>
       <td>${productLabel(row)}</td>
       <td>${billToLabel(row)}</td>
       <td>${d.dispatch?.docket_no ?? '-'}</td>
