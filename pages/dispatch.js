@@ -284,7 +284,6 @@ function openViewDispatchModal(row) {
   }
 
   const dispatchHtml = disp ? `
-    <div class="detail"><small>Docket No.</small><p>${disp.docket_no ?? '-'}</p></div>
     <div class="detail"><small>Invoice No.</small><p>${disp.invoice_no ?? '-'}</p></div>
     <div class="detail"><small>Invoice Date</small><p>${disp.invoice_date ? new Date(disp.invoice_date).toLocaleDateString('en-GB') : '-'}</p></div>
     <div class="detail"><small>Mode of Delivery</small><p>${disp.mode_of_delivery ?? '-'}</p></div>
@@ -294,9 +293,19 @@ function openViewDispatchModal(row) {
   ` : `<div class="detail"><small>Dispatch</small><p>Not yet dispatched</p></div>`;
 
   content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
       <h3>Dispatch Details</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      <div style="display:flex;align-items:flex-start;gap:16px;">
+        <div style="text-align:right;">
+          <small style="color:#64748b;">Docket No.</small>
+          <p style="margin:2px 0 0;font-weight:600;">${disp?.docket_no ?? '-'}</p>
+        </div>
+        <div style="text-align:right;">
+          <small style="color:#64748b;">By</small>
+          <p style="margin:2px 0 0;font-weight:600;">${disp?.dispatched_through ?? '-'}</p>
+        </div>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
     </div>
     ${bodyHtml}
     <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
@@ -345,6 +354,8 @@ function openDispatchModal(row) {
         <option value="self_pickup" ${existing?.mode_of_delivery === 'self_pickup' ? 'selected' : ''}>Self Pickup</option>
       </select>
 
+      <input name="dispatched_through" placeholder="By (Courier / Transporter Name)" value="${existing?.dispatched_through ?? ''}" required>
+
       <input name="invoice_no" placeholder="Invoice No." value="${existing?.invoice_no ?? ''}" required>
       <input name="invoice_date" type="date" value="${existing?.invoice_date ? existing.invoice_date.slice(0, 10) : ''}" required>
 
@@ -387,6 +398,7 @@ function openDispatchModal(row) {
       invoice_no: fd.get('invoice_no').trim().toLowerCase(),
       invoice_date: fd.get('invoice_date'),
       mode_of_delivery: fd.get('mode_of_delivery'),
+      dispatched_through: fd.get('dispatched_through').trim(),
       ship_to_different: shipDifferent,
       ship_to_address: shipDifferent ? { company_name: fd.get('ship_company_name') || '', address: fd.get('ship_address') || '' } : null,
       image: imageDataUrl || null
