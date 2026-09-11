@@ -144,7 +144,12 @@ function rowBestDate(d) {
 }
 
 function renderTable(rows) {
-  const sorted = [...rows].sort((a, b) => new Date(rowBestDate(b.data) || 0) - new Date(rowBestDate(a.data) || 0));
+  const sorted = [...rows].sort((a, b) => {
+    const aPending = !a.data.dispatch;
+    const bPending = !b.data.dispatch;
+    if (aPending !== bPending) return aPending ? -1 : 1;
+    return new Date(rowBestDate(b.data) || 0) - new Date(rowBestDate(a.data) || 0);
+  });
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / DISP_PAGE_SIZE));
   dispPage = Math.min(Math.max(1, dispPage), totalPages);
