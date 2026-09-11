@@ -990,105 +990,124 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             if not returned_items:
                 raise HTTPException(status_code=400, detail="select at least one product that was returned")
 
-            already_serials = set(order.get("returned_serials_processed") or [])
-            already_qty = dict(order.get("returned_qty_processed") or {})
-            newly_processed_serials = []
-            processed_records = []  # what actually got processed this submission — for order history/view
+            already_serial_conditions = dict(order.get("returned_serial_conditions") or {})
+            already_qty_conditions = dict(order.get("returned_qty_conditions") or {})
+            processed_records = []
 
             inv_db = inventory_manager()
+
+            def _reverse(prev_condition, product_id, model_no, quantity, serials):
+                query = {"product_id": product_id, "model_no": model_no}
+                query["product_type"] = "damaged" if prev_condition == "faulty" else {"$ne": "damaged"}
+                existing = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query=query)
+                if not existing:
+                    return
+                entry = existing[0]
+                remaining_serials = [s for s in (entry.get("serial_numbers") or []) if s not in serials]
+                new_quantity = max(0, int(entry.get("quantity", 0) or 0) - quantity)
+                if prev_condition == "faulty" and new_quantity <= 0 and not remaining_serials:
+                    inv_db.delete(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(entry["_id"])})
+                else:
+                    inv_db.update(
+                        collection_name=INVENTORY_COLLECTION,
+                        query={"_id": ObjectId(entry["_id"])},
+                        update_values={"serial_numbers": remaining_serials, "quantity": new_quantity}
+                    )
+
+            def _apply(condition, product_id, product_name, model_no, quantity, serials):
+                if condition == "faulty":
+                    existing_damaged = inv_db.get_data(
+                        collection_name=INVENTORY_COLLECTION,
+                        query={"product_id": product_id, "model_no": model_no, "product_type": "damaged"}
+                    )
+                    damage_reason = f"returned faulty from order {order_id}: {return_reason}"
+                    if existing_damaged:
+                        entry = existing_damaged[0]
+                        merged_serials = (entry.get("serial_numbers") or []) + list(serials)
+                        new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+                        inv_db.update(
+                            collection_name=INVENTORY_COLLECTION,
+                            query={"_id": ObjectId(entry["_id"])},
+                            update_values={"serial_numbers": merged_serials, "quantity": new_quantity, "reason": damage_reason}
+                        )
+                    else:
+                        inventory_manager(
+                            product_name=product_name,
+                            product_id=product_id,
+                            quantity=quantity,
+                            model_no=model_no,
+                            serial_numbers=list(serials),
+                            product_type="damaged",
+                            reason=damage_reason,
+                        ).add(collection_name=INVENTORY_COLLECTION)
+                else:
+                    inv_db.restock_returned_units(
+                        collection_name=INVENTORY_COLLECTION,
+                        product_id=product_id,
+                        product_name=product_name,
+                        model_no=model_no,
+                        quantity=quantity,
+                        serial_numbers=list(serials),
+                    )
+
             for ret_item in returned_items:
                 product_id = ret_item.get("product_id")
                 product_name = ret_item.get("product_name", "")
                 model_no = ret_item.get("model_no", "") or ""
                 serials = [s for s in (ret_item.get("serial_numbers") or []) if s]
-                condition = ret_item.get("condition")  # "ok" | "faulty"
+                condition = ret_item.get("condition")
                 if not product_id:
                     continue
 
-                qty_key = f"{product_id}|{model_no}"
-                if serials:
-                    fresh_serials = [s for s in serials if s not in already_serials]
-                    if not fresh_serials:
-                        continue  # every serial on this line was already processed in an earlier submission
-                    quantity = len(fresh_serials)
-                else:
-                    already_done = int(already_qty.get(qty_key, 0) or 0)
-                    requested_qty = int(ret_item.get("quantity", 0) or 0)
-                    quantity = max(0, requested_qty - already_done)
-                    fresh_serials = []
-                    if quantity <= 0:
-                        continue  # this line's quantity was already fully processed earlier
-
                 try:
-                    if condition == "faulty":
-                        # Deliberately NOT using add_or_merge() here — its
-                        # cross-category "serial found under a different
-                        # product_type elsewhere" migration logic is meant for
-                        # the manual "Add Existing Product" restock flow and
-                        # isn't needed for a fresh return (the serial isn't
-                        # anywhere else in inventory at this point, it was
-                        # already deducted when the order was created). A plain,
-                        # direct merge-by-product_id+model_no+product_type here
-                        # is simpler and avoids that logic misfiring.
-                        existing_damaged = inv_db.get_data(
-                            collection_name=INVENTORY_COLLECTION,
-                            query={"product_id": product_id, "model_no": model_no, "product_type": "damaged"}
-                        )
-                        damage_reason = f"returned faulty from order {order_id}: {return_reason}"
-                        if existing_damaged:
-                            entry = existing_damaged[0]
-                            merged_serials = (entry.get("serial_numbers") or []) + list(fresh_serials)
-                            new_quantity = int(entry.get("quantity", 0) or 0) + quantity
-                            inv_db.update(
-                                collection_name=INVENTORY_COLLECTION,
-                                query={"_id": ObjectId(entry["_id"])},
-                                update_values={"serial_numbers": merged_serials, "quantity": new_quantity, "reason": damage_reason}
-                            )
-                        else:
-                            inventory_manager(
-                                product_name=product_name,
-                                product_id=product_id,
-                                quantity=quantity,
-                                model_no=model_no,
-                                serial_numbers=fresh_serials,
-                                product_type="damaged",
-                                reason=damage_reason,
-                            ).add(collection_name=INVENTORY_COLLECTION)
+                    if serials:
+                        for s in serials:
+                            prev_condition = already_serial_conditions.get(s)
+                            if prev_condition == condition:
+                                continue
+                            if prev_condition:
+                                _reverse(prev_condition, product_id, model_no, 1, [s])
+                            _apply(condition, product_id, product_name, model_no, 1, [s])
+                            already_serial_conditions[s] = condition
+                            processed_records.append({
+                                "product_id": product_id, "product_name": product_name, "model_no": model_no,
+                                "condition": condition, "quantity": 1, "serial_numbers": [s]
+                            })
                     else:
-                        inv_db.restock_returned_units(
-                            collection_name=INVENTORY_COLLECTION,
-                            product_id=product_id,
-                            product_name=product_name,
-                            model_no=model_no,
-                            quantity=quantity,
-                            serial_numbers=fresh_serials,
-                        )
+                        key = f"{product_id}|{model_no}"
+                        requested_qty = int(ret_item.get("quantity", 0) or 0)
+                        prev = already_qty_conditions.get(key)
+                        if prev and prev["condition"] == condition:
+                            delta = max(0, requested_qty - int(prev["quantity"]))
+                            if delta <= 0:
+                                continue
+                            _apply(condition, product_id, product_name, model_no, delta, [])
+                            prev["quantity"] = requested_qty
+                            qty_for_record = delta
+                        elif prev:
+                            _reverse(prev["condition"], product_id, model_no, int(prev["quantity"]), [])
+                            _apply(condition, product_id, product_name, model_no, requested_qty, [])
+                            already_qty_conditions[key] = {"condition": condition, "quantity": requested_qty}
+                            qty_for_record = requested_qty
+                        else:
+                            if requested_qty <= 0:
+                                continue
+                            _apply(condition, product_id, product_name, model_no, requested_qty, [])
+                            already_qty_conditions[key] = {"condition": condition, "quantity": requested_qty}
+                            qty_for_record = requested_qty
+
+                        processed_records.append({
+                            "product_id": product_id, "product_name": product_name, "model_no": model_no,
+                            "condition": condition, "quantity": qty_for_record, "serial_numbers": []
+                        })
                 except Exception as ret_err:
                     logging.error(f"order {order_id} return processing failed for {product_id} ({condition}): {ret_err}")
                     raise HTTPException(status_code=400, detail=f"could not process return for {product_name or product_id}: {ret_err}")
 
-                if fresh_serials:
-                    newly_processed_serials.extend(fresh_serials)
-                else:
-                    already_qty[qty_key] = int(already_qty.get(qty_key, 0) or 0) + quantity
-
-                processed_records.append({
-                    "product_id": product_id,
-                    "product_name": product_name,
-                    "model_no": model_no,
-                    "condition": condition,
-                    "quantity": quantity,
-                    "serial_numbers": fresh_serials,
-                })
-
-            updated["returned_serials_processed"] = list(already_serials) + newly_processed_serials
-            updated["returned_qty_processed"] = already_qty
-            # Accumulate across submissions (instead of overwriting) so the
-            # order's full return history — every product, its serial(s) and
-            # condition — stays visible in View Order Details even if the
-            # return was corrected/added-to across more than one submission.
+            updated["returned_serial_conditions"] = already_serial_conditions
+            updated["returned_qty_conditions"] = already_qty_conditions
             updated["returned_items"] = list(order.get("returned_items") or []) + processed_records
-            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) submitted, {len(newly_processed_serials)} new serial(s) processed")
+            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) submitted, {len(processed_records)} unit(s) processed")
 
         # These fields actually live inside order["items"][0], not at the
         # top level of the order document — editing them has to go through
