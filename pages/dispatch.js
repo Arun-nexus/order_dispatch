@@ -1,6 +1,6 @@
 const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [], searchQuery: '', activeFilters: null };
 let dispPage = 1;
-const DISP_PAGE_SIZE = 7;
+const DISP_PAGE_SIZE = 30;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
