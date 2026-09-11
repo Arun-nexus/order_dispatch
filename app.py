@@ -987,25 +987,53 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                 if not product_id or quantity <= 0:
                     continue
 
-                if condition == "faulty":
-                    inventory_manager(
-                        product_name=product_name,
-                        product_id=product_id,
-                        quantity=quantity,
-                        model_no=model_no,
-                        serial_numbers=serials,
-                        product_type="damaged",
-                        reason=f"returned faulty from order {order_id}: {return_reason}",
-                    ).add_or_merge(collection_name=INVENTORY_COLLECTION)
-                else:
-                    inv_db.restock_returned_units(
-                        collection_name=INVENTORY_COLLECTION,
-                        product_id=product_id,
-                        product_name=product_name,
-                        model_no=model_no,
-                        quantity=quantity,
-                        serial_numbers=serials,
-                    )
+                try:
+                    if condition == "faulty":
+                        # Deliberately NOT using add_or_merge() here — its
+                        # cross-category "serial found under a different
+                        # product_type elsewhere" migration logic is meant for
+                        # the manual "Add Existing Product" restock flow and
+                        # isn't needed for a fresh return (the serial isn't
+                        # anywhere else in inventory at this point, it was
+                        # already deducted when the order was created). A plain,
+                        # direct merge-by-product_id+model_no+product_type here
+                        # is simpler and avoids that logic misfiring.
+                        existing_damaged = inv_db.get_data(
+                            collection_name=INVENTORY_COLLECTION,
+                            query={"product_id": product_id, "model_no": model_no, "product_type": "damaged"}
+                        )
+                        damage_reason = f"returned faulty from order {order_id}: {return_reason}"
+                        if existing_damaged:
+                            entry = existing_damaged[0]
+                            merged_serials = (entry.get("serial_numbers") or []) + list(serials)
+                            new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+                            inv_db.update(
+                                collection_name=INVENTORY_COLLECTION,
+                                query={"_id": ObjectId(entry["_id"])},
+                                update_values={"serial_numbers": merged_serials, "quantity": new_quantity, "reason": damage_reason}
+                            )
+                        else:
+                            inventory_manager(
+                                product_name=product_name,
+                                product_id=product_id,
+                                quantity=quantity,
+                                model_no=model_no,
+                                serial_numbers=serials,
+                                product_type="damaged",
+                                reason=damage_reason,
+                            ).add(collection_name=INVENTORY_COLLECTION)
+                    else:
+                        inv_db.restock_returned_units(
+                            collection_name=INVENTORY_COLLECTION,
+                            product_id=product_id,
+                            product_name=product_name,
+                            model_no=model_no,
+                            quantity=quantity,
+                            serial_numbers=serials,
+                        )
+                except Exception as ret_err:
+                    logging.error(f"order {order_id} return processing failed for {product_id} ({condition}): {ret_err}")
+                    raise HTTPException(status_code=400, detail=f"could not process return for {product_name or product_id}: {ret_err}")
             logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) processed back into inventory")
 
         # These fields actually live inside order["items"][0], not at the
@@ -2119,6 +2147,156 @@ async def inventory(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("inventory dataset cannot be fetched")
         raise HTTPException(status_code=500, detail="inventory dataset cannot be fetched")
+
+
+@app.get("/inventory/serial_history/{serial_number}")
+async def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
+    """
+    Full lifetime trail for one serial number, stitched together from every
+    collection that could mention it — inventory (current stock), assembly
+    (when/how it was built), orders (sold + any return), and allocations
+    (demo unit or sales-person allocation + any return/damage), plus every
+    service record raised against it. Returned as a single chronologically
+    sorted timeline so the "Record" search on the Inventory page can show a
+    unit's whole history in one place: how it entered stock, where it went,
+    and what happened to it since.
+    """
+    try:
+        serial_number = serial_number.strip()
+        if not serial_number:
+            raise HTTPException(status_code=400, detail="serial number is required")
+
+        events = []
+
+        # ---- Currently in inventory (and under which category) ----
+        inv_db = inventory_manager()
+        inv_entries = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"serial_numbers": serial_number})
+        for entry in inv_entries:
+            events.append({
+                "type": "inventory",
+                "label": f"In stock — {productTypeLabelPy(entry.get('product_type'))}",
+                "date": entry.get("purchase_date"),
+                "details": {
+                    "product_name": entry.get("product_name"),
+                    "product_id": entry.get("product_id"),
+                    "model_no": entry.get("model_no"),
+                    "supplier": entry.get("supplier"),
+                    "lot_no": entry.get("lot_no"),
+                    "product_type": entry.get("product_type"),
+                    "reason": entry.get("reason") or None,
+                }
+            })
+
+        # ---- Assembly (when/how this unit was built, if it was assembled in-house) ----
+        asm_db = assembly_manager()
+        assemblies = asm_db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"serials.serial_number": serial_number})
+        for asm in assemblies:
+            serial_entry = next((s for s in asm.get("serials", []) if s.get("serial_number") == serial_number), {})
+            events.append({
+                "type": "assembly",
+                "label": "Assembled",
+                "date": asm.get("completed_at") or asm.get("assembly_date") or asm.get("created_at"),
+                "details": {
+                    "assembly_id": asm.get("assembly_id"),
+                    "product_name": asm.get("product_name"),
+                    "hologram_number": serial_entry.get("hologram_number"),
+                    "status": asm.get("status"),
+                }
+            })
+
+        # ---- Orders (sale + any return) ----
+        order_db = order_manager()
+        orders = order_db.get_data(collection_name=ORDERS_COLLECTION, query={"items.serial_numbers": serial_number})
+        for o in orders:
+            item = next((it for it in o.get("items", []) if serial_number in (it.get("serial_numbers") or [])), {})
+            events.append({
+                "type": "order",
+                "label": "Sold via order",
+                "date": o.get("order_date"),
+                "details": {
+                    "order_id": o.get("order_id"),
+                    "product_name": item.get("product_name"),
+                    "company_name": (o.get("customer") or {}).get("company_name"),
+                    "status": o.get("status"),
+                }
+            })
+            if o.get("status") == "returned":
+                ret_item = next((r for r in (o.get("returned_items") or []) if serial_number in (r.get("serial_numbers") or [])), None)
+                events.append({
+                    "type": "order_return",
+                    "label": "Returned (order)",
+                    "date": o.get("return_date") or o.get("order_date"),
+                    "details": {
+                        "order_id": o.get("order_id"),
+                        "reason": o.get("return_reason"),
+                        "condition": ret_item.get("condition") if ret_item else None,
+                    }
+                })
+
+        # ---- Allocations (demo unit or sales-person product allocation + return/damage) ----
+        alloc_db = allocation_manager()
+        allocations = alloc_db.get_data(collection_name=ALLOCATION_COLLECTION, query={"items.serial_numbers": serial_number})
+        for a in allocations:
+            item = next((it for it in a.get("items", []) if serial_number in (it.get("serial_numbers") or [])), {})
+            is_demo = a.get("allocation_type") == "demo_unit"
+            events.append({
+                "type": "allocation",
+                "label": "Allocated to demo/customer" if is_demo else "Allocated to sales person",
+                "date": a.get("allotment_date"),
+                "details": {
+                    "allocation_id": a.get("allocation_id"),
+                    "product_name": item.get("product_name"),
+                    "to": (a.get("customer") or {}).get("company_name") if is_demo else (a.get("sales_person") or {}).get("name"),
+                    "allocated_by": a.get("allocated_by"),
+                    "return_status": a.get("return_status"),
+                }
+            })
+            if a.get("return_status") == "returned":
+                damage = a.get("damage_report") or {}
+                events.append({
+                    "type": "allocation_return",
+                    "label": "Returned (allocation)" + (" — faulty" if damage.get("reported") else ""),
+                    "date": a.get("return_completed_at") or a.get("returned_on"),
+                    "details": {
+                        "allocation_id": a.get("allocation_id"),
+                        "returned_by": a.get("returned_by"),
+                        "faulty": bool(damage.get("reported")),
+                        "issue": damage.get("issue"),
+                    }
+                })
+
+        # ---- Service records raised against this serial ----
+        svc_db = service_detail(product_id="", serial_no="")
+        services = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"serial_no": serial_number})
+        for s in services:
+            events.append({
+                "type": "service",
+                "label": f"Service — {s.get('service_status', 'raised')}",
+                "date": s.get("created_at") or s.get("purchase_date"),
+                "details": {
+                    "service_id": s.get("service_id"),
+                    "issue": s.get("issue"),
+                    "status": s.get("service_status"),
+                    "technician_id": s.get("technician_id"),
+                }
+            })
+
+        events.sort(key=lambda e: e.get("date") or "")
+
+        logging.info(f"serial history fetched for {serial_number}: {len(events)} event(s)")
+        return {"message": "serial history", "serial_number": serial_number, "events": events}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("serial history lookup failed")
+        raise HTTPException(status_code=500, detail="serial history could not be fetched")
+
+
+def productTypeLabelPy(product_type):
+    labels = {"product": "Product", "accessories": "Accessory", "spare_parts": "Spare Part",
+              "service_parts": "Service Part", "damaged": "Damaged Product"}
+    return labels.get(product_type, product_type or "Product")
 
 
 @app.get("/inventory/available_serials")

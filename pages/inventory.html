@@ -131,6 +131,13 @@
       <div class="top-actions">
         <button class="export"><i class="fa-solid fa-file-export"></i> Export</button>
         <button class="add-product"><i class="fa-solid fa-plus"></i> Add Product</button>
+        <button class="record-search"><i class="fa-solid fa-magnifying-glass"></i> Record</button>
+      </div>
+
+      <!-- Serial Number Record / History Modal (built dynamically by inventory.js) -->
+      <div id="serialRecordModal" class="modal"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:84vh;overflow-y:auto;"></div>
       </div>
 
       <!-- FILTER SECTION -->

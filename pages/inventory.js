@@ -27,8 +27,121 @@ document.addEventListener('DOMContentLoaded', () => {
   wireHeaderSearch();
   wireModals();
   wireCardClicks();
+  wireSerialRecordModal();
   applyRolePermissions();
 });
+
+// ---------- "Record" — full lifetime history lookup by serial number ----------
+function wireSerialRecordModal() {
+  const btn = document.querySelector('.top-actions .record-search');
+  const modal = document.getElementById('serialRecordModal');
+  if (!btn || !modal) return;
+
+  btn.addEventListener('click', () => openSerialRecordModal());
+
+  function renderSearchForm(prefill) {
+    const content = modal.querySelector('.modal-content');
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Record — Serial Number History</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <p style="color:#64748b;font-size:13px;margin-bottom:10px;">Search a serial number to see its full lifetime record — when it was added to inventory, assembled, sold/demoed, returned, and every service raised against it.</p>
+      <div style="display:flex;gap:8px;">
+        <input id="serialRecordInput" placeholder="Enter serial number" value="${prefill ? escapeHtmlInv(prefill) : ''}" style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <button type="button" id="serialRecordSearchBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Search</button>
+      </div>
+      <div id="serialRecordResults" style="margin-top:16px;"></div>`;
+
+    content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+    const input = content.querySelector('#serialRecordInput');
+    const search = () => runSerialSearch(input.value.trim());
+    content.querySelector('#serialRecordSearchBtn').addEventListener('click', search);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') search(); });
+    if (prefill) search();
+    input.focus();
+  }
+
+  async function runSerialSearch(serial) {
+    const resultsBox = modal.querySelector('#serialRecordResults');
+    if (!serial) { resultsBox.innerHTML = '<p style="color:#d62828;font-size:13px;">Enter a serial number to search.</p>'; return; }
+    resultsBox.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching...</p>';
+    try {
+      const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(serial)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'search failed');
+      resultsBox.innerHTML = renderSerialTimeline(data.events || [], serial);
+    } catch (err) {
+      if (err.message === 'unauthorized' || err.message === 'forbidden') return;
+      resultsBox.innerHTML = `<p style="color:#d62828;font-size:13px;">${escapeHtmlInv(err.message)}</p>`;
+    }
+  }
+
+  function openSerialRecordModal(prefill) {
+    renderSearchForm(prefill);
+    modal.style.display = 'flex';
+  }
+
+  // Allow other parts of the page (e.g. a row's serial number) to jump
+  // straight into a search for that serial.
+  window.openSerialRecordModal = openSerialRecordModal;
+}
+
+function escapeHtmlInv(str) {
+  return String(str ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+const SERIAL_EVENT_ICONS = {
+  inventory: 'fa-warehouse',
+  assembly: 'fa-gears',
+  order: 'fa-cart-shopping',
+  order_return: 'fa-rotate-left',
+  allocation: 'fa-people-carry-box',
+  allocation_return: 'fa-rotate-left',
+  service: 'fa-screwdriver-wrench',
+};
+
+function serialEventDetailLine(ev) {
+  const d = ev.details || {};
+  switch (ev.type) {
+    case 'inventory':
+      return `${d.product_name ?? ''} ${d.model_no ? '· ' + d.model_no : ''} — Supplier: ${d.supplier ?? '-'}${d.reason ? ` — ${d.reason}` : ''}`;
+    case 'assembly':
+      return `${d.product_name ?? ''} — Assembly #${(d.assembly_id || '').slice(0, 8)}${d.hologram_number ? ' — Hologram ' + d.hologram_number : ''} — ${d.status ?? ''}`;
+    case 'order':
+      return `${d.product_name ?? ''} — Order #${(d.order_id || '').slice(0, 8)} — ${d.company_name ?? '-'} — Status: ${d.status ?? ''}`;
+    case 'order_return':
+      return `Order #${(d.order_id || '').slice(0, 8)} — Condition: ${d.condition ?? '-'} — Reason: ${d.reason ?? '-'}`;
+    case 'allocation':
+      return `${d.product_name ?? ''} — To: ${d.to ?? '-'}${d.allocated_by ? ' (by ' + d.allocated_by + ')' : ''} — Status: ${d.return_status ?? ''}`;
+    case 'allocation_return':
+      return `Allocation #${(d.allocation_id || '').slice(0, 8)} — by ${d.returned_by ?? '-'}${d.faulty ? ' — Faulty' + (d.issue ? ': ' + d.issue : '') : ' — OK'}`;
+    case 'service':
+      return `Service #${(d.service_id || '').slice(0, 8)} — ${d.issue ?? ''} — Status: ${d.status ?? ''}`;
+    default:
+      return '';
+  }
+}
+
+function renderSerialTimeline(events, serial) {
+  if (!events.length) {
+    return `<p style="color:#94a3b8;font-size:13px;text-align:center;padding:16px;">No record found for serial number <strong>${escapeHtmlInv(serial)}</strong>.</p>`;
+  }
+  return `
+    <div style="font-size:13px;color:#334155;margin-bottom:10px;">Lifetime record for <strong>${escapeHtmlInv(serial)}</strong> (${events.length} event${events.length > 1 ? 's' : ''})</div>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      ${events.map(ev => `
+        <div style="border-left:3px solid #1665ff;padding-left:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <strong style="font-size:13px;"><i class="fa-solid ${SERIAL_EVENT_ICONS[ev.type] || 'fa-circle-dot'}" style="margin-right:6px;color:#1665ff;"></i>${escapeHtmlInv(ev.label)}</strong>
+            <small style="color:#94a3b8;">${ev.date ? new Date(ev.date).toLocaleDateString('en-GB') : '-'}</small>
+          </div>
+          <p style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtmlInv(serialEventDetailLine(ev))}</p>
+        </div>`).join('')}
+    </div>`;
+}
 
 // ---------- Cards -> click to see details ----------
 function wireCardClicks() {
