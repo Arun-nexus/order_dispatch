@@ -966,9 +966,23 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
         # under (restock_returned_units — merges into the matching
         # product_id+product_name+model_no lot, or creates one). Faulty
         # units are instead pushed into the "damaged" inventory category
-        # (add_or_merge — merges into an existing damaged entry for the same
+        # (merges into an existing damaged entry for the same
         # product_id+model_no, quantity bumped up, or creates a new one).
-        if updated.get("status") == "returned" and order.get("status") != "returned":
+        #
+        # IMPORTANT: this runs on EVERY submission where status=="returned",
+        # not just the first — once an order is already "returned", e.g. the
+        # Update Status modal is reopened to correct a mistake (an item that
+        # should've been "faulty" was first saved as "ok", or a second item
+        # is being returned later), the old code's "only if the order wasn't
+        # already returned" guard silently skipped ALL processing on every
+        # later submission with no error, so the correction never reached
+        # inventory even though the request looked successful. Each
+        # already-processed serial number (or, for unserialized lines,
+        # already-processed quantity per product_id+model_no) is tracked on
+        # the order itself so re-submitting doesn't restock/damage the same
+        # unit twice, while still letting genuinely NEW lines/serials in this
+        # submission go through.
+        if updated.get("status") == "returned":
             return_reason = (updated.get("return_reason") or "").strip()
             returned_items = updated.get("returned_items") or []
             if not return_reason:
@@ -976,16 +990,34 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             if not returned_items:
                 raise HTTPException(status_code=400, detail="select at least one product that was returned")
 
+            already_serials = set(order.get("returned_serials_processed") or [])
+            already_qty = dict(order.get("returned_qty_processed") or {})
+            newly_processed_serials = []
+            processed_records = []  # what actually got processed this submission — for order history/view
+
             inv_db = inventory_manager()
             for ret_item in returned_items:
                 product_id = ret_item.get("product_id")
                 product_name = ret_item.get("product_name", "")
                 model_no = ret_item.get("model_no", "") or ""
-                quantity = int(ret_item.get("quantity", 0) or 0)
-                serials = ret_item.get("serial_numbers") or []
+                serials = [s for s in (ret_item.get("serial_numbers") or []) if s]
                 condition = ret_item.get("condition")  # "ok" | "faulty"
-                if not product_id or quantity <= 0:
+                if not product_id:
                     continue
+
+                qty_key = f"{product_id}|{model_no}"
+                if serials:
+                    fresh_serials = [s for s in serials if s not in already_serials]
+                    if not fresh_serials:
+                        continue  # every serial on this line was already processed in an earlier submission
+                    quantity = len(fresh_serials)
+                else:
+                    already_done = int(already_qty.get(qty_key, 0) or 0)
+                    requested_qty = int(ret_item.get("quantity", 0) or 0)
+                    quantity = max(0, requested_qty - already_done)
+                    fresh_serials = []
+                    if quantity <= 0:
+                        continue  # this line's quantity was already fully processed earlier
 
                 try:
                     if condition == "faulty":
@@ -1005,7 +1037,7 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                         damage_reason = f"returned faulty from order {order_id}: {return_reason}"
                         if existing_damaged:
                             entry = existing_damaged[0]
-                            merged_serials = (entry.get("serial_numbers") or []) + list(serials)
+                            merged_serials = (entry.get("serial_numbers") or []) + list(fresh_serials)
                             new_quantity = int(entry.get("quantity", 0) or 0) + quantity
                             inv_db.update(
                                 collection_name=INVENTORY_COLLECTION,
@@ -1018,7 +1050,7 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                                 product_id=product_id,
                                 quantity=quantity,
                                 model_no=model_no,
-                                serial_numbers=serials,
+                                serial_numbers=fresh_serials,
                                 product_type="damaged",
                                 reason=damage_reason,
                             ).add(collection_name=INVENTORY_COLLECTION)
@@ -1029,12 +1061,34 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                             product_name=product_name,
                             model_no=model_no,
                             quantity=quantity,
-                            serial_numbers=serials,
+                            serial_numbers=fresh_serials,
                         )
                 except Exception as ret_err:
                     logging.error(f"order {order_id} return processing failed for {product_id} ({condition}): {ret_err}")
                     raise HTTPException(status_code=400, detail=f"could not process return for {product_name or product_id}: {ret_err}")
-            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) processed back into inventory")
+
+                if fresh_serials:
+                    newly_processed_serials.extend(fresh_serials)
+                else:
+                    already_qty[qty_key] = int(already_qty.get(qty_key, 0) or 0) + quantity
+
+                processed_records.append({
+                    "product_id": product_id,
+                    "product_name": product_name,
+                    "model_no": model_no,
+                    "condition": condition,
+                    "quantity": quantity,
+                    "serial_numbers": fresh_serials,
+                })
+
+            updated["returned_serials_processed"] = list(already_serials) + newly_processed_serials
+            updated["returned_qty_processed"] = already_qty
+            # Accumulate across submissions (instead of overwriting) so the
+            # order's full return history — every product, its serial(s) and
+            # condition — stays visible in View Order Details even if the
+            # return was corrected/added-to across more than one submission.
+            updated["returned_items"] = list(order.get("returned_items") or []) + processed_records
+            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) submitted, {len(newly_processed_serials)} new serial(s) processed")
 
         # These fields actually live inside order["items"][0], not at the
         # top level of the order document — editing them has to go through

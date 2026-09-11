@@ -718,6 +718,19 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
     <div class="detail"><small>Return Reason</small><p>${o.status === 'returned' ? (o.return_reason || '-') : '-'}</p></div>
+    ${(o.returned_items || []).length ? `
+    <div class="detail"><small>Returned Product(s)</small></div>
+    <table style="width:100%;font-size:13px;margin:0 0 10px;border-collapse:collapse;">
+      <thead><tr style="text-align:left;color:#fff;">
+        <th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Condition</th>
+      </tr></thead>
+      <tbody>${o.returned_items.map(r => `<tr>
+        <td>${r.product_name ?? ''}${r.model_no ? `<br><small style="color:#94a3b8;">${r.model_no}</small>` : ''}</td>
+        <td>${(r.serial_numbers && r.serial_numbers.length) ? r.serial_numbers.join(', ') : '—'}</td>
+        <td>${r.quantity ?? 0}</td>
+        <td><span class="${r.condition === 'faulty' ? 'cancel' : 'delivered'}">${r.condition === 'faulty' ? 'Faulty' : 'OK'}</span></td>
+      </tr>`).join('')}</tbody>
+    </table>` : ''}
     <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Warranty</small><p>${(o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +₹${o.warranty_charge ?? 0})` : 'Standard (1 Year)'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
