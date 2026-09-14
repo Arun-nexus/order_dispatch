@@ -2449,6 +2449,29 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         # value doesn't normalize to anything meaningful.
         effective_type = (str(raw_effective_type or "").strip().lower()) or str(current_type or "product").strip().lower()
 
+        # product_id / model_no together (plus product_type) form the natural key
+        # that identifies a lot elsewhere in the app (see add_or_merge). If this
+        # request is renaming either one, make sure the new key doesn't already
+        # belong to a *different* document — otherwise two distinct lots would end
+        # up sharing one identity and become impossible to tell apart afterwards.
+        target_product_id = updated_values.get("product_id", product_id)
+        target_model_no = updated_values.get("model_no", existing[0].get("model_no"))
+        if target_product_id != product_id or target_model_no != existing[0].get("model_no"):
+            conflict_query = {
+                "product_id": target_product_id,
+                "model_no": target_model_no,
+                "product_type": updated_values.get("product_type", current_type),
+            }
+            conflicting = [
+                c for c in db.get_data(collection_name=INVENTORY_COLLECTION, query=conflict_query)
+                if c.get("_id") != existing[0].get("_id")
+            ]
+            if conflicting:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"a product with ID '{target_product_id}' and model '{target_model_no}' already exists — choose a different ID/model instead"
+                )
+
         SERIAL_OPTIONAL_TYPES = ("accessories", "spare_parts", "service_parts")
 
         # serial numbers are optional for accessories / spare_parts / service_parts,

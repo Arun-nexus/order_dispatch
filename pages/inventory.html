@@ -330,8 +330,9 @@
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
       <form style="display:flex;flex-direction:column;gap:10px;">
-        <input placeholder="Product Name">
-        <input placeholder="Product ID" disabled style="background:#f3f4f6;">
+        <input name="product_name" placeholder="Product Name">
+        <input name="product_id" placeholder="Product ID">
+        <input name="model_no" placeholder="Model No.">
         <label style="font-size:13px;color:#64748b;">Type</label>
         <select id="editProductType" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
           <option value="product">Product</option>
@@ -340,12 +341,12 @@
           <option value="damaged">Damaged Product</option>
           <option value="accessories">Accessories</option>
         </select>
-        <input placeholder="Lot No.">
-        <input placeholder="Supplier">
-        <input type="date">
-        <input type="number" placeholder="Quantity">
-        <input placeholder="Price">
-        <input type="number" placeholder="Tax Rate (%)">
+        <input name="lot_no" placeholder="Lot No.">
+        <input name="supplier" placeholder="Supplier">
+        <input name="purchase_date" type="date">
+        <input name="quantity" type="number" placeholder="Quantity">
+        <input name="price" placeholder="Price">
+        <input name="tax_rate" type="number" placeholder="Tax Rate (%)">
 
         <div id="editHologramSection" style="display:none;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">
           <label style="font-size:13px;font-weight:600;color:#334155;">Hologram Numbers</label>

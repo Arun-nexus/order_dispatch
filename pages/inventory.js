@@ -917,15 +917,16 @@ function openEditModal(p) {
   invState.editRemovedSerials = [];
 
   const modal = document.getElementById('editModal');
-  const inputs = modal.querySelectorAll('form input');
-  inputs[0].value = p.product_name ?? '';
-  inputs[1].value = p.product_id ?? '';
-  inputs[2].value = p.lot_no ?? '';
-  inputs[3].value = p.supplier ?? '';
-  inputs[4].value = p.purchase_date ?? '';
-  inputs[5].value = p.quantity ?? '';
-  inputs[6].value = p.price ?? '';
-  inputs[7].value = p.tax_rate ?? '';
+  const form = modal.querySelector('form');
+  form.elements['product_name'].value = p.product_name ?? '';
+  form.elements['product_id'].value = p.product_id ?? '';
+  form.elements['model_no'].value = p.model_no ?? '';
+  form.elements['lot_no'].value = p.lot_no ?? '';
+  form.elements['supplier'].value = p.supplier ?? '';
+  form.elements['purchase_date'].value = p.purchase_date ?? '';
+  form.elements['quantity'].value = p.quantity ?? '';
+  form.elements['price'].value = p.price ?? '';
+  form.elements['tax_rate'].value = p.tax_rate ?? '';
 
   const typeSelect = document.getElementById('editProductType');
   if (typeSelect) {
@@ -943,10 +944,11 @@ function openEditModal(p) {
   wireHologramControls();
 
   renderEditSerialsUI();
-  inputs[5].removeEventListener('input', renderEditSerialsUI);
-  inputs[5].addEventListener('input', renderEditSerialsUI);
-  inputs[5].removeEventListener('input', syncEditHologramQuantity);
-  inputs[5].addEventListener('input', syncEditHologramQuantity);
+  const quantityInput = form.elements['quantity'];
+  quantityInput.removeEventListener('input', renderEditSerialsUI);
+  quantityInput.addEventListener('input', renderEditSerialsUI);
+  quantityInput.removeEventListener('input', syncEditHologramQuantity);
+  quantityInput.addEventListener('input', syncEditHologramQuantity);
 
   if (typeSelect) {
     typeSelect.removeEventListener('change', renderEditSerialsUI);
@@ -977,7 +979,7 @@ function onEditTypeChangeForHologram() {
 // add/removeEventListener pairing in openEditModal actually works)
 function syncEditHologramQuantity() {
   const modal = document.getElementById('editModal');
-  const quantityInput = modal.querySelectorAll('form input')[5];
+  const quantityInput = modal.querySelector('form').elements['quantity'];
   invState.editHologramQuantity = Number(quantityInput.value) || 0;
   renderHologramUI();
 }
@@ -1661,8 +1663,8 @@ function wireModals() {
   const editForm = document.querySelector('#editModal form');
   if (editForm) editForm.addEventListener('submit', async e => {
     e.preventDefault();
-    const inputs = e.target.querySelectorAll('input');
-    const targetQuantity = Number(inputs[5].value);
+    const form = e.target;
+    const targetQuantity = Number(form.elements['quantity'].value);
 
     const new_serial_numbers = [...e.target.querySelectorAll('.new-serial-input')].map(i => i.value.trim().toLowerCase());
     const remove_serial_numbers = [...invState.editRemovedSerials];
@@ -1697,16 +1699,21 @@ function wireModals() {
     }
 
     const updated_values = {
-      product_name: inputs[0].value,
-      lot_no: inputs[2].value,
-      supplier: inputs[3].value,
-      purchase_date: inputs[4].value,
+      product_name: form.elements['product_name'].value,
+      product_id: form.elements['product_id'].value,
+      model_no: form.elements['model_no'].value,
+      lot_no: form.elements['lot_no'].value,
+      supplier: form.elements['supplier'].value,
+      purchase_date: form.elements['purchase_date'].value,
       quantity: targetQuantity,
-      price: inputs[6].value,
-      tax_rate: Number(inputs[7].value),
+      price: form.elements['price'].value,
+      tax_rate: Number(form.elements['tax_rate'].value),
       product_type: typeSelect ? typeSelect.value : 'product'
     };
     try {
+      // invState.activeProductId / invState.activeModelNo are the ORIGINAL id and
+      // model number, used to locate the record being edited. Any new id/model
+      // typed into the form travels inside updated_values as a rename request.
       const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
