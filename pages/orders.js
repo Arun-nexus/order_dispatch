@@ -1,7 +1,7 @@
 const orderState = { orders: [], activeOrderId: null };
 const invLookup = { products: [] };
 let ordersPage = 1;
-const ORDERS_PAGE_SIZE = 10;
+const ORDERS_PAGE_SIZE = 50;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInventoryForOrders();
   wireHeaderButtons();
   wireFilter();
+  wireCardFilters();
   wireDetailModals();
   loadOrderRequests();
 });
@@ -530,6 +531,75 @@ function wireSortBy() {
     ordersPage = 1;
     renderOrdersTable(applySort(base));
   });
+}
+
+// ---------- Card Click -> Detail Modal ----------
+function wireCardFilters() {
+  document.querySelectorAll('.cards .card[data-card-filter]').forEach(card => {
+    card.addEventListener('click', () => openOrderCardDetailModal(card.dataset.cardFilter));
+  });
+}
+
+function orderCardRowsHtml(list) {
+  if (!list.length) return '<p style="color:#94a3b8;text-align:center;padding:16px;">No orders to show.</p>';
+  return `<table style="width:100%;font-size:13px;border-collapse:collapse;">
+    <thead><tr style="text-align:left;">
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Order ID</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Product</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Company</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Order Date</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Status</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Amount</th>
+    </tr></thead>
+    <tbody>${list.map(o => `<tr>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${(o.order_id || '').slice(0, 8)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${escapeHtml(o.product_name ?? '')}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${escapeHtml(o.customer?.company_name ?? o.company_name ?? '')}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${statusLabel(o.status)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">₹${o.total_mrp ?? o.price ?? 0}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function ensureOrderCardDetailModal() {
+  let modal = document.getElementById('orderCardDetailModal');
+  if (modal) return modal;
+  modal = document.createElement('div');
+  modal.id = 'orderCardDetailModal';
+  modal.className = 'modal';
+  modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;';
+  modal.innerHTML = `<div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:640px;max-height:86vh;overflow-y:auto;"></div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+  return modal;
+}
+
+function openOrderCardDetailModal(type) {
+  const modal = ensureOrderCardDetailModal();
+  const content = modal.querySelector('.modal-content');
+  const orders = orderState.orders;
+  const statusMap = { Pending: 'placed', Delivered: 'delivered', Cancelled: 'cancelled' };
+
+  let title = 'All Orders';
+  let list = orders;
+  if (type === 'today') {
+    const today = new Date().toDateString();
+    title = "Today's Orders";
+    list = orders.filter(o => o.order_date && new Date(o.order_date).toDateString() === today);
+  } else if (statusMap[type]) {
+    title = `${type} Orders`;
+    list = orders.filter(o => o.status === statusMap[type]);
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>${title}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${orderCardRowsHtml(list)}`;
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
 }
 
 // ---------- Apply Filter (Status / Payment Mode / Date) ----------

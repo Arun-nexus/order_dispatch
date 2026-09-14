@@ -143,6 +143,19 @@ function renderSerialTimeline(events, serial) {
     </div>`;
 }
 
+function exportLowStockToExcel(lowItems) {
+  const rows = lowItems.map(p => ({
+    'Product Name': p.product_name ?? '',
+    'Product ID': p.product_id ?? '',
+    'Model No.': p.model_no ?? '',
+    'Quantity': p.quantity ?? 0
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Low Stock');
+  XLSX.writeFile(wb, `low_stock_${Date.now()}.xlsx`);
+}
+
 // ---------- Cards -> click to see details ----------
 function wireCardClicks() {
   document.querySelectorAll('.card-clickable').forEach(card => {
@@ -186,8 +199,8 @@ function openCardDetailModal(cardType) {
     bodyHtml = rowsHtml(lowItems, [
       { label: 'Product Name', cell: p => p.product_name ?? '' },
       { label: 'Product ID', cell: p => p.product_id ?? '' },
+      { label: 'Model No.', cell: p => p.model_no ?? ''},
       { label: 'Quantity', cell: p => `<span class="stock low">${p.quantity ?? 0}</span>` },
-      { label: 'Supplier', cell: p => p.supplier ?? '-' }
     ]);
   } else if (cardType === 'suppliers') {
     title = 'Suppliers';
@@ -216,9 +229,17 @@ function openCardDetailModal(cardType) {
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h3>${title}</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      <div>
+        ${cardType === 'low_stock' ? '<button id="lowStockExportBtn" style="margin-right:10px;padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;"><i class="fa-solid fa-download"></i> Export</button>' : ''}
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
     </div>
     ${bodyHtml}`;
+
+  if (cardType === 'low_stock') {
+    const lowItems = products.filter(p => (Number(p.quantity) || 0) <= 10);
+    content.querySelector('#lowStockExportBtn').addEventListener('click', () => exportLowStockToExcel(lowItems));
+  }
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });

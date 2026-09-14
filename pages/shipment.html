@@ -76,7 +76,7 @@
 
       <!-- CARDS -->
       <section class="cards">
-        <div class="card">
+        <div class="card" data-card-filter="thisMonth" style="cursor:pointer;">
           <div>
             <span>This Month Shipment</span>
             <h2 id="cardThisMonth">0</h2>
@@ -84,7 +84,7 @@
           </div>
           <i class="fa-solid fa-calendar-days"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="today" style="cursor:pointer;">
           <div>
             <span>Today Shipment</span>
             <h2 id="cardToday">0</h2>
@@ -92,7 +92,7 @@
           </div>
           <i class="fa-regular fa-calendar-check"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="received" style="cursor:pointer;">
           <div>
             <span>Received Shipment</span>
             <h2 id="cardReceived">0</h2>
@@ -100,13 +100,21 @@
           </div>
           <i class="fa-solid fa-circle-check"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="pending" style="cursor:pointer;">
           <div>
             <span>Pending Shipment</span>
             <h2 id="cardPending">0</h2>
             <p>Receiving date not set</p>
           </div>
           <i class="fa-regular fa-clock"></i>
+        </div>
+        <div class="card" data-card-filter="fy" style="cursor:pointer;">
+          <div>
+            <span>Financial Year Shipment</span>
+            <h2 id="cardFY">0</h2>
+            <p>Current FY (Apr–Mar)</p>
+          </div>
+          <i class="fa-solid fa-file-invoice"></i>
         </div>
       </section>
 
@@ -229,6 +237,12 @@
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
+  <!-- Card Detail Modal -->
+  <div id="shipmentCardDetailModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:640px;max-height:86vh;overflow-y:auto;"></div>
+  </div>
+
   <script src="shipment.js"></script>
 </body>
 

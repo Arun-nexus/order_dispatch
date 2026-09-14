@@ -101,6 +101,12 @@ function shipmentStatus(s) {
   return s.receivedDate ? 'received' : 'pending';
 }
 
+function currentFYRange() {
+  const now = new Date();
+  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return { start: new Date(y, 3, 1), end: new Date(y + 1, 2, 31, 23, 59, 59) };
+}
+
 function renderCards() {
   const now = new Date();
   const thisMonth = shipments.filter(s => {
@@ -111,11 +117,85 @@ function renderCards() {
   const today = shipments.filter(s => (s.createdAt || '').slice(0, 10) === todayStr()).length;
   const received = shipments.filter(s => shipmentStatus(s) === 'received').length;
   const pending = shipments.filter(s => shipmentStatus(s) === 'pending').length;
+  const fyRange = currentFYRange();
+  const fy = shipments.filter(s => {
+    const d = new Date(s.createdAt || s.dispatchDate);
+    return d >= fyRange.start && d <= fyRange.end;
+  }).length;
 
   document.getElementById('cardThisMonth').textContent = thisMonth;
   document.getElementById('cardToday').textContent = today;
   document.getElementById('cardReceived').textContent = received;
   document.getElementById('cardPending').textContent = pending;
+  document.getElementById('cardFY').textContent = fy;
+}
+
+function shipmentCardRowsHtml(list) {
+  if (!list.length) return '<p style="color:#94a3b8;text-align:center;padding:16px;">No shipments to show.</p>';
+  return `<table style="width:100%;font-size:13px;border-collapse:collapse;">
+    <thead><tr style="text-align:left;">
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Company</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Products</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Dispatch Date</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Received Date</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Status</th>
+    </tr></thead>
+    <tbody>${list.map(s => `<tr>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${s.companyName ?? ''}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${productSummary(s.products)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${s.dispatchDate ? new Date(s.dispatchDate).toLocaleDateString('en-GB') : '-'}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${s.receivedDate ? new Date(s.receivedDate).toLocaleDateString('en-GB') : '-'}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${shipmentStatus(s)}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function openShipmentCardDetailModal(type) {
+  const modal = document.getElementById('shipmentCardDetailModal');
+  if (!modal) return;
+  const content = modal.querySelector('.modal-content');
+  const now = new Date();
+  const fyRange = currentFYRange();
+
+  let title = '';
+  let list = shipments;
+  if (type === 'thisMonth') {
+    title = 'This Month Shipment';
+    list = shipments.filter(s => {
+      const d = new Date(s.createdAt || s.dispatchDate);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+  } else if (type === 'today') {
+    title = 'Today Shipment';
+    list = shipments.filter(s => (s.createdAt || '').slice(0, 10) === todayStr());
+  } else if (type === 'received') {
+    title = 'Received Shipment';
+    list = shipments.filter(s => shipmentStatus(s) === 'received');
+  } else if (type === 'pending') {
+    title = 'Pending Shipment';
+    list = shipments.filter(s => shipmentStatus(s) === 'pending');
+  } else if (type === 'fy') {
+    title = 'Financial Year Shipment';
+    list = shipments.filter(s => {
+      const d = new Date(s.createdAt || s.dispatchDate);
+      return d >= fyRange.start && d <= fyRange.end;
+    });
+  }
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>${title}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${shipmentCardRowsHtml(list)}`;
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
+
+function wireShipmentCardClicks() {
+  document.querySelectorAll('.cards .card[data-card-filter]').forEach(card => {
+    card.addEventListener('click', () => openShipmentCardDetailModal(card.dataset.cardFilter));
+  });
 }
 
 function productSummary(products) {
@@ -594,6 +674,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addShipmentBtn').addEventListener('click', openAddShipmentModal);
   document.getElementById('applyShipmentFilter').addEventListener('click', renderTable);
   document.getElementById('shipmentSearch').addEventListener('input', renderTable);
+  wireShipmentCardClicks();
   loadShipments();
 });
 
