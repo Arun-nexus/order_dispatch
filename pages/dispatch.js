@@ -23,8 +23,106 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDispatchQueue();
   wireFilter();
   wireHeaderSearch();
+  wireDispatchCardClicks();
   setInterval(loadDispatchQueue, 60 * 1000);
 });
+
+// ---------- Cards -> click to see details ----------
+function dispatchRowState(d) {
+  const hasDispatch = !!d.dispatch;
+  const hasDocket = hasDispatch && !!d.dispatch.docket_no;
+  return !hasDispatch ? 'pending' : hasDocket ? 'dispatched' : 'in_progress';
+}
+
+function dispatchCardTypeLabel(kind) {
+  return kind === 'order' ? 'Order' : kind === 'product_allocation' ? 'Product' : 'Spare Part';
+}
+
+function dispatchCardRowsHtml(rows) {
+  if (!rows.length) return '<p style="color:#94a3b8;text-align:center;padding:16px;">No records to show.</p>';
+  return `<table style="width:100%;font-size:13px;border-collapse:collapse;">
+    <thead><tr style="text-align:left;">
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Type</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Date</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Product</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Bill To / Service</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Docket No.</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Status</th>
+    </tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${dispatchCardTypeLabel(row.kind)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${dateLabel(row)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${productLabel(row)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${billToLabel(row)}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${row.data.dispatch?.docket_no ?? '-'}</td>
+      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${dispatchRowState(row.data)}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function dispatchCardRows(cardType) {
+  const today = new Date().toDateString();
+  const all = combinedRows();
+  if (cardType === 'total_pending') return all.filter(r => dispatchRowState(r.data) !== 'dispatched');
+  if (cardType === 'orders_pending') return all.filter(r => r.kind === 'order' && dispatchRowState(r.data) !== 'dispatched');
+  if (cardType === 'spare_pending') return all.filter(r => r.kind === 'spare_part' && dispatchRowState(r.data) !== 'dispatched');
+  if (cardType === 'product_pending') return all.filter(r => r.kind === 'product_allocation' && dispatchRowState(r.data) !== 'dispatched');
+  if (cardType === 'dispatched_today') return all.filter(r => r.data.dispatch?.dispatched_at && new Date(r.data.dispatch.dispatched_at).toDateString() === today);
+  if (cardType === 'total_dispatched') return all.filter(r => !!r.data.dispatch);
+  return [];
+}
+
+const DISPATCH_CARD_TITLES = {
+  total_pending: 'Total Pending',
+  orders_pending: 'Orders Pending',
+  spare_pending: 'Spare Parts Pending',
+  product_pending: 'Products Pending',
+  dispatched_today: 'Dispatched Today',
+  total_dispatched: 'Total Dispatched'
+};
+
+function openDispatchCardDetailModal(cardType) {
+  const modal = document.getElementById('dispatchCardDetailModal');
+  if (!modal) return;
+  const content = modal.querySelector('.modal-content');
+  const rows = dispatchCardRows(cardType);
+
+  const categoryFilterHtml = cardType === 'total_pending' ? `
+    <div style="margin-bottom:12px;">
+      <select id="dispatchCardCategoryFilter" style="padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <option value="">All Categories</option>
+        <option value="order">Orders</option>
+        <option value="spare_part">Spare Parts</option>
+        <option value="product_allocation">Allocated Products</option>
+      </select>
+    </div>` : '';
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>${DISPATCH_CARD_TITLES[cardType] || ''}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${categoryFilterHtml}
+    <div id="dispatchCardRowsWrap">${dispatchCardRowsHtml(rows)}</div>`;
+
+  const catSelect = content.querySelector('#dispatchCardCategoryFilter');
+  if (catSelect) {
+    catSelect.addEventListener('change', () => {
+      const filtered = catSelect.value ? rows.filter(r => r.kind === catSelect.value) : rows;
+      content.querySelector('#dispatchCardRowsWrap').innerHTML = dispatchCardRowsHtml(filtered);
+    });
+  }
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
+  modal.style.display = 'flex';
+}
+
+function wireDispatchCardClicks() {
+  document.querySelectorAll('.card-clickable').forEach(card => {
+    card.addEventListener('click', () => openDispatchCardDetailModal(card.dataset.card));
+  });
+}
 
 // ---------- Header search (docket, invoice, product, serial number) ----------
 function wireHeaderSearch() {

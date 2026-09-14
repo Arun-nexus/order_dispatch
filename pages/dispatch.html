@@ -74,42 +74,42 @@
       </header>
 
       <section class="cards">
-        <div class="card">
+        <div class="card card-clickable" data-card="total_pending" style="cursor:pointer;">
           <div><span>Total Pending</span>
             <h2 id="cardTotalPending">0</h2>
             <p>Awaiting dispatch</p>
           </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="orders_pending" style="cursor:pointer;">
           <div><span>Orders Pending</span>
             <h2 id="cardOrdersPending">0</h2>
             <p>Status: Processing</p>
           </div>
           <i class="fa-solid fa-cart-shopping"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="spare_pending" style="cursor:pointer;">
           <div><span>Spare Parts Pending</span>
             <h2 id="cardSparePending">0</h2>
             <p>Issued to services</p>
           </div>
           <i class="fa-solid fa-gears"></i>
         </div>
-        <div class="card">
-          <div><span>Products Pending</span>
+        <div class="card card-clickable" data-card="product_pending" style="cursor:pointer;">
+          <div><span>Demo units</span>
             <h2 id="cardProductAllocPending">0</h2>
             <p>Allocated to sales persons</p>
           </div>
           <i class="fa-solid fa-people-carry-box"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="dispatched_today" style="cursor:pointer;">
           <div><span>Dispatched Today</span>
             <h2 id="cardDispatchedToday">0</h2>
             <p>Confirmed today</p>
           </div>
           <i class="fa-solid fa-truck"></i>
         </div>
-        <div class="card">
+        <div class="card card-clickable" data-card="total_dispatched" style="cursor:pointer;">
           <div><span>Total Dispatched</span>
             <h2 id="cardTotalDispatched">0</h2>
             <p>All time</p>
@@ -215,6 +215,12 @@
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
+  <!-- Card Detail Modal (with type filter for Total Pending) -->
+  <div id="dispatchCardDetailModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:680px;max-height:86vh;overflow-y:auto;"></div>
+  </div>
+
   <script src="dispatch.js"></script>
 </body>
 
