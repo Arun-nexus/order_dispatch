@@ -2,7 +2,9 @@ import pymongo
 import certifi
 import os
 from logger import logging
+from dotenv import load_dotenv
 
+load_dotenv()
 
 ca = certifi.where()
 

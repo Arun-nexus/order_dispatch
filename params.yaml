@@ -1,4 +1,4 @@
 account_creation_collection_name: users
 order_collection_name: orders
 service_collection_name: service
-inventory_collection_name: inventory
+inventory_collection_name: inventory_fixed
