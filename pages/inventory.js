@@ -196,12 +196,14 @@ function openCardDetailModal(cardType) {
   } else if (cardType === 'low_stock') {
     title = 'Low Stock Items (≤ 10 units)';
     const lowItems = products.filter(p => (Number(p.quantity) || 0) <= 10);
-    bodyHtml = rowsHtml(lowItems, [
-      { label: 'Product Name', cell: p => p.product_name ?? '' },
-      { label: 'Product ID', cell: p => p.product_id ?? '' },
-      { label: 'Model No.', cell: p => p.model_no ?? ''},
-      { label: 'Quantity', cell: p => `<span class="stock low">${p.quantity ?? 0}</span>` },
-    ]);
+    bodyHtml = `
+      <div id="lowStockCategoryFilter" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;padding:10px 12px;background:#f8fafc;border-radius:10px;font-size:13px;">
+        ${Object.entries(PRODUCT_TYPE_LABELS).map(([val, label]) => `
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" class="lowStockTypeChk" value="${val}" checked> ${label}
+          </label>`).join('')}
+      </div>
+      <div id="lowStockRowsWrap"></div>`;
   } else if (cardType === 'suppliers') {
     title = 'Suppliers';
     const bySupplier = {};
@@ -238,7 +240,23 @@ function openCardDetailModal(cardType) {
 
   if (cardType === 'low_stock') {
     const lowItems = products.filter(p => (Number(p.quantity) || 0) <= 10);
-    content.querySelector('#lowStockExportBtn').addEventListener('click', () => exportLowStockToExcel(lowItems));
+    const wrap = content.querySelector('#lowStockRowsWrap');
+    const cols = [
+      { label: 'Product Name', cell: p => p.product_name ?? '' },
+      { label: 'Product ID', cell: p => p.product_id ?? '' },
+      { label: 'Model No.', cell: p => p.model_no ?? '' },
+      { label: 'Type', cell: p => productTypeLabel(p.product_type || 'product') },
+      { label: 'Quantity', cell: p => `<span class="stock low">${p.quantity ?? 0}</span>` }
+    ];
+    const getChecked = () => Array.from(content.querySelectorAll('.lowStockTypeChk:checked')).map(c => c.value);
+    const filteredItems = () => {
+      const allowed = getChecked();
+      return lowItems.filter(p => allowed.includes(p.product_type || 'product'));
+    };
+    const rerender = () => { wrap.innerHTML = rowsHtml(filteredItems(), cols); };
+    rerender();
+    content.querySelectorAll('.lowStockTypeChk').forEach(chk => chk.addEventListener('change', rerender));
+    content.querySelector('#lowStockExportBtn').addEventListener('click', () => exportLowStockToExcel(filteredItems()));
   }
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
