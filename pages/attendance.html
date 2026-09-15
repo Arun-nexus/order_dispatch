@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attendance | Acer Biomedical</title>
+
+  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+
+<body>
+  <div class="container">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+
+      <ul>
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
+        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li class="active"><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Admin">
+        <div>
+          <h4 id="sidebarUserName">Admin</h4>
+          <p id="sidebarUserRole">Super Admin</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>Attendance</h1>
+          <p>Daily biometric attendance, monthly late report and WhatsApp late reminders</p>
+        </div>
+        <div class="right-header">
+          <div style="position:relative;">
+            <button id="notifBell"><i class="fa-regular fa-bell"></i></button>
+            <span id="notifBadge"
+              style="display:none;position:absolute;top:2px;right:2px;background:#d62828;color:#fff;font-size:10px;border-radius:999px;padding:1px 5px;">0</span>
+          </div>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Admin">
+            <div>
+              <h4 id="headerUserName">Admin</h4>
+              <p id="headerUserRole">Super Admin</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="cards">
+        <div class="card">
+          <div><span>Present Today</span><h2 id="cardPresentToday">0</h2><p id="cardDateLabel">-</p></div>
+          <i class="fa-solid fa-user-check"></i>
+        </div>
+        <div class="card">
+          <div><span>Late Today</span><h2 id="cardLateToday">0</h2><p>After threshold time</p></div>
+          <i class="fa-solid fa-clock" style="background:#fff4e5;color:#f59e0b;"></i>
+        </div>
+        <div class="card">
+          <div><span>Reminders Sent Today</span><h2 id="cardRemindersToday">0</h2><p>WhatsApp via Twilio</p></div>
+          <i class="fa-brands fa-whatsapp" style="background:#dcfce7;color:#16a34a;"></i>
+        </div>
+        <div class="card">
+          <div><span>Late Time Set At</span><h2 id="cardLateThreshold">10:00</h2><p id="cardMonthLabel">This month's report</p></div>
+          <i class="fa-regular fa-clock"></i>
+        </div>
+      </section>
+
+      <div class="top-actions">
+        <button class="add-product" id="uploadAttendanceBtn"><i class="fa-solid fa-upload"></i> Upload Today's Attendance</button>
+        <button class="export" id="setLateTimeBtn"><i class="fa-solid fa-clock"></i> Set Late Time</button>
+        <button class="export" id="manageContactsBtn"><i class="fa-solid fa-address-book"></i> WhatsApp Contacts</button>
+      </div>
+
+      <section class="filter-section">
+        <div class="filter-box">
+          <i class="fa-solid fa-toggle-on"></i>
+          <select id="viewModeSelect">
+            <option value="daily">Daily List</option>
+            <option value="monthly">Monthly Report</option>
+          </select>
+        </div>
+        <div class="filter-box" id="dateFilterBox">
+          <i class="fa-solid fa-calendar-day"></i>
+          <input type="date" id="dateInput">
+        </div>
+        <div class="filter-box" id="monthFilterBox" style="display:none;">
+          <i class="fa-solid fa-calendar-days"></i>
+          <input type="month" id="monthInput">
+        </div>
+        <button class="filter-btn" id="applyFilterBtn"><i class="fa-solid fa-filter"></i> Apply</button>
+      </section>
+
+      <div class="table-container">
+        <table>
+          <thead id="attendanceThead">
+            <!-- rendered dynamically depending on daily/monthly view -->
+          </thead>
+          <tbody id="attendanceTbody">
+            <!-- rows rendered dynamically by attendance.js -->
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Logout Modal -->
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- common_auth.js MUST load first: enforces login + role-based page access -->
+  <script src="../common_auth.js"></script>
+
+  <!-- Upload Attendance Modal -->
+  <div id="uploadAttendanceModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Upload Today's Attendance</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Upload the biometric machine's "Daily Present List" export (.xls) as-is. The date is read from the file itself.</p>
+      <input type="file" id="attendanceFileInput" accept=".xls,.html,.htm" style="width:100%;margin-bottom:14px;">
+      <button id="attendanceUploadSubmitBtn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Upload</button>
+      <div id="attendanceUploadResult" style="margin-top:12px;font-size:12px;color:#64748b;"></div>
+    </div>
+  </div>
+
+  <!-- Late Time Modal -->
+  <div id="lateTimeModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:340px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Late Time</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Anyone clocking in after this time is marked late and gets a WhatsApp reminder (if their number is saved).</p>
+      <input type="time" id="lateTimeInput" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px;">
+      <button id="lateTimeSaveBtn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+    </div>
+  </div>
+
+  <!-- WhatsApp Contacts Modal -->
+  <div id="contactsModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:460px;max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>WhatsApp Contacts</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Save each employee's WhatsApp number (with country code, e.g. +91XXXXXXXXXX) so late reminders can reach them.</p>
+      <div style="display:flex;gap:8px;margin-bottom:14px;">
+        <input id="contactEmpCode" placeholder="Emp Code" style="width:90px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input id="contactEmpName" placeholder="Employee Name" style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input id="contactPhone" placeholder="+91XXXXXXXXXX" style="width:140px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+        <button id="contactSaveBtn" style="padding:8px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+      </div>
+      <div id="contactsList" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+  </div>
+
+  <script>
+    function openLogoutModal(e) {
+      e.preventDefault();
+      document.getElementById("logoutModal").classList.add("active");
+    }
+    function closeLogoutModal() {
+      document.getElementById("logoutModal").classList.remove("active");
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const role = getRole() || '';
+      const uname = getUsername() || 'User';
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+    });
+  </script>
+  <script src="attendance.js"></script>
+</body>
+
+</html>

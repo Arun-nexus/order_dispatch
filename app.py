@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -28,6 +28,12 @@ import base64
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timezone, timedelta
+import io
+from html.parser import HTMLParser
+try:
+    from twilio.rest import Client as TwilioClient  # pip install twilio
+except ImportError:
+    TwilioClient = None
 
 
 def compute_warranty_until(received_date: str, warranty_text: str):
@@ -83,18 +89,15 @@ ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
 SERVICE_COLLECTION = params["service_collection_name"]
 INVENTORY_COLLECTION = params["inventory_collection_name"]
-# some inventory documents were created before product_id was required and
-# can have product_id == "". An empty string can never appear in a URL path
-# segment (the route just won't match), so the frontend substitutes this
-# sentinel when it needs to target such a record, and every /inventory/*/{product_id}
-# route decodes it back to "" before querying.
-EMPTY_PRODUCT_ID_SENTINEL = "__blank_id__"
 CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
 SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
 REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
 SHIPMENT_COLLECTION = params.get("shipment_collection_name", "shipments")
 ASSEMBLY_COLLECTION = params.get("assembly_collection_name", "assemblies")
+ATTENDANCE_COLLECTION = params.get("attendance_collection_name", "attendance")
+ATTENDANCE_CONTACTS_COLLECTION = params.get("attendance_contacts_collection_name", "attendance_contacts")
+ATTENDANCE_SETTINGS_COLLECTION = params.get("attendance_settings_collection_name", "attendance_settings")
 
 # ---- Damaged-product report settings ----
 # Image is emailed out immediately when reported, then wiped from Mongo after
@@ -223,6 +226,16 @@ class CreateDemoUnitRequest(BaseModel):
 
 class OrderStatusRequest(BaseModel):
     order_id: str
+
+
+class LateThresholdRequest(BaseModel):
+    late_time: str  # "HH:MM", 24-hour format — anyone clocking in after this is marked late
+
+
+class AttendanceContactRequest(BaseModel):
+    emp_code: str
+    employee_name: str = ""
+    phone_number: str  # E.164 format, e.g. +91XXXXXXXXXX — needed to send the WhatsApp reminder
 
 
 class DispatchConfirmRequest(BaseModel):
@@ -996,124 +1009,105 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             if not returned_items:
                 raise HTTPException(status_code=400, detail="select at least one product that was returned")
 
-            already_serial_conditions = dict(order.get("returned_serial_conditions") or {})
-            already_qty_conditions = dict(order.get("returned_qty_conditions") or {})
-            processed_records = []
+            already_serials = set(order.get("returned_serials_processed") or [])
+            already_qty = dict(order.get("returned_qty_processed") or {})
+            newly_processed_serials = []
+            processed_records = []  # what actually got processed this submission — for order history/view
 
             inv_db = inventory_manager()
-
-            def _reverse(prev_condition, product_id, model_no, quantity, serials):
-                query = {"product_id": product_id, "model_no": model_no}
-                query["product_type"] = "damaged" if prev_condition == "faulty" else {"$ne": "damaged"}
-                existing = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query=query)
-                if not existing:
-                    return
-                entry = existing[0]
-                remaining_serials = [s for s in (entry.get("serial_numbers") or []) if s not in serials]
-                new_quantity = max(0, int(entry.get("quantity", 0) or 0) - quantity)
-                if prev_condition == "faulty" and new_quantity <= 0 and not remaining_serials:
-                    inv_db.delete(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(entry["_id"])})
-                else:
-                    inv_db.update(
-                        collection_name=INVENTORY_COLLECTION,
-                        query={"_id": ObjectId(entry["_id"])},
-                        update_values={"serial_numbers": remaining_serials, "quantity": new_quantity}
-                    )
-
-            def _apply(condition, product_id, product_name, model_no, quantity, serials):
-                if condition == "faulty":
-                    existing_damaged = inv_db.get_data(
-                        collection_name=INVENTORY_COLLECTION,
-                        query={"product_id": product_id, "model_no": model_no, "product_type": "damaged"}
-                    )
-                    damage_reason = f"returned faulty from order {order_id}: {return_reason}"
-                    if existing_damaged:
-                        entry = existing_damaged[0]
-                        merged_serials = (entry.get("serial_numbers") or []) + list(serials)
-                        new_quantity = int(entry.get("quantity", 0) or 0) + quantity
-                        inv_db.update(
-                            collection_name=INVENTORY_COLLECTION,
-                            query={"_id": ObjectId(entry["_id"])},
-                            update_values={"serial_numbers": merged_serials, "quantity": new_quantity, "reason": damage_reason}
-                        )
-                    else:
-                        inventory_manager(
-                            product_name=product_name,
-                            product_id=product_id,
-                            quantity=quantity,
-                            model_no=model_no,
-                            serial_numbers=list(serials),
-                            product_type="damaged",
-                            reason=damage_reason,
-                        ).add(collection_name=INVENTORY_COLLECTION)
-                else:
-                    inv_db.restock_returned_units(
-                        collection_name=INVENTORY_COLLECTION,
-                        product_id=product_id,
-                        product_name=product_name,
-                        model_no=model_no,
-                        quantity=quantity,
-                        serial_numbers=list(serials),
-                    )
-
             for ret_item in returned_items:
                 product_id = ret_item.get("product_id")
                 product_name = ret_item.get("product_name", "")
                 model_no = ret_item.get("model_no", "") or ""
                 serials = [s for s in (ret_item.get("serial_numbers") or []) if s]
-                condition = ret_item.get("condition")
+                condition = ret_item.get("condition")  # "ok" | "faulty"
                 if not product_id:
                     continue
 
-                try:
-                    if serials:
-                        for s in serials:
-                            prev_condition = already_serial_conditions.get(s)
-                            if prev_condition == condition:
-                                continue
-                            if prev_condition:
-                                _reverse(prev_condition, product_id, model_no, 1, [s])
-                            _apply(condition, product_id, product_name, model_no, 1, [s])
-                            already_serial_conditions[s] = condition
-                            processed_records.append({
-                                "product_id": product_id, "product_name": product_name, "model_no": model_no,
-                                "condition": condition, "quantity": 1, "serial_numbers": [s]
-                            })
-                    else:
-                        key = f"{product_id}|{model_no}"
-                        requested_qty = int(ret_item.get("quantity", 0) or 0)
-                        prev = already_qty_conditions.get(key)
-                        if prev and prev["condition"] == condition:
-                            delta = max(0, requested_qty - int(prev["quantity"]))
-                            if delta <= 0:
-                                continue
-                            _apply(condition, product_id, product_name, model_no, delta, [])
-                            prev["quantity"] = requested_qty
-                            qty_for_record = delta
-                        elif prev:
-                            _reverse(prev["condition"], product_id, model_no, int(prev["quantity"]), [])
-                            _apply(condition, product_id, product_name, model_no, requested_qty, [])
-                            already_qty_conditions[key] = {"condition": condition, "quantity": requested_qty}
-                            qty_for_record = requested_qty
-                        else:
-                            if requested_qty <= 0:
-                                continue
-                            _apply(condition, product_id, product_name, model_no, requested_qty, [])
-                            already_qty_conditions[key] = {"condition": condition, "quantity": requested_qty}
-                            qty_for_record = requested_qty
+                qty_key = f"{product_id}|{model_no}"
+                if serials:
+                    fresh_serials = [s for s in serials if s not in already_serials]
+                    if not fresh_serials:
+                        continue  # every serial on this line was already processed in an earlier submission
+                    quantity = len(fresh_serials)
+                else:
+                    already_done = int(already_qty.get(qty_key, 0) or 0)
+                    requested_qty = int(ret_item.get("quantity", 0) or 0)
+                    quantity = max(0, requested_qty - already_done)
+                    fresh_serials = []
+                    if quantity <= 0:
+                        continue  # this line's quantity was already fully processed earlier
 
-                        processed_records.append({
-                            "product_id": product_id, "product_name": product_name, "model_no": model_no,
-                            "condition": condition, "quantity": qty_for_record, "serial_numbers": []
-                        })
+                try:
+                    if condition == "faulty":
+                        # Deliberately NOT using add_or_merge() here — its
+                        # cross-category "serial found under a different
+                        # product_type elsewhere" migration logic is meant for
+                        # the manual "Add Existing Product" restock flow and
+                        # isn't needed for a fresh return (the serial isn't
+                        # anywhere else in inventory at this point, it was
+                        # already deducted when the order was created). A plain,
+                        # direct merge-by-product_id+model_no+product_type here
+                        # is simpler and avoids that logic misfiring.
+                        existing_damaged = inv_db.get_data(
+                            collection_name=INVENTORY_COLLECTION,
+                            query={"product_id": product_id, "model_no": model_no, "product_type": "damaged"}
+                        )
+                        damage_reason = f"returned faulty from order {order_id}: {return_reason}"
+                        if existing_damaged:
+                            entry = existing_damaged[0]
+                            merged_serials = (entry.get("serial_numbers") or []) + list(fresh_serials)
+                            new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+                            inv_db.update(
+                                collection_name=INVENTORY_COLLECTION,
+                                query={"_id": ObjectId(entry["_id"])},
+                                update_values={"serial_numbers": merged_serials, "quantity": new_quantity, "reason": damage_reason}
+                            )
+                        else:
+                            inventory_manager(
+                                product_name=product_name,
+                                product_id=product_id,
+                                quantity=quantity,
+                                model_no=model_no,
+                                serial_numbers=fresh_serials,
+                                product_type="damaged",
+                                reason=damage_reason,
+                            ).add(collection_name=INVENTORY_COLLECTION)
+                    else:
+                        inv_db.restock_returned_units(
+                            collection_name=INVENTORY_COLLECTION,
+                            product_id=product_id,
+                            product_name=product_name,
+                            model_no=model_no,
+                            quantity=quantity,
+                            serial_numbers=fresh_serials,
+                        )
                 except Exception as ret_err:
                     logging.error(f"order {order_id} return processing failed for {product_id} ({condition}): {ret_err}")
                     raise HTTPException(status_code=400, detail=f"could not process return for {product_name or product_id}: {ret_err}")
 
-            updated["returned_serial_conditions"] = already_serial_conditions
-            updated["returned_qty_conditions"] = already_qty_conditions
+                if fresh_serials:
+                    newly_processed_serials.extend(fresh_serials)
+                else:
+                    already_qty[qty_key] = int(already_qty.get(qty_key, 0) or 0) + quantity
+
+                processed_records.append({
+                    "product_id": product_id,
+                    "product_name": product_name,
+                    "model_no": model_no,
+                    "condition": condition,
+                    "quantity": quantity,
+                    "serial_numbers": fresh_serials,
+                })
+
+            updated["returned_serials_processed"] = list(already_serials) + newly_processed_serials
+            updated["returned_qty_processed"] = already_qty
+            # Accumulate across submissions (instead of overwriting) so the
+            # order's full return history — every product, its serial(s) and
+            # condition — stays visible in View Order Details even if the
+            # return was corrected/added-to across more than one submission.
             updated["returned_items"] = list(order.get("returned_items") or []) + processed_records
-            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) submitted, {len(processed_records)} unit(s) processed")
+            logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) submitted, {len(newly_processed_serials)} new serial(s) processed")
 
         # These fields actually live inside order["items"][0], not at the
         # top level of the order document — editing them has to go through
@@ -1944,6 +1938,282 @@ async def dispatch_queue(user: dict = Depends(require_role("service_manager", "a
         raise HTTPException(status_code=500, detail="dispatch queue could not be fetched")
 
 
+# =========================================================
+# Attendance — daily biometric upload, monthly report, and
+# automatic WhatsApp "you are late" reminders via Twilio.
+# Admin-only end to end (see require_role("admin") below and
+# common_auth.js's ROLE_ACCESS for the page itself).
+# =========================================================
+
+class _AttendanceTableParser(HTMLParser):
+    """
+    Minimal dependency-free <table> reader (stdlib html.parser only — no
+    lxml/html5lib needed, unlike pandas.read_html which requires one of
+    those and silently fails on servers that don't have them installed).
+    Reads every <tr>, and within it every <td>/<th> cell's text, into a
+    plain list of rows — exactly what the biometric machine's "Daily
+    Present List" export needs (it's an HTML table saved with a .xls
+    extension).
+    """
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+        self._current_row = None
+        self._current_cell = None
+        self._in_cell = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self._current_row = []
+        elif tag in ("td", "th"):
+            self._in_cell = True
+            self._current_cell = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th"):
+            if self._current_row is not None:
+                self._current_row.append("".join(self._current_cell).strip())
+            self._in_cell = False
+            self._current_cell = None
+        elif tag == "tr":
+            if self._current_row is not None:
+                self.rows.append(self._current_row)
+            self._current_row = None
+
+    def handle_data(self, data):
+        if self._in_cell and self._current_cell is not None:
+            self._current_cell.append(data)
+
+
+def parse_attendance_table(html_text: str):
+    parser = _AttendanceTableParser()
+    parser.feed(html_text)
+    return [r for r in parser.rows if any((c or "").strip() for c in r)]
+
+
+def get_late_threshold() -> str:
+    db = mongodbclient()
+    doc = db.get_data(collection_name=ATTENDANCE_SETTINGS_COLLECTION, query={"key": "late_threshold"})
+    return doc[0].get("value", "10:00") if doc else "10:00"
+
+
+def send_whatsapp_late_reminder(phone_number: str, employee_name: str, in_time: str) -> bool:
+    """
+    Sends a "you are late today" WhatsApp message via Twilio.
+    Requires the `twilio` package (pip install twilio) and these env vars:
+      TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM
+      (TWILIO_WHATSAPP_FROM looks like "whatsapp:+14155238886")
+    Silently returns False (and logs why) if any of that isn't set up yet,
+    so a missing Twilio config never blocks the attendance upload itself.
+    """
+    if TwilioClient is None:
+        logging.error("twilio package not installed — run `pip install twilio` to enable late reminders")
+        return False
+    sid = os.getenv("TWILIO_ACCOUNT_SID")
+    token = os.getenv("TWILIO_AUTH_TOKEN")
+    from_whatsapp = os.getenv("TWILIO_WHATSAPP_FROM")
+    if not (sid and token and from_whatsapp):
+        logging.error("Twilio not configured — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM")
+        return False
+    try:
+        client = TwilioClient(sid, token)
+        to = phone_number if phone_number.startswith("whatsapp:") else f"whatsapp:{phone_number}"
+        client.messages.create(
+            from_=from_whatsapp,
+            to=to,
+            body=f"Hi {employee_name}, you clocked in at {in_time} today which is after office start time. You are marked LATE today. Please try to reach on time."
+        )
+        return True
+    except Exception as e:
+        logging.error(f"failed to send whatsapp reminder to {phone_number}: {e}")
+        return False
+
+
+@app.get("/attendance/late_threshold")
+async def get_late_threshold_endpoint(user: dict = Depends(require_role("admin"))):
+    return {"late_time": get_late_threshold()}
+
+
+@app.post("/attendance/late_threshold")
+async def set_late_threshold_endpoint(request: LateThresholdRequest, user: dict = Depends(require_role("admin"))):
+    try:
+        db = mongodbclient()
+        existing = db.get_data(collection_name=ATTENDANCE_SETTINGS_COLLECTION, query={"key": "late_threshold"})
+        if existing:
+            db.update_data(collection_name=ATTENDANCE_SETTINGS_COLLECTION, query={"key": "late_threshold"},
+                            update_values={"value": request.late_time})
+        else:
+            db.add(collection_name=ATTENDANCE_SETTINGS_COLLECTION, dictionary={"key": "late_threshold", "value": request.late_time})
+        return {"message": "late threshold updated", "late_time": request.late_time}
+    except Exception as e:
+        logging.error("late threshold could not be updated")
+        raise HTTPException(status_code=500, detail="late threshold could not be updated")
+
+
+@app.get("/attendance/contacts")
+async def list_attendance_contacts(user: dict = Depends(require_role("admin"))):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={})
+        return {"message": "attendance contacts", "dataset": dataset}
+    except Exception as e:
+        logging.error("attendance contacts could not be fetched")
+        raise HTTPException(status_code=500, detail="attendance contacts could not be fetched")
+
+
+@app.post("/attendance/contacts")
+async def upsert_attendance_contact(request: AttendanceContactRequest, user: dict = Depends(require_role("admin"))):
+    """Save/update the WhatsApp number for one employee (by Emp Code) — needed before late reminders can reach them."""
+    try:
+        db = mongodbclient()
+        payload = request.dict()
+        existing = db.get_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={"emp_code": request.emp_code})
+        if existing:
+            db.update_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={"emp_code": request.emp_code}, update_values=payload)
+        else:
+            db.add(collection_name=ATTENDANCE_CONTACTS_COLLECTION, dictionary=payload)
+        return {"message": "contact saved", "contact": payload}
+    except Exception as e:
+        logging.error("attendance contact could not be saved")
+        raise HTTPException(status_code=500, detail="attendance contact could not be saved")
+
+
+@app.get("/attendance/")
+async def get_attendance(date: str = Query(None), month: str = Query(None), user: dict = Depends(require_role("admin"))):
+    """date="YYYY-MM-DD" for one day's list, or month="YYYY-MM" for that month's records (monthly report)."""
+    try:
+        db = mongodbclient()
+        query = {}
+        if date:
+            query["date"] = date
+        elif month:
+            query["date"] = {"$regex": f"^{re.escape(month)}"}
+        dataset = db.get_data(collection_name=ATTENDANCE_COLLECTION, query=query)
+        return {"message": "attendance dataset", "dataset": dataset}
+    except Exception as e:
+        logging.error("attendance dataset could not be fetched")
+        raise HTTPException(status_code=500, detail="attendance dataset could not be fetched")
+
+
+@app.post("/attendance/upload")
+async def upload_attendance(file: UploadFile = File(...), user: dict = Depends(require_role("admin"))):
+    """
+    Takes the daily biometric export as-is (the "DailyPresentList_*.xls" file
+    — really an HTML table saved with an .xls extension) and:
+      1. reads the date from its "Date : DD-Mon-YYYY" header,
+      2. stores one attendance record per employee for that date
+         (re-uploading the same day's file updates those records instead of
+         duplicating them),
+      3. compares each employee's In-Time against the configured late
+         threshold and, for anyone late who hasn't already been messaged for
+         that date, sends a WhatsApp "you are late today" reminder via
+         Twilio (only for employees with a saved phone number under
+         Attendance → Contacts).
+    """
+    try:
+        raw_bytes = await file.read()
+        raw = raw_bytes.decode("utf-8", errors="ignore")
+
+        date_match = re.search(r"Date\s*:\s*(\d{1,2}-[A-Za-z]{3}-\d{4})", raw)
+        if not date_match:
+            raise HTTPException(status_code=400, detail="could not find the attendance date (expected a 'Date : DD-Mon-YYYY' header) in this file")
+        att_date = datetime.strptime(date_match.group(1), "%d-%b-%Y").strftime("%Y-%m-%d")
+
+        try:
+            table_rows = parse_attendance_table(raw)
+        except Exception:
+            raise HTTPException(status_code=400, detail="could not read an attendance table out of this file")
+        if not table_rows or len(table_rows) < 2:
+            raise HTTPException(status_code=400, detail="no attendance table found in this file")
+
+        header = [h.strip() for h in table_rows[0]]
+
+        def col_index(name):
+            for i, h in enumerate(header):
+                if h.strip().lower() == name.lower():
+                    return i
+            return -1
+
+        idx_emp_code = col_index("Emp Code")
+        idx_name = col_index("Employee Name")
+        idx_dept = col_index("Department")
+        idx_branch = col_index("Branch")
+        idx_in = col_index("In-Time")
+        idx_out = col_index("Out-Time")
+        idx_status = col_index("Status")
+        if idx_emp_code == -1 or idx_name == -1:
+            raise HTTPException(status_code=400, detail="this file's table doesn't look like the expected attendance format (missing Emp Code / Employee Name columns)")
+
+        def cell(row, idx):
+            return row[idx].strip() if idx != -1 and idx < len(row) else ""
+
+        threshold_str = get_late_threshold()
+        threshold_time = datetime.strptime(threshold_str, "%H:%M").time()
+
+        db = mongodbclient()
+        records_saved = 0
+        late_reminders_sent = []
+        late_no_contact = []
+
+        for row in table_rows[1:]:
+            emp_code = cell(row, idx_emp_code)
+            if not emp_code:
+                continue
+            employee_name = cell(row, idx_name)
+            department = cell(row, idx_dept)
+            branch = cell(row, idx_branch)
+            in_time_str = cell(row, idx_in)
+            out_time_str = cell(row, idx_out)
+            status = cell(row, idx_status)
+
+            is_late = "LT" in status.upper()
+            if in_time_str:
+                try:
+                    is_late = datetime.strptime(in_time_str, "%H:%M").time() > threshold_time
+                except ValueError:
+                    pass  # fall back to the device's own P-LT flag above
+
+            existing = db.get_data(collection_name=ATTENDANCE_COLLECTION, query={"date": att_date, "emp_code": emp_code})
+            reminder_already_sent = bool(existing[0].get("reminder_sent")) if existing else False
+
+            record = {
+                "date": att_date, "emp_code": emp_code, "employee_name": employee_name,
+                "department": department, "branch": branch, "in_time": in_time_str,
+                "out_time": out_time_str, "status": status, "is_late": is_late,
+                "reminder_sent": reminder_already_sent,
+            }
+            if existing:
+                db.update_data(collection_name=ATTENDANCE_COLLECTION, query={"date": att_date, "emp_code": emp_code}, update_values=record)
+            else:
+                db.add(collection_name=ATTENDANCE_COLLECTION, dictionary=record)
+            records_saved += 1
+
+            if is_late and not reminder_already_sent:
+                contact = db.get_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={"emp_code": emp_code})
+                phone = contact[0].get("phone_number") if contact else None
+                if phone:
+                    if send_whatsapp_late_reminder(phone, employee_name, in_time_str):
+                        db.update_data(collection_name=ATTENDANCE_COLLECTION, query={"date": att_date, "emp_code": emp_code},
+                                        update_values={"reminder_sent": True})
+                        late_reminders_sent.append(employee_name)
+                else:
+                    late_no_contact.append(employee_name)
+
+        logging.info(f"attendance uploaded for {att_date}: {records_saved} record(s), {len(late_reminders_sent)} reminder(s) sent")
+        return {
+            "message": "attendance uploaded",
+            "date": att_date,
+            "records_saved": records_saved,
+            "late_reminders_sent": late_reminders_sent,
+            "late_without_contact": late_no_contact,  # late today but no WhatsApp number saved yet
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("attendance upload failed")
+        raise HTTPException(status_code=500, detail="attendance file could not be processed")
+
+
 @app.post("/dispatch/confirm/order/{order_id}")
 async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
@@ -2399,12 +2669,6 @@ async def available_serials(product_id: str, model_no: str = "", user: dict = De
 @app.post("/inventory/create")
 async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
-        if not request.product_id.strip():
-            # a blank product_id can never be targeted again afterwards (it can't be
-            # put in a URL path segment), so it must be rejected up front rather than
-            # silently stored
-            raise HTTPException(status_code=400, detail="product ID is required")
-
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
         serial_optional_types = ("accessories", "spare_parts", "service_parts")
@@ -2442,8 +2706,6 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
 @app.post("/inventory/update/{product_id}")
 async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
-        if product_id == EMPTY_PRODUCT_ID_SENTINEL:
-            product_id = ""
         db = inventory_manager()
         match_query = {"product_id": product_id}
         if request.model_no is not None:
@@ -2462,34 +2724,6 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         # count" check below. Falls back to the type already on file if the request's
         # value doesn't normalize to anything meaningful.
         effective_type = (str(raw_effective_type or "").strip().lower()) or str(current_type or "product").strip().lower()
-
-        # product_id / model_no together (plus product_type) form the natural key
-        # that identifies a lot elsewhere in the app (see add_or_merge). If this
-        # request is renaming either one, make sure the new key doesn't already
-        # belong to a *different* document — otherwise two distinct lots would end
-        # up sharing one identity and become impossible to tell apart afterwards.
-        target_product_id = updated_values.get("product_id", product_id)
-        target_model_no = updated_values.get("model_no", existing[0].get("model_no"))
-        if "product_id" in updated_values and not str(target_product_id or "").strip():
-            # a blank product_id can never be targeted again afterwards (it can't be
-            # put in a URL path segment without the frontend's sentinel workaround),
-            # so renaming TO blank must be rejected up front
-            raise HTTPException(status_code=400, detail="product ID cannot be blank")
-        if target_product_id != product_id or target_model_no != existing[0].get("model_no"):
-            conflict_query = {
-                "product_id": target_product_id,
-                "model_no": target_model_no,
-                "product_type": updated_values.get("product_type", current_type),
-            }
-            conflicting = [
-                c for c in db.get_data(collection_name=INVENTORY_COLLECTION, query=conflict_query)
-                if c.get("_id") != existing[0].get("_id")
-            ]
-            if conflicting:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"a product with ID '{target_product_id}' and model '{target_model_no}' already exists — choose a different ID/model instead"
-                )
 
         SERIAL_OPTIONAL_TYPES = ("accessories", "spare_parts", "service_parts")
 
@@ -2612,8 +2846,6 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 @app.post("/inventory/delete/{product_id}")
 async def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
     try:
-        if product_id == EMPTY_PRODUCT_ID_SENTINEL:
-            product_id = ""
         db = inventory_manager(product_id=product_id)
         if model_no is not None:
             existing = db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id, "model_no": model_no})
@@ -2645,8 +2877,6 @@ async def repair_damaged_product(product_id: str, model_no: Optional[str] = None
       Status column as "Send to Parent Company" instead.
     """
     try:
-        if product_id == EMPTY_PRODUCT_ID_SENTINEL:
-            product_id = ""
         db = inventory_manager()
         match_query = {"product_id": product_id, "product_type": "damaged"}
         if model_no is not None:
