@@ -395,11 +395,11 @@ function renderAStep2() {
       showResponseModal('Add an inventory part', 'Add at least one part from inventory — its hologram numbers supply the hologram number for each assembled unit.', false);
       return;
     }
-    const matching = inventoryParts.filter(p => Number(p.quantity) === Number(assemblyDraft.quantity));
-    if (matching.length !== 1) {
+    const matching = inventoryParts.filter(p => Number(p.quantity) >= Number(assemblyDraft.quantity));
+    if (matching.length === 0) {
       showResponseModal(
         'Check part quantities',
-        `Exactly one inventory part must have quantity equal to the assembly quantity (${assemblyDraft.quantity}) — that part supplies the hologram number for each unit.`,
+        `Exactly one inventory part must have quantity at least equal to the assembly quantity (${assemblyDraft.quantity}) — that part supplies the hologram number for each unit.`,
         false
       );
       return;
@@ -493,7 +493,7 @@ function renderAStep3() {
   }
 
   const hologramPart = (assemblyDraft.partsUsed || []).find(
-    p => p.source === 'inventory' && Number(p.quantity) === Number(assemblyDraft.quantity)
+    p => p.source === 'inventory' && Number(p.quantity) >= Number(assemblyDraft.quantity)
   );
 
   const box = ASSEMBLY_MODAL();

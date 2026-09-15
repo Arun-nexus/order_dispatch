@@ -1,627 +1,1218 @@
-// =========================================================
-// assembly.js
-// Powers pages/assembly.html — cards, table/filtering, and the
-// 3-step "Add Assembly" wizard:
-//   1) Product details (name, ID, model no., quantity to build)
-//   2) Parts used — pulled from inventory's spare_parts stock (only parts
-//      that already carry hologram numbers show up here) and/or added
-//      locally (never touches inventory). Exactly one inventory part must
-//      have quantity == assembly quantity — that's the hologram-bearing part.
-//   3) Serial numbers only, auto-generated per unit, editable. Hologram
-//      numbers are NOT entered here — the server pulls one per unit from
-//      the hologram-bearing part's stock when the assembly is saved.
-//
-// Talks to the real backend: GET/POST /assembly/... and
-// GET /assembly/available_parts (see app.py + manage_assembly.py).
-// Spare-part stock itself is fed by shipment.js: a shipment part marked
-// "assembly" lands in inventory (product_type="spare_parts") as soon as
-// that shipment is marked received; hologram numbers are added afterward
-// via inventory.js's edit modal (serial-wise, from Excel or by hand).
-// =========================================================
+const allocState = { allocations: [], products: [], requests: [], searchQuery: '', activeFilters: null };
+let allocPage = 1;
+const ALLOC_PAGE_SIZE = 7;
 
-let assemblies = [];
-let availableParts = [];      // [{part_name, quantity}] — inventory spare_parts stock
-let assemblyDraft = null;
-let assemblyStep = 1;
-let deletingAssemblyId = null;
-
-const ASSEMBLY_MODAL = () => document.querySelector('#assemblyModal .modal-content');
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-// =========================================================
-// SERVER <-> UI SHAPE
-// =========================================================
-
-function fromServerShapeAssembly(a) {
-  return {
-    id: a.assembly_id,
-    productName: a.product_name,
-    productId: a.product_id,
-    modelNumber: a.model_number,
-    quantity: a.quantity,
-    partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source })),
-    serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number })),
-    status: a.status,
-    createdAt: a.created_at,
-  };
-}
-
-function toServerShapeAssembly(a) {
-  return {
-    product_name: a.productName,
-    product_id: a.productId || '',
-    model_number: a.modelNumber || '',
-    quantity: Number(a.quantity) || 0,
-    parts_used: (a.partsUsed || []).map(p => ({
-      part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source,
-    })),
-    serials: (a.serials || []).map(s => ({ serial_number: s })),
-  };
-}
-
-// =========================================================
-// LOAD + CARDS + TABLE
-// =========================================================
-
-async function loadAssemblies() {
-  try {
-    const res = await apiFetch('/assembly/');
-    if (res.ok) {
-      const data = await res.json();
-      assemblies = (data.dataset || []).map(fromServerShapeAssembly);
-    }
-  } catch (err) {
-    console.warn('assembly: could not load assemblies', err.message);
+// Generic pagination control renderer — rebuilds the .pagination buttons based
+// on however many pages the current row count needs, and wires them up.
+function renderTablePagination(container, page, totalPages, onChange) {
+  if (!container) return;
+  if (totalPages <= 1) { container.innerHTML = ''; return; }
+  let html = `<button class="page-btn" data-page="prev"><i class="fa-solid fa-angle-left"></i></button>`;
+  for (let i = 1; i <= totalPages; i++) {
+    html += `<button class="page${i === page ? ' active-page' : ''}" data-page="${i}">${i}</button>`;
   }
-  renderCards();
-  renderTable();
+  html += `<button class="page-btn" data-page="next"><i class="fa-solid fa-angle-right"></i></button>`;
+  container.innerHTML = html;
+  container.querySelectorAll('[data-page]').forEach(btn => btn.addEventListener('click', () => {
+    const d = btn.dataset.page;
+    if (d === 'prev') onChange(Math.max(1, page - 1));
+    else if (d === 'next') onChange(Math.min(totalPages, page + 1));
+    else onChange(Number(d));
+  }));
 }
 
-async function loadAvailableParts() {
-  try {
-    const res = await apiFetch('/assembly/available_parts');
-    if (res.ok) {
-      const data = await res.json();
-      availableParts = data.dataset || [];
-    }
-  } catch (err) {
-    console.warn('assembly: could not load available parts', err.message);
-  }
-  const el = document.getElementById('cardAvailableShipment');
-  if (el) el.textContent = availableParts.length;
-}
+document.addEventListener('DOMContentLoaded', () => {
+  loadAllocations();
+  loadInventoryForAllocation();
+  loadPendingRequests();
+  wireTopActions();
+  wireFilter();
+  wireHeaderSearch();
+  injectAllocateModal();
+  wireNotifBell();
+  setInterval(() => renderAllocationsTable(getFilteredAllocations()), 60 * 1000); // keep countdowns fresh
+  setInterval(loadPendingRequests, 60 * 1000);
+});
 
-function renderCards() {
-  const now = new Date();
-  const thisMonth = assemblies.filter(a => {
-    const d = new Date(a.createdAt);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  }).length;
-  const today = assemblies.filter(a => (a.createdAt || '').slice(0, 10) === todayStr()).length;
-  const pending = assemblies.filter(a => a.status === 'pending').length;
-
-  document.getElementById('cardThisMonth').textContent = thisMonth;
-  document.getElementById('cardToday').textContent = today;
-  document.getElementById('cardPending').textContent = pending;
-  document.getElementById('cardAvailableShipment').textContent = availableParts.length;
-}
-
-function sourceLabel(p) {
-  return p.source === 'local' ? 'Local parts' : 'Inventory (spare parts)';
-}
-
-function renderTable() {
-  const tbody = document.getElementById('assemblyTbody');
-  const statusFilter = document.getElementById('statusFilter').value;
-  const search = (document.getElementById('assemblySearch').value || '').toLowerCase();
-
-  const rows = assemblies.filter(a => {
-    if (statusFilter && a.status !== statusFilter) return false;
-    if (search) {
-      const hay = (a.productName + ' ' + a.productId + ' ' + (a.serials || []).map(s => s.serial).join(' ')).toLowerCase();
-      if (!hay.includes(search)) return false;
-    }
-    return true;
+// ---------- Header search (by serial number, product name or sales person) ----------
+function wireHeaderSearch() {
+  const input = document.querySelector('.search input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    allocState.searchQuery = input.value.trim().toLowerCase();
+    allocPage = 1;
+    renderAllocationsTable(getFilteredAllocations());
   });
+}
 
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No assemblies yet</td></tr>`;
+// Combines the header search box with whatever the "Apply Filter" bar last
+// set, so any action that re-fetches data (approve, return, allocate, etc.)
+// can re-render the SAME filtered/searched view instead of snapping back to
+// the full unfiltered list.
+function getFilteredAllocations() {
+  let list = allocState.allocations;
+
+  const q = allocState.searchQuery;
+  if (q) {
+    list = list.filter(a => {
+      const isSpare = a.allocation_type === 'spare_part';
+      const serials = isSpare ? [] : (a.items || []).flatMap(i => i.serial_numbers || []);
+      const products = isSpare
+        ? [a.spare_part?.part_name || '']
+        : (a.items || []).map(i => i.product_name || '');
+      const who = isSpare
+        ? `service #${(a.spare_part?.service_id || '').slice(0, 8)}`
+        : (a.sales_person?.name || '');
+      return serials.some(s => (s || '').toLowerCase().includes(q)) ||
+        products.some(p => p.toLowerCase().includes(q)) ||
+        who.toLowerCase().includes(q) ||
+        (a.company_name || '').toLowerCase().includes(q) ||
+        (a.allocation_id || '').toLowerCase().includes(q);
+    });
+  }
+
+  const f = allocState.activeFilters;
+  if (f) {
+    list = list.filter(a => {
+      const meta = returnMeta(a);
+      const statusOk = !f.status
+        || (f.status === 'Pending' && a.return_status !== 'returned' && !meta.overdue)
+        || (f.status === 'Overdue' && meta.overdue && a.return_status !== 'returned')
+        || (f.status === 'Returned' && a.return_status === 'returned');
+      const dateOk = !f.date || (a.allotment_date || '').startsWith(f.date);
+      return statusOk && dateOk;
+    });
+  }
+
+  return list;
+}
+
+function wireNotifBell() {
+  const bell = document.getElementById('notifBell');
+  if (bell) bell.addEventListener('click', () => {
+    document.getElementById('pendingRequestsSection')?.scrollIntoView({ behavior: 'smooth' });
+  });
+}
+
+async function loadPendingRequests() {
+  const role = getRole();
+  const section = document.getElementById('pendingRequestsSection');
+  // Requests panel is visible to admin/accounts/service_manager — matches
+  // backend's require_role() on /request/. Other roles get their own
+  // request status via the notification bell (common_auth.js) instead.
+  const canView = role === 'admin' || role === 'accounts' || role === 'service_manager';
+  if (!canView) {
+    if (section) section.style.display = 'none';
+    return;
+  }
+  try {
+    const res = await apiFetch('/request/');
+    if (!res.ok) throw new Error('failed to fetch requests');
+    const data = await res.json();
+    allocState.requests = data.dataset || [];
+    renderPendingRequests();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function renderPendingRequests() {
+  const box = document.getElementById('pendingRequestsList');
+  const badge = document.getElementById('notifBadge');
+  const countLabel = document.getElementById('pendingCountLabel');
+  if (!box) return;
+
+  const pending = allocState.requests
+    .filter(r => r.status === 'pending')
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  if (badge) {
+    badge.style.display = pending.length ? 'inline-block' : 'none';
+    badge.textContent = pending.length;
+  }
+  if (countLabel) countLabel.textContent = pending.length ? `(${pending.length})` : '';
+
+  if (!pending.length) {
+    box.innerHTML = '<p style="color:#94a3b8;padding:10px;">No pending requests.</p>';
     return;
   }
 
-  tbody.innerHTML = rows.map(a => {
-    const pill = a.status === 'completed'
-      ? '<span class="status delivered">Completed</span>'
-      : '<span class="status pending">Pending</span>';
-    const usesInventory = (a.partsUsed || []).some(p => p.source !== 'local');
-    const usesLocal = (a.partsUsed || []).some(p => p.source === 'local');
-    const sourceSummary = usesInventory && usesLocal ? 'Inventory + Local'
-      : usesInventory ? 'Inventory (spare parts)'
-      : usesLocal ? 'Local parts' : '—';
+  box.innerHTML = pending.map(r => {
+    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen' };
+    const icon = iconMap[r.request_type] || 'fa-bell';
+
+    let title, subtitle;
+    if (r.request_type === 'demo_unit') {
+      title = `Demo Unit — ${r.details?.customer?.company_name || 'New customer'}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+    } else if (r.request_type === 'order') {
+      title = `Order — ${r.details?.customer?.company_name || 'New customer'}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+    } else if (r.request_type === 'media_review') {
+      title = `Service Media — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+      subtitle = 'Video uploaded, awaiting download confirmation';
+    } else if (r.request_type === 'status_update') {
+      title = `Status Change — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+      subtitle = `Requested: "${(r.details?.service_status || '').replace('_', ' ')}"${r.details?.reason ? ' — ' + r.details.reason : ''}`;
+    } else {
+      title = `Spare Part — Service #${(r.details?.service_id || '').slice(0, 8)}`;
+      subtitle = r.details?.note || '';
+    }
+
+    // status_update is completed from the Service page's Update Status action (needs
+    // service charges etc. that this quick panel doesn't collect), so no approve/reject here
+    const actions = r.request_type === 'status_update'
+      ? `<p style="font-size:11px;color:#94a3b8;">Complete this from the Service page's Update Status action.</p>`
+      : `<div style="display:flex;gap:8px;">
+          <button class="req-approve-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Approve</button>
+          <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
+        </div>`;
+
     return `
-      <tr>
-        <td>${a.productName}</td>
-        <td>${a.productId || '—'}</td>
-        <td>${a.modelNumber || '—'}</td>
-        <td>${a.quantity}</td>
-        <td>${sourceSummary}</td>
-        <td>${pill}</td>
-        <td>${(a.createdAt || '').slice(0, 10)}</td>
-        <td>
-          <button class="icon-btn" data-action="view" data-id="${a.id}" title="View"><i class="fa-solid fa-eye"></i></button>
-          <button class="icon-btn" data-action="export" data-id="${a.id}" title="Export Serials"><i class="fa-solid fa-file-excel"></i></button>
-          ${a.status === 'pending' ? `<button class="icon-btn" data-action="complete" data-id="${a.id}" title="Mark Completed"><i class="fa-solid fa-check"></i></button>` : ''}
-          <button class="icon-btn" data-action="delete" data-id="${a.id}" title="Delete"><i class="fa-solid fa-trash"></i></button>
-        </td>
-      </tr>`;
+      <div class="order-item" data-id="${r.request_id}">
+        <div class="order-left">
+          <div class="order-icon"><i class="fa-solid ${icon}"></i></div>
+          <div>
+            <h4>${title}</h4>
+            <p>${subtitle} • raised by ${r.raised_by}</p>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="req-view-btn" title="View details" style="border:none;background:none;color:#1665ff;font-size:16px;cursor:pointer;"><i class="fa-solid fa-circle-info"></i></button>
+          ${actions}
+        </div>
+      </div>`;
   }).join('');
 
-  tbody.querySelectorAll('[data-action="view"]').forEach(b => b.addEventListener('click', () => openViewAssemblyModal(b.dataset.id)));
-  tbody.querySelectorAll('[data-action="export"]').forEach(b => b.addEventListener('click', () => exportAssemblySerials(b.dataset.id)));
-  tbody.querySelectorAll('[data-action="complete"]').forEach(b => b.addEventListener('click', () => markAssemblyCompleted(b.dataset.id)));
-  tbody.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => openDeleteAssemblyModal(b.dataset.id)));
+  box.querySelectorAll('.req-approve-btn').forEach(btn => btn.addEventListener('click', e => approveRequest(rowRequestId(e))));
+  box.querySelectorAll('.req-reject-btn').forEach(btn => btn.addEventListener('click', e => rejectRequest(rowRequestId(e))));
+  box.querySelectorAll('.req-view-btn').forEach(btn => btn.addEventListener('click', e => openRequestDetailsModal(rowRequest(e))));
 }
 
-// =========================================================
-// VIEW / COMPLETE / DELETE / EXPORT (saved assemblies)
-// =========================================================
+function rowRequest(e) {
+  const id = e.target.closest('.order-item').dataset.id;
+  return allocState.requests.find(r => r.request_id === id);
+}
 
-function openViewAssemblyModal(id) {
-  const a = assemblies.find(x => x.id === id);
-  if (!a) return;
-  const box = document.querySelector('#viewAssemblyModal .modal-content');
-  box.innerHTML = `
+// Shows type-specific details for a pending request: product name/qty/price for
+// demo unit & order requests, spare part note/technician/service id for spare
+// part requests. Reuses the existing viewAllocationModal markup.
+function openRequestDetailsModal(r) {
+  if (!r) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+  const d = r.details || {};
+
+  let heading, body;
+
+  if (r.request_type === 'demo_unit' || r.request_type === 'order') {
+    heading = r.request_type === 'demo_unit' ? 'Demo Unit Request' : 'Order Request';
+    const itemsRows = (d.items || []).map(i => `
+      <div class="detail"><small>Product</small><p>${i.product_name ?? ''} — Qty: ${i.quantity ?? ''}, Price: ₹${i.price ?? '-'}</p></div>`).join('');
+    body = `
+      ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
+      <div class="detail"><small>Customer</small><p>${d.customer?.company_name ?? '-'}</p></div>
+      <div class="detail"><small>Address</small><p>${d.customer?.company_address ?? '-'}</p></div>`;
+  } else if (r.request_type === 'spare_part') {
+    heading = 'Spare Part Request';
+    body = `
+      <div class="detail"><small>Spare Part</small><p>${d.note || '-'}</p></div>
+      <div class="detail"><small>Technician</small><p>${r.raised_by ?? '-'}</p></div>
+      <div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>`;
+  } else if (r.request_type === 'status_update') {
+    heading = 'Status Change Request';
+    body = `
+      <div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>
+      <div class="detail"><small>Requested Status</small><p>${(d.service_status || '').replace('_', ' ')}</p></div>
+      <div class="detail"><small>Reason</small><p>${d.reason || '-'}</p></div>
+      <div class="detail"><small>Requested By</small><p>${r.raised_by ?? '-'}</p></div>`;
+  } else {
+    heading = 'Request Details';
+    body = `<div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>
+      <div class="detail"><small>Requested By</small><p>${r.raised_by ?? '-'}</p></div>`;
+  }
+
+  content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>Assembly Details</h3>
+      <h3>${heading}</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div class="detail"><small>Product</small><p>${a.productName} (${a.productId || '—'})</p></div>
-    <div class="detail"><small>Model Number</small><p>${a.modelNumber || '—'}</p></div>
-    <div class="detail"><small>Quantity</small><p>${a.quantity}</p></div>
-    <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
-    <h4 style="margin-bottom:8px;">Parts Used</h4>
-    <ul style="margin:0 0 14px 18px;font-size:13px;color:#475569;">
-      ${(a.partsUsed || []).map(p => `<li>${p.name} — qty ${p.quantity} <span style="color:#94a3b8;">(${sourceLabel(p)})</span></li>`).join('') || '<li style="color:#94a3b8;">No parts recorded</li>'}
-    </ul>
-    <h4 style="margin-bottom:8px;">Serial / Hologram Numbers</h4>
-    <div style="max-height:220px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
-      <table style="width:100%;font-size:13px;">
-        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th></tr></thead>
-        <tbody>
-          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td></tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
-  box.querySelector('.close').addEventListener('click', () => closeModal('viewAssemblyModal'));
-  openModal('viewAssemblyModal');
+    ${body}`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
 }
 
-async function markAssemblyCompleted(id) {
+function rowRequestId(e) {
+  return e.target.closest('.order-item').dataset.id;
+}
+
+async function approveRequest(requestId) {
+  if (!confirm('Approve this request?')) return;
   try {
-    const res = await apiFetch(`/assembly/mark_completed/${id}`, { method: 'POST' });
+    const res = await apiFetch(`/request/approve/${requestId}`, { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'could not mark this assembly as completed');
-
-    const a = assemblies.find(x => x.id === id);
-    if (a) a.status = 'completed';
-    renderCards();
-    renderTable();
-
-    const inventoryNote = data.inventory_sync === 'merged'
-      ? 'Assembled units were merged into the existing inventory entry.'
-      : data.inventory_sync === 'created'
-        ? 'A new inventory entry was created for these units.'
-        : 'Assembly completed, but inventory sync needs a manual check.';
-    showResponseModal('Assembly completed', inventoryNote, data.inventory_sync !== undefined && !String(data.inventory_sync).startsWith('failed'));
+    if (!res.ok) throw new Error(data.detail || 'approval failed');
+    await loadPendingRequests();
+    await loadAllocations();
+    await loadInventoryForAllocation();
   } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
-      showResponseModal('Update failed', 'Could not mark this assembly as completed.', false);
-    }
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
   }
 }
 
-function openDeleteAssemblyModal(id) {
-  deletingAssemblyId = id;
-  openModal('deleteAssemblyModal');
-}
-document.getElementById('deleteAssemblyCancel')?.addEventListener('click', () => closeModal('deleteAssemblyModal'));
-document.getElementById('deleteAssemblyConfirm')?.addEventListener('click', async () => {
+async function rejectRequest(requestId) {
+  const reason = prompt('Reason for rejecting (optional):') || '';
   try {
-    await apiFetch(`/assembly/delete/${deletingAssemblyId}`, { method: 'POST' });
-    assemblies = assemblies.filter(a => a.id !== deletingAssemblyId);
-    closeModal('deleteAssemblyModal');
-    renderCards();
-    renderTable();
-    showResponseModal('Assembly deleted', 'The assembly record has been removed.', true);
+    const res = await apiFetch(`/request/reject/${requestId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'rejection failed');
+    await loadPendingRequests();
   } catch (err) {
-    closeModal('deleteAssemblyModal');
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
-      showResponseModal('Delete failed', 'Could not delete this assembly.', false);
-    }
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
   }
-});
+}
 
-function exportAssemblySerials(id) {
-  const a = assemblies.find(x => x.id === id);
+async function loadAllocations() {
+  try {
+    const res = await apiFetch('/allocation/');
+    if (!res.ok) throw new Error('failed to fetch allocations');
+    const data = await res.json();
+    allocState.allocations = (data.dataset || []).slice().reverse();
+    allocPage = 1;
+    renderAllocationsTable(getFilteredAllocations());
+    updateAllocationCards(allocState.allocations);
+  } catch (err) {
+    console.error(err);
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load allocations.');
+  }
+}
+
+async function loadInventoryForAllocation() {
+  try {
+    const res = await apiFetch('/inventory/');
+    if (!res.ok) throw new Error('failed to fetch inventory');
+    const data = await res.json();
+    allocState.products = data.dataset || [];
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function returnMeta(a) {
+  if (a.return_status === 'returned') return { label: 'Returned', cls: 'high', overdue: false, complete: true };
+  const due = new Date(a.return_due_date);
+  const now = new Date();
+  const msLeft = due - now;
+  if (msLeft <= 0) return { label: 'Overdue', cls: 'low', overdue: true, complete: false };
+  const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
+  return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false, complete: false };
+}
+
+function updateAllocationCards(allocations) {
+  const values = document.querySelectorAll('.cards .card h2');
+  if (!values.length) return;
+  const pending = allocations.filter(a => !returnMeta(a).complete && !returnMeta(a).overdue).length;
+  const overdue = allocations.filter(a => !returnMeta(a).complete && returnMeta(a).overdue).length;
+  const returned = allocations.filter(a => returnMeta(a).complete).length;
+  values[0].textContent = allocations.length;
+  if (values[1]) values[1].textContent = pending;
+  if (values[2]) values[2].textContent = overdue;
+  if (values[3]) values[3].textContent = returned;
+}
+
+// Label for one allocated item — new rows always carry quantity 1 and their
+// own serial number (partial returns are gone), but older rows created
+// before this change may still hold quantity>1 with several serials, so
+// both are shown correctly here.
+function itemLabel(i) {
+  const qtyPart = (i.quantity || 1) > 1 ? ` x${i.quantity}` : '';
+  return `${i.product_name}${qtyPart}`;
+}
+function itemSerials(i) {
+  return (i.serial_numbers || []).join(', ');
+}
+
+function renderAllocationsTable(allocations) {
+  // Newest allotments first instead of the raw (ascending) API order.
+  const sorted = [...allocations].sort((a, b) =>
+    new Date(b.allotment_date || b.created_at || 0) - new Date(a.allotment_date || a.created_at || 0));
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / ALLOC_PAGE_SIZE));
+  allocPage = Math.min(Math.max(1, allocPage), totalPages);
+  const start = (allocPage - 1) * ALLOC_PAGE_SIZE;
+  const pageRows = sorted.slice(start, start + ALLOC_PAGE_SIZE);
+
+  const tbody = document.querySelector('.table-container tbody');
+  tbody.innerHTML = '';
+
+  pageRows.forEach(a => {
+    const meta = returnMeta(a);
+    const isSpare = a.allocation_type === 'spare_part';
+    const productLabel = isSpare
+      ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
+      : (a.items || []).map(itemLabel).join(', ');
+    const serialLabel = isSpare
+      ? '-'
+      : ((a.items || []).map(itemSerials).filter(Boolean).join(', ') || '-');
+    const whoLabel = isSpare
+      ? `Service #${(a.spare_part?.service_id || '').slice(0, 8)}`
+      : (a.sales_person?.name ?? '');
+    const addressLabel = isSpare
+      ? (a.spare_part?.service_id || '').slice(0, 8) || '-'
+      : ([a.company_name, a.address].filter(Boolean).join(', ') || '-');
+
+    const tr = document.createElement('tr');
+    tr.dataset.id = a.allocation_id;
+    tr.innerHTML = `
+      <td>${isSpare ? 'Spare Part' : 'Product'}</td>
+      <td>${productLabel}</td>
+      <td>${serialLabel}</td>
+      <td>${whoLabel}</td>
+      <td>${addressLabel}</td>
+      <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td>${a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td><span class="stock ${meta.cls}">${meta.label}</span></td>
+      <td>
+        <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
+        ${!isSpare && !a.dispatch && !a.sent_to_dispatch && window.__allocCanCreate
+          ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}
+        ${!isSpare && a.sent_to_dispatch && !a.dispatch
+          ? '<span class="stock pending" title="Waiting to be dispatched" style="padding:4px 8px;">In Dispatch Queue</span>' : ''}
+        ${!meta.complete && window.__allocCanReturnOrDamage ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
+        ${window.__allocCanReturnOrDamage ? (a.damage_report?.reported
+          ? '<button class="icon-btn damage-view-btn" title="Damage reported" style="color:#d62828;"><i class="fa-solid fa-triangle-exclamation"></i></button>'
+          : '<button class="icon-btn damage-report-btn" title="Report damaged product"><i class="fa-regular fa-triangle-exclamation"></i></button>') : ''}
+      </td>`;
+    tbody.appendChild(tr);
+  });
+
+  tbody.querySelectorAll('.view-alloc-btn').forEach(btn => btn.addEventListener('click', e => openViewAllocationModal(rowAllocation(e))));
+  tbody.querySelectorAll('.dispatch-alloc-btn').forEach(btn => btn.addEventListener('click', e => sendToDispatch(rowAllocation(e))));
+  tbody.querySelectorAll('.return-alloc-btn').forEach(btn => btn.addEventListener('click', e => openReturnModal(rowAllocation(e))));
+  tbody.querySelectorAll('.damage-report-btn').forEach(btn => btn.addEventListener('click', e => openDamageReportModal(rowAllocation(e))));
+  tbody.querySelectorAll('.damage-view-btn').forEach(btn => btn.addEventListener('click', e => openDamageViewModal(rowAllocation(e))));
+
+  renderTablePagination(document.querySelector('.pagination'), allocPage, totalPages, p => {
+    allocPage = p;
+    renderAllocationsTable(allocations);
+  });
+}
+
+// ---------- Send allocated product to Dispatch (mirrors how orders reach the dispatch queue) ----------
+async function sendToDispatch(a) {
   if (!a) return;
-  exportSerialsToExcel(a.serials, a.productName || 'assembly');
+  const label = (a.items || []).map(itemLabel).join(', ');
+  if (!confirm(`Send "${label}" to the dispatch queue?`)) return;
+  try {
+    const res = await apiFetch(`/allocation/send_to_dispatch/${a.allocation_id}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'could not send to dispatch');
+    await loadAllocations();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }
 
-function exportSerialsToExcel(serials, productName) {
-  const rows = serials.map((s, i) => ({ 'Unit #': i + 1, 'Serial Number': s.serial, 'Hologram Number': s.hologram }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Serials');
-  const safeName = (productName || 'assembly').replace(/[^a-z0-9]+/gi, '_');
-  XLSX.writeFile(wb, `${safeName}_serials.xlsx`);
+function rowAllocation(e) {
+  const tr = e.target.closest('tr');
+  return allocState.allocations.find(a => a.allocation_id === tr.dataset.id);
 }
 
-// =========================================================
-// MODAL HELPERS
-// =========================================================
-function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-
-// =========================================================
-// ADD ASSEMBLY WIZARD
-// =========================================================
-
-function stepDots(active) {
-  const labels = ['Product', 'Parts Used', 'Serial Numbers'];
-  return `
-    <div style="display:flex;gap:8px;margin-bottom:20px;">
-      ${labels.map((label, i) => `
-        <div style="flex:1;text-align:center;">
-          <div style="height:6px;border-radius:99px;background:${i + 1 <= active ? '#1665ff' : '#e2e8f0'};margin-bottom:6px;"></div>
-          <span style="font-size:11px;color:${i + 1 === active ? '#1665ff' : '#94a3b8'};font-weight:${i + 1 === active ? '600' : '400'};">${label}</span>
-        </div>
-      `).join('')}
-    </div>`;
+// ---------- Return allocation ----------
+// Every row is now a single allocated unit (or, for spare parts, one
+// service's request) — so returning it is a one-shot confirm, no picking
+// serials or splitting quantity.
+function openReturnModal(a) {
+  if (!a) return;
+  const isSpare = a.allocation_type === 'spare_part';
+  const label = isSpare
+    ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
+    : (a.items || []).map(i => `${i.product_name}${itemSerials(i) ? ' (SN: ' + itemSerials(i) + ')' : ''}`).join(', ');
+  if (!confirm(`Mark "${label}" as returned?`)) return;
+  submitReturn(a);
 }
 
-async function openAddAssemblyModal() {
-  assemblyDraft = {
-    productName: '', productId: '', modelNumber: '', quantity: 1,
-    partsUsed: [], serials: [],
-  };
-  assemblyStep = 1;
-  await loadAvailableParts();   // refresh stock right before the wizard opens
-  renderAssemblyStep();
-  openModal('assemblyModal');
+async function submitReturn(a) {
+  try {
+    const res = await apiFetch(`/allocation/return/${a.allocation_id}`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'update failed');
+    await loadAllocations();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  }
 }
 
-function renderAssemblyStep() {
-  if (assemblyStep === 1) return renderAStep1();
-  if (assemblyStep === 2) return renderAStep2();
-  return renderAStep3();
-}
+function openViewAllocationModal(a) {
+  if (!a) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+  const meta = returnMeta(a);
+  const isSpare = a.allocation_type === 'spare_part';
 
-// ---------- STEP 1: product details ----------
-function renderAStep1() {
-  const box = ASSEMBLY_MODAL();
-  box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>Add Assembly</h3>
+  const itemsHtml = isSpare
+    ? `<div class="detail"><small>Spare Part</small><p>${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}</p></div>
+       <div class="detail"><small>Service ID</small><p>${a.spare_part?.service_id ?? ''}</p></div>`
+    : `<div class="detail"><small>Products</small><p>${(a.items || []).map(i => {
+         const idModel = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+         return `${i.product_name}${idModel ? ' (' + idModel + ')' : ''} x${i.quantity}${i.serial_numbers?.length ? ' — SN: ' + i.serial_numbers.join(', ') : ''}`;
+       }).join('<br>')}</p></div>
+       <div class="detail"><small>Sales Person</small><p>${a.sales_person?.name ?? ''} — ${a.sales_person?.contact_number ?? ''}</p></div>
+       <div class="detail"><small>Company / Address</small><p>${a.company_name ?? ''}, ${a.address ?? ''}</p></div>`;
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Allocation Details</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    ${stepDots(1)}
-    <form id="aStep1Form" style="display:flex;flex-direction:column;gap:10px;">
-      <input id="a1ProductName" placeholder="Product Name" value="${assemblyDraft.productName}" required>
-      <input id="a1ProductId" placeholder="Product ID" value="${assemblyDraft.productId}">
-      <input id="a1ModelNumber" placeholder="Model Number" value="${assemblyDraft.modelNumber}">
-      <label style="font-size:13px;color:#64748b;">Quantity to Assemble</label>
-      <input type="number" id="a1Quantity" min="1" value="${assemblyDraft.quantity}" required>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-        <button type="button" class="cancel-btn" id="aCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Parts Used</button>
+    <div class="detail"><small>Allocation ID</small><p>${a.allocation_id ?? ''}</p></div>
+    ${itemsHtml}
+    <div class="detail"><small>Allotment Date</small><p>${a.allotment_date ? new Date(a.allotment_date).toLocaleString() : '-'}</p></div>
+    <div class="detail"><small>Return Due</small><p>${a.return_due_date ? new Date(a.return_due_date).toLocaleString() : '-'}</p></div>
+    <div class="detail"><small>Status</small><p>${meta.label}</p></div>`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
+
+// ---------- Report Damaged Product modal ----------
+function openDamageReportModal(a) {
+  if (!a) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Report Damaged Product</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <form id="damageForm" style="display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <label style="font-size:12px;color:#64748b;">Photo of damage (required)</label>
+        <input type="file" name="image" accept="image/*" required style="width:100%;padding:6px 0;">
       </div>
-    </form>
-  `;
-  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
-  box.querySelector('#aCancelBtn').addEventListener('click', () => closeModal('assemblyModal'));
-  box.querySelector('#aStep1Form').addEventListener('submit', (e) => {
+      <textarea name="issue" placeholder="Specify the issue (e.g. cracked casing, broken screen...)" required rows="4"
+        style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+      <p style="font-size:11px;color:#94a3b8;">Photo is emailed immediately and auto-deleted from the database after 2 days.</p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Submit</button>
+      </div>
+    </form>`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+
+  content.querySelector('#damageForm').addEventListener('submit', e => {
     e.preventDefault();
-    assemblyDraft.productName = document.getElementById('a1ProductName').value.trim();
-    assemblyDraft.productId = document.getElementById('a1ProductId').value.trim();
-    assemblyDraft.modelNumber = document.getElementById('a1ModelNumber').value.trim();
-    assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
-    assemblyStep = 2;
-    renderAssemblyStep();
+    const fd = new FormData(e.target);
+    const issue = (fd.get('issue') || '').trim();
+    const imageFile = e.target.image.files[0];
+
+    if (!imageFile) { alert('Please attach a photo of the damaged product.'); return; }
+    if (!issue) { alert('Please specify the issue.'); return; }
+
+    const maxBytes = 2 * 1024 * 1024;
+    if (imageFile.size > maxBytes) {
+      alert(`Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`);
+      return;
+    }
+
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await apiFetch(`/allocation/report_damage/${a.allocation_id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issue, image: reader.result })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'damage report failed');
+        modal.style.display = 'none';
+        await loadAllocations();
+      } catch (err) {
+        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit';
+      }
+    };
+    reader.readAsDataURL(imageFile);
   });
+
+  modal.style.display = 'flex';
 }
 
-// ---------- STEP 2: parts used (from inventory spare_parts + local) ----------
-function renderAStep2() {
-  const box = ASSEMBLY_MODAL();
-  box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>Add Assembly</h3>
+function openDamageViewModal(a) {
+  if (!a?.damage_report) return;
+  const dr = a.damage_report;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+
+  const imageHtml = dr.image
+    ? `<img src="${dr.image}" style="max-width:100%;border-radius:10px;margin-top:8px;">`
+    : `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">Photo already emailed and auto-deleted from the database (2-day retention).</p>`;
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Damage Report</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    ${stepDots(2)}
-    <p style="font-size:13px;color:#64748b;margin-bottom:4px;">Add every part this batch needs. Parts pulled from inventory are deducted from its spare parts stock when you save; local parts are not.</p>
-    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
-      <i class="fa-solid fa-circle-info"></i>
-      Only hologram-tagged parts show up here. Exactly one inventory part's quantity must equal the assembly quantity
-      (${assemblyDraft.quantity}) — that part's hologram numbers get assigned to the finished units.
-    </p>
-    <div id="partsUsedRows" style="display:flex;flex-direction:column;gap:8px;"></div>
-    <div style="display:flex;gap:10px;margin-top:10px;">
-      <button type="button" id="addInvPartBtn" ${availableParts.length ? '' : 'disabled'}
-        style="flex:1;padding:10px 12px;border:1px dashed #1665ff;border-radius:8px;background:#f0f6ff;cursor:pointer;font-size:13px;color:#1665ff;${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
-        <i class="fa-solid fa-boxes-stacked"></i> Add Part from Inventory
-      </button>
-      <button type="button" id="addLocalPartBtn"
-        style="flex:1;padding:10px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
-        <i class="fa-solid fa-plus"></i> Add Local Part
-      </button>
-    </div>
-    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
-      <button type="button" id="aBackTo1Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
-      <button type="button" id="aNextTo3Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Serial / Hologram</button>
-    </div>
-  `;
-  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
-  box.querySelector('#aBackTo1Btn').addEventListener('click', () => { syncPartsUsedFromDom(); assemblyStep = 1; renderAssemblyStep(); });
+    <div class="detail"><small>Issue</small><p>${dr.issue ?? ''}</p></div>
+    <div class="detail"><small>Reported By</small><p>${dr.reported_by ?? ''}</p></div>
+    <div class="detail"><small>Reported At</small><p>${dr.reported_at ? new Date(dr.reported_at).toLocaleString() : '-'}</p></div>
+    <div class="detail"><small>Photo</small>${imageHtml}</div>`;
 
-  renderPartsUsedRows();
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
 
-  box.querySelector('#addInvPartBtn').addEventListener('click', () => {
-    if (!availableParts.length) return;
-    const first = availableParts[0];
-    // default quantity to the assembly quantity — that's the 1:1 rule for
-    // whichever part ends up supplying the hologram numbers; still editable
-    assemblyDraft.partsUsed.push({ name: first.part_name, quantity: assemblyDraft.quantity, source: 'inventory' });
-    renderPartsUsedRows();
-  });
-  box.querySelector('#addLocalPartBtn').addEventListener('click', () => {
-    assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local' });
-    renderPartsUsedRows();
-  });
+function wireTopActions() {
+  const exportBtn = document.querySelector('.top-actions .export');
+  if (exportBtn) exportBtn.addEventListener('click', exportAllocationsCSV);
+  // Allocate button is wired inside injectAllocateModal()
 
-  box.querySelector('#aNextTo3Btn').addEventListener('click', () => {
-    syncPartsUsedFromDom();
-    const valid = assemblyDraft.partsUsed.filter(p => p.name && p.quantity);
-    if (!valid.length) {
-      showResponseModal('Add a part', 'Please add at least one part (from inventory or locally) before continuing.', false);
-      return;
+  // Matches backend: admin/accounts/service_manager can create & send to
+  // dispatch; admin/accounts/distributor/service_manager can return or
+  // report damage.
+  const role = getRole();
+  window.__allocCanCreate = role === 'admin' || role === 'accounts' || role === 'service_manager';
+  window.__allocCanReturnOrDamage = role === 'admin' || role === 'accounts' || role === 'distributor' || role === 'service_manager';
+  if (!window.__allocCanCreate) {
+    const addBtn = document.querySelector('.top-actions .add-product');
+    if (addBtn) addBtn.style.display = 'none';
+  }
+}
+
+function exportAllocationsCSV() {
+  openExportWizard({
+    title: 'Export Allocations',
+    statusOptions: ['pending', 'returned'],
+    statusField: 'return_status',
+    dateField: 'allotment_date',
+    dateLabel: 'Allotment Date',
+    getRows: () => allocState.allocations,
+    onConfirm: (rows) => {
+      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Allotment Date', 'Return Due', 'Status'];
+      const csvRows = rows.map(a => {
+        const isSpare = a.allocation_type === 'spare_part';
+        return [
+          a.allocation_id,
+          isSpare ? 'Spare Part' : 'Product',
+          isSpare ? `${a.spare_part?.part_name} x${a.spare_part?.quantity}` : (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(' | '),
+          isSpare ? a.spare_part?.service_id : a.sales_person?.name,
+          a.allotment_date,
+          a.return_due_date,
+          returnMeta(a).label
+        ];
+      });
+      downloadCSV(header, csvRows, 'allocations.csv');
     }
-    const inventoryParts = valid.filter(p => p.source === 'inventory');
-    if (!inventoryParts.length) {
-      showResponseModal('Add an inventory part', 'Add at least one part from inventory — its hologram numbers supply the hologram number for each assembled unit.', false);
-      return;
-    }
-    const matching = inventoryParts.filter(p => Number(p.quantity) >= Number(assemblyDraft.quantity));
-    if (matching.length !== 1) {
-      showResponseModal(
-        'Check part quantities',
-        `Exactly one inventory part must have quantity at least equal to the assembly quantity (${assemblyDraft.quantity}) — that part supplies the hologram number for each unit.`,
-        false
-      );
-      return;
-    }
-    assemblyDraft.partsUsed = valid;
-    assemblyStep = 3;
-    renderAssemblyStep();
   });
 }
 
-function renderPartsUsedRows() {
-  const wrap = document.getElementById('partsUsedRows');
+// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
+function downloadCSV(header, rows, filename) {
+  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
 
-  wrap.innerHTML = assemblyDraft.partsUsed.map((p, i) => {
-    let nameField;
-    if (p.source === 'inventory') {
-      nameField = `
-        <select class="partUsedName" style="flex:2;">
-          ${availableParts.map(sp => `<option value="${sp.part_name}" ${sp.part_name === p.name ? 'selected' : ''}>${sp.part_name} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
-        </select>`;
-    } else {
-      nameField = `<input type="text" class="partUsedName" placeholder="Part Name" value="${p.name}" style="flex:2;">`;
-    }
+function openExportWizard({ title, statusOptions, statusField, dateField, dateLabel, getRows, onConfirm }) {
+  const field = statusField || 'status';
+  let modal = document.getElementById('exportWizardModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'exportWizardModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:1200;';
+    document.body.appendChild(modal);
+  }
 
-    return `
-      <div style="display:flex;gap:8px;align-items:center;" data-part-row="${i}">
-        <span style="font-size:11px;font-weight:600;color:${p.source === 'inventory' ? '#1665ff' : '#64748b'};width:70px;flex-shrink:0;">
-          ${p.source === 'inventory' ? 'INVENTORY' : 'LOCAL'}
-        </span>
-        ${nameField}
-        <input type="number" min="0" class="partUsedQty" placeholder="Qty" value="${p.quantity}" style="flex:1;">
-        <button type="button" class="removePartUsedBtn" data-index="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:36px;height:36px;cursor:pointer;">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
-      </div>`;
-  }).join('') || '<p style="color:#94a3b8;font-size:13px;">No parts added yet — use the buttons below.</p>';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:26px;width:360px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>${title}</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
+        ${statusOptions ? `
+        <label style="font-size:13px;color:#64748b;">Status</label>
+        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="">All Statuses</option>
+          ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
+        </select>` : ''}
+        ${dateField ? `
+        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <input type="date" name="dateFrom">
+        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <input type="date" name="dateTo">` : ''}
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+        </div>
+      </form>
+    </div>`;
 
-  wrap.querySelectorAll('.removePartUsedBtn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      syncPartsUsedFromDom();
-      assemblyDraft.partsUsed.splice(Number(btn.dataset.index), 1);
-      renderPartsUsedRows();
+  modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
+  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
+
+  modal.querySelector('#exportWizardForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const status = fd.get('status');
+    const dateFrom = fd.get('dateFrom');
+    const dateTo = fd.get('dateTo');
+
+    const filtered = getRows().filter(row => {
+      if (status && row[field] !== status) return false;
+      if (dateField && (dateFrom || dateTo)) {
+        const rowDate = row[dateField] ? new Date(row[dateField]) : null;
+        if (!rowDate) return false;
+        if (dateFrom && rowDate < new Date(dateFrom)) return false;
+        if (dateTo && rowDate > new Date(dateTo + 'T23:59:59')) return false;
+      }
+      return true;
     });
+
+    modal.style.display = 'none';
+    onConfirm(filtered);
+  });
+
+  modal.style.display = 'flex';
+}
+
+function wireFilter() {
+  const filterBtn = document.querySelector('.filter-btn');
+  if (!filterBtn) return;
+  filterBtn.addEventListener('click', () => {
+    const [statusSel] = document.querySelectorAll('.filter-box select');
+    const [dateBox] = document.querySelectorAll('.filter-box input[type="date"]');
+    const status = statusSel.value === 'All Status' ? '' : statusSel.value;
+    const date = dateBox.value;
+
+    allocState.activeFilters = (status || date) ? { status, date } : null;
+    allocPage = 1;
+    renderAllocationsTable(getFilteredAllocations());
   });
 }
 
-function syncPartsUsedFromDom() {
-  const wrap = document.getElementById('partsUsedRows');
-  if (!wrap) return;
-  wrap.querySelectorAll('[data-part-row]').forEach(row => {
-    const i = Number(row.dataset.partRow);
-    assemblyDraft.partsUsed[i].name = row.querySelector('.partUsedName').value.trim();
-    assemblyDraft.partsUsed[i].quantity = row.querySelector('.partUsedQty').value;
+// ---------- Allocate wizard ----------
+const allocWiz = {
+  type: '',              // 'product' | 'spare'
+  salesPersonId: '',
+  salesPerson: null,
+  cart: {},               // product_id -> {product_id, product_name, quantity}
+  serialChoices: {},      // rowKey (product_id||product_name||model_no) -> [serial1, serial2, ...] one per unit
+  service: null,
+  partName: '',
+  partQuantity: 1,
+  companyName: '',
+  address: ''
+};
+
+function resetAllocWiz() {
+  allocWiz.type = '';
+  allocWiz.salesPersonId = '';
+  allocWiz.salesPerson = null;
+  allocWiz.cart = {};
+  allocWiz.serialChoices = {};
+  allocWiz.service = null;
+  allocWiz.partName = '';
+  allocWiz.partQuantity = 1;
+  allocWiz.companyName = '';
+  allocWiz.address = '';
+}
+
+function injectAllocateModal() {
+  const modal = document.getElementById('allocateModal');
+  const newBtn = document.querySelector('.top-actions .add-product');
+  if (newBtn) newBtn.addEventListener('click', () => {
+    resetAllocWiz();
+    modal.style.display = 'flex';
+    renderAllocTypeStep();
+  });
+  modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+}
+
+function allocModalBody() {
+  const modal = document.getElementById('allocateModal');
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 id="allocWizTitle">Allocate</h3>
+      <button type="button" id="allocWizClose" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div id="allocWizBody"></div>`;
+  content.querySelector('#allocWizClose').addEventListener('click', () => modal.style.display = 'none');
+  return document.getElementById('allocWizBody');
+}
+function allocWizTitle(t) { document.getElementById('allocWizTitle').textContent = t; }
+
+// Step 0: allocation type
+function renderAllocTypeStep() {
+  const body = allocModalBody();
+  allocWizTitle('Allocate');
+  body.innerHTML = `
+    <p style="color:#64748b;margin-bottom:14px;">What are you allocating?</p>
+    <div style="display:flex;gap:10px;">
+      <button id="btnAllocProduct" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+        <i class="fa-solid fa-box"></i><br>Product to Sales Person
+      </button>
+      <button id="btnAllocSpare" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+        <i class="fa-solid fa-screwdriver-wrench"></i><br>Spare Part to Service
+      </button>
+    </div>`;
+  document.getElementById('btnAllocProduct').addEventListener('click', () => { allocWiz.type = 'product'; renderSalesPersonTypeStep(); });
+  document.getElementById('btnAllocSpare').addEventListener('click', () => { allocWiz.type = 'spare'; renderActiveServicesStep(); });
+}
+
+// ----- Product allocation flow -----
+function renderSalesPersonTypeStep() {
+  const body = allocModalBody();
+  allocWizTitle('Sales Person');
+  body.innerHTML = `
+    <p style="color:#64748b;margin-bottom:14px;">Existing sales person or a new one?</p>
+    <div style="display:flex;gap:10px;">
+      <button id="btnSpExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+        <i class="fa-solid fa-address-book"></i><br>Existing
+      </button>
+      <button id="btnSpNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+        <i class="fa-solid fa-user-plus"></i><br>New
+      </button>
+    </div>
+    <div style="margin-top:14px;">
+      <button type="button" id="backAllocType" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+    </div>`;
+  document.getElementById('backAllocType').addEventListener('click', renderAllocTypeStep);
+  document.getElementById('btnSpExisting').addEventListener('click', renderExistingSalesPersonStep);
+  document.getElementById('btnSpNew').addEventListener('click', renderNewSalesPersonStep);
+}
+
+function renderExistingSalesPersonStep() {
+  const body = allocModalBody();
+  allocWizTitle('Select Sales Person');
+  body.innerHTML = `
+    <input id="spSearch" placeholder="Search name, company or contact" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <div id="spResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
+    <div style="margin-top:14px;">
+      <button type="button" id="backSp1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+    </div>`;
+  document.getElementById('backSp1').addEventListener('click', renderSalesPersonTypeStep);
+
+  const searchInput = document.getElementById('spSearch');
+  const resultsBox = document.getElementById('spResults');
+  const runSearch = async () => {
+    resultsBox.innerHTML = '<small style="color:#94a3b8;">Searching...</small>';
+    try {
+      const term = searchInput.value.trim();
+      const res = await apiFetch(`/salesperson/search?term=${encodeURIComponent(term)}`);
+      const data = await res.json();
+      const list = data.dataset || [];
+      if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No sales persons found.</small>'; return; }
+      resultsBox.innerHTML = list.map(sp => `
+        <div class="sp-row" data-id="${sp.sales_person_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
+          <strong>${sp.name ?? ''}</strong><br>
+          <small style="color:#64748b;">${sp.company_name ?? ''} • ${sp.contact_number ?? ''}</small>
+        </div>`).join('');
+      resultsBox.querySelectorAll('.sp-row').forEach(row => row.addEventListener('click', () => {
+        const sp = list.find(x => x.sales_person_id === row.dataset.id);
+        allocWiz.salesPersonId = sp.sales_person_id;
+        allocWiz.salesPerson = sp;
+        renderProductCartStep();
+      }));
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') resultsBox.innerHTML = '<small style="color:#d62828;">Search failed.</small>';
+    }
+  };
+  let debounce;
+  searchInput.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(runSearch, 300); });
+  runSearch();
+}
+
+function renderNewSalesPersonStep() {
+  const body = allocModalBody();
+  allocWizTitle('New Sales Person');
+  body.innerHTML = `
+    <form id="newSpForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="name" placeholder="Sales Person Name" required>
+      <input name="company_name" placeholder="Company Name" required>
+      <input name="address" placeholder="Address" required>
+      <input name="contact_number" placeholder="Contact Number" required>
+      <input name="email" type="email" placeholder="Email">
+      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+        <button type="button" id="backSp2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+      </div>
+    </form>`;
+  document.getElementById('backSp2').addEventListener('click', renderSalesPersonTypeStep);
+  document.getElementById('newSpForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      name: fd.get('name'), company_name: fd.get('company_name'), address: fd.get('address'),
+      contact_number: fd.get('contact_number'), email: fd.get('email') || ''
+    };
+    try {
+      const res = await apiFetch('/salesperson/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'creation failed');
+      allocWiz.salesPersonId = data.sales_person_id;
+      allocWiz.salesPerson = data.sales_person || payload;
+      renderProductCartStep();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
   });
 }
 
-// ---------- STEP 3: serial + hologram numbers ----------
-function generateSerialNumbers(quantity, productId) {
-  const datePart = todayStr().replace(/-/g, '');
-  const base = (productId || 'PRD').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const serials = [];
-  for (let i = 1; i <= quantity; i++) {
-    const seq = String(i).padStart(4, '0');
-    serials.push(`${base}-${datePart}-${seq}`);
-  }
-  return serials;
-}
+function renderProductCartStep() {
+  const body = allocModalBody();
+  allocWizTitle(`Products for ${allocWiz.salesPerson?.name ?? ''}`);
+  const products = allocState.products;
 
-// Bumps the trailing number in a seed string by `offset`, keeping the same
-// zero-padding width — "ACER-20260820-0001" + 1 -> "ACER-20260820-0002".
-// If the seed has no trailing digits, a "-0002" style suffix is appended.
-function incrementSeed(seed, offset) {
-  const match = seed.match(/^(.*?)(\d+)$/);
-  if (!match) {
-    return `${seed}-${String(offset + 1).padStart(4, '0')}`;
+  // BUG FIX (same as orders.js): inventory keeps one document per lot, and
+  // the same product_id can appear on several rows with a different
+  // product_name/model_no. A row/cart-line is only "the same product" when
+  // product_id + product_name + model_no ALL match — otherwise it's a
+  // different, independent product and needs its own row + cart entry.
+  const rowKey = (p) => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
+  const totalQtyByKey = new Map();
+  for (const p of products) {
+    const key = rowKey(p);
+    totalQtyByKey.set(key, (totalQtyByKey.get(key) || 0) + (Number(p.quantity) || 0));
   }
-  const [, prefix, digits] = match;
-  const nextNumber = parseInt(digits, 10) + offset;
-  return prefix + String(nextNumber).padStart(digits.length, '0');
-}
-
-function renderAStep3() {
-  // fresh draft: only unit 1 gets a suggested value (still fully editable);
-  // the rest stay blank until "Generate Remaining" is used, or the user can
-  // just type every one manually. Hologram numbers are NOT entered here —
-  // the server assigns one per unit from the hologram-bearing inventory
-  // part's stock (see hologramPartName below) when the assembly is saved.
-  if (!assemblyDraft.serials.length || assemblyDraft.serials.length !== assemblyDraft.quantity) {
-    const suggestion = generateSerialNumbers(1, assemblyDraft.productId)[0];
-    assemblyDraft.serials = Array.from({ length: assemblyDraft.quantity }, (_, i) => i === 0 ? suggestion : '');
+  const stockFor = (p) => totalQtyByKey.get(rowKey(p)) ?? (Number(p.quantity) || 0);
+  function dedupeByRowKey(list) {
+    const seen = new Map();
+    for (const p of list) {
+      const key = rowKey(p);
+      if (!seen.has(key)) seen.set(key, p);
+    }
+    return [...seen.values()];
   }
 
-  const hologramPart = (assemblyDraft.partsUsed || []).find(
-    p => p.source === 'inventory' && Number(p.quantity) >= Number(assemblyDraft.quantity)
-  );
-
-  const box = ASSEMBLY_MODAL();
-  box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>Add Assembly</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-    </div>
-    ${stepDots(3)}
-    <p style="font-size:13px;color:#64748b;margin-bottom:6px;">
-      Enter (or adjust) Unit 1's serial number below, then generate the rest of the batch from it — or fill in / edit every unit by hand.
-    </p>
-    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
-      <i class="fa-solid fa-circle-info"></i>
-      Hologram numbers aren't entered here — each unit will automatically get the next hologram number on file for
-      <strong>${hologramPart ? hologramPart.name : 'the inventory part'}</strong> when you save.
-    </p>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
-      <button type="button" id="genFromUnit1Btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;">
-        <i class="fa-solid fa-arrow-down-9-1"></i> Generate Remaining From Unit 1
-      </button>
-      <button type="button" id="regenSerialsBtn" style="padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;">
-        <i class="fa-solid fa-rotate"></i> Auto-generate All
-      </button>
-    </div>
-    <div style="max-height:280px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
+  body.innerHTML = `
+    <input id="allocProdFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead style="position:sticky;top:0;background:#f8fafc;">
-          <tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial Number</th></tr>
-        </thead>
-        <tbody id="serialRows"></tbody>
+        <thead><tr style="text-align:left;color:#64748b;"><th>Product</th><th>Stock</th><th style="width:70px;">Qty</th></tr></thead>
+        <tbody id="allocProdRows"></tbody>
       </table>
     </div>
-    <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
-      <button type="button" id="aBackTo2Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
-      <button type="button" id="saveAssemblyBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#1665ff,#4c92ff);color:#fff;cursor:pointer;font-weight:600;">
-        <i class="fa-solid fa-check"></i> Save Assembly
-      </button>
-    </div>
-  `;
-  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
-  box.querySelector('#aBackTo2Btn').addEventListener('click', () => { syncSerialsFromDom(); assemblyStep = 2; renderAssemblyStep(); });
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <button type="button" id="backCart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="toDetailsBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+    </div>`;
+  document.getElementById('backCart').addEventListener('click', () => allocWiz.salesPersonId ? renderExistingSalesPersonStep() : renderNewSalesPersonStep());
 
-  box.querySelector('#genFromUnit1Btn').addEventListener('click', () => {
-    syncSerialsFromDom();
-    const seed = assemblyDraft.serials[0];
-    if (!seed) {
-      showResponseModal('Fill Unit 1 first', 'Enter Unit 1\'s serial number, then generate the rest.', false);
+  const rowsBox = document.getElementById('allocProdRows');
+  const renderRows = (list) => {
+    const rows = dedupeByRowKey(list);
+    rowsBox.innerHTML = rows.map(p => {
+      const key = rowKey(p);
+      const stock = stockFor(p);
+      return `
+      <tr>
+        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' · ' + p.model_no : ''}</small></td>
+        <td>${stock}</td>
+        <td><input type="number" min="0" max="${stock}" value="${allocWiz.cart[key]?.quantity ?? 0}"
+              data-row-key="${key}" class="allocQtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+      </tr>`;
+    }).join('');
+    rowsBox.querySelectorAll('.allocQtyInput').forEach(inp => inp.addEventListener('input', () => {
+      const key = inp.dataset.rowKey;
+      const p = rows.find(x => rowKey(x) === key);
+      if (!p) return;
+      const stock = stockFor(p);
+      const qty = Math.max(0, Math.min(Number(inp.value) || 0, stock));
+      inp.value = qty;
+      if (qty > 0) allocWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, model_no: p.model_no || '', quantity: qty };
+      else delete allocWiz.cart[key];
+    }));
+  };
+  renderRows(products);
+  document.getElementById('allocProdFilter').addEventListener('input', e => {
+    const term = e.target.value.trim().toLowerCase();
+    renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term)));
+  });
+
+  document.getElementById('toDetailsBtn').addEventListener('click', () => {
+    if (!Object.keys(allocWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
+    renderAllocSerialReviewStep();
+  });
+}
+
+// Step: review auto-fetched serial numbers for the cart, optionally swap any
+// of them for a different available serial before allotment details.
+async function renderAllocSerialReviewStep() {
+  allocWizTitle('Review Serial Numbers');
+  const body = allocModalBody();
+  body.innerHTML = `<p style="color:#94a3b8;">Loading available serial numbers...</p>`;
+
+  const cartItems = Object.values(allocWiz.cart);
+  const rowKeyOf = (i) => `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+
+  const availableByVariant = {};
+  await Promise.all(cartItems.map(async (item) => {
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    if (availableByVariant[variantKey]) return;
+    try {
+      const params = new URLSearchParams({ product_id: item.product_id, model_no: item.model_no || '' });
+      const res = await apiFetch(`/inventory/available_serials?${params.toString()}`);
+      const data = await res.json();
+      availableByVariant[variantKey] = data.serial_numbers || [];
+    } catch (err) {
+      availableByVariant[variantKey] = [];
+    }
+  }));
+
+  let html = `<p style="color:#64748b;margin-bottom:12px;font-size:13px;">
+    Each unit is auto-assigned the oldest available serial number. Pick a different one below if needed — search by typing in the box.
+  </p>`;
+
+  cartItems.forEach((item) => {
+    const rowKey = rowKeyOf(item);
+    const variantKey = `${item.product_id}||${item.model_no || ''}`;
+    const available = availableByVariant[variantKey] || [];
+    const needed = item.quantity;
+    const slots = Math.min(needed, available.length);
+
+    html += `<div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+      <strong>${item.product_name}${item.model_no ? ' · ' + item.model_no : ''}</strong> × ${needed}`;
+
+    if (!available.length) {
+      html += `<p style="font-size:12px;color:#94a3b8;margin-top:4px;">No serial numbers on file for this item — will allocate unserialized.</p></div>`;
       return;
     }
-    for (let i = 1; i < assemblyDraft.serials.length; i++) {
-      assemblyDraft.serials[i] = incrementSeed(seed, i);
+    if (needed > available.length) {
+      html += `<p style="font-size:12px;color:#d62828;margin-top:4px;">Only ${available.length} serial number(s) on file — the remaining ${needed - available.length} unit(s) will allocate unserialized.</p>`;
     }
-    renderSerialRows();
+
+    const existingChoices = allocWiz.serialChoices[rowKey] || [];
+    for (let slot = 0; slot < slots; slot++) {
+      const defaultSerial = available[slot];
+      const chosen = existingChoices[slot] || defaultSerial;
+      html += `
+        <div style="margin-top:8px;">
+          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <input list="allocSerialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="allocSerialPickInput"
+                 data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
+                 style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+          <datalist id="allocSerialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}">
+            ${available.map(sn => `<option value="${sn}">`).join('')}
+          </datalist>
+        </div>`;
+    }
+    html += `</div>`;
   });
 
-  box.querySelector('#regenSerialsBtn').addEventListener('click', () => {
-    assemblyDraft.serials = generateSerialNumbers(assemblyDraft.quantity, assemblyDraft.productId);
-    renderSerialRows();
-  });
-  box.querySelector('#saveAssemblyBtn').addEventListener('click', finalizeAssembly);
+  html += `
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button type="button" id="backSerialReview" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="toDetailsBtn2" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+    </div>`;
 
-  renderSerialRows();
-}
+  body.innerHTML = html;
+  document.getElementById('backSerialReview').addEventListener('click', renderProductCartStep);
 
-function renderSerialRows() {
-  const tbody = document.getElementById('serialRows');
-  tbody.innerHTML = assemblyDraft.serials.map((s, i) => `
-    <tr data-serial-row="${i}">
-      <td style="padding:6px 8px;">${i + 1}${i === 0 ? ' <span style="color:#94a3b8;font-size:11px;">(seed)</span>' : ''}</td>
-      <td style="padding:6px 8px;"><input type="text" class="serialInput" placeholder="Serial Number" value="${s}" style="width:100%;"></td>
-    </tr>
-  `).join('');
-}
-
-function syncSerialsFromDom() {
-  const tbody = document.getElementById('serialRows');
-  if (!tbody) return;
-  tbody.querySelectorAll('[data-serial-row]').forEach(row => {
-    const i = Number(row.dataset.serialRow);
-    assemblyDraft.serials[i] = row.querySelector('.serialInput').value.trim();
-  });
-}
-
-// ---------- FINALIZE ----------
-async function finalizeAssembly() {
-  syncSerialsFromDom();
-
-  if (assemblyDraft.serials.some(s => !s)) {
-    showResponseModal('Missing values', 'Every unit needs a serial number.', false);
-    return;
-  }
-  const serialSet = new Set(assemblyDraft.serials);
-  if (serialSet.size !== assemblyDraft.serials.length) {
-    showResponseModal('Duplicate values', 'Serial numbers must be unique within this batch.', false);
-    return;
-  }
-
-  try {
-    const res = await apiFetch('/assembly/create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(toServerShapeAssembly(assemblyDraft)),
+  body.querySelectorAll('.allocSerialPickInput').forEach(inp => {
+    const rowKey = inp.dataset.rowKey;
+    const slot = Number(inp.dataset.slot);
+    if (!allocWiz.serialChoices[rowKey]) allocWiz.serialChoices[rowKey] = [];
+    allocWiz.serialChoices[rowKey][slot] = inp.value;
+    inp.addEventListener('change', () => {
+      const siblings = [...body.querySelectorAll(`.allocSerialPickInput[data-row-key="${rowKey}"]`)];
+      const dup = siblings.find(s => s !== inp && s.value === inp.value && inp.value.trim() !== '');
+      if (dup) {
+        alert('This serial number is already selected for another unit of this item — pick a different one.');
+        inp.value = allocWiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      const item = cartItems.find(i => rowKeyOf(i) === rowKey);
+      const variantKey = `${item?.product_id}||${item?.model_no || ''}`;
+      const available = availableByVariant[variantKey] || [];
+      if (inp.value.trim() && !available.includes(inp.value.trim())) {
+        alert('That serial number isn\'t in the available list for this product.');
+        inp.value = allocWiz.serialChoices[rowKey][slot] || '';
+        return;
+      }
+      allocWiz.serialChoices[rowKey][slot] = inp.value.trim();
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'assembly creation failed');
+  });
 
-    closeModal('assemblyModal');
-    assemblyDraft = null;
-    await loadAssemblies();
-    await loadAvailableParts();   // inventory spare parts stock changed — refresh
-    showResponseModal('Assembly saved', 'The assembly has been created and parts stock updated.', true);
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
-      showResponseModal('Save failed', err.message, false);
+  document.getElementById('toDetailsBtn2').addEventListener('click', renderCompanyDetailsStep);
+}
+
+// Step: optional company details — none of these fields are required, so the
+// admin can skip straight through if there's nothing to record here.
+function renderCompanyDetailsStep() {
+  const body = allocModalBody();
+  allocWizTitle('Company Details (Optional)');
+  const c = allocWiz.companyDetails || {};
+  body.innerHTML = `
+    <form id="companyDetailsForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="company_name" placeholder="Company Name" value="${c.company_name ?? ''}">
+      <input name="address" placeholder="Address" value="${c.address ?? ''}">
+      <input name="gst_number" placeholder="GST No." value="${c.gst_number ?? ''}">
+      <input name="phone_number" placeholder="Phone No." value="${c.phone_number ?? ''}">
+      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+        <button type="button" id="backCompanyDetails" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+      </div>
+    </form>`;
+  document.getElementById('backCompanyDetails').addEventListener('click', renderAllocSerialReviewStep);
+  document.getElementById('companyDetailsForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    allocWiz.companyDetails = {
+      company_name: fd.get('company_name') || '',
+      address: fd.get('address') || '',
+      gst_number: fd.get('gst_number') || '',
+      phone_number: fd.get('phone_number') || ''
+    };
+    renderAllotmentDetailsStep();
+  });
+}
+
+function renderAllotmentDetailsStep() {
+  const body = allocModalBody();
+  allocWizTitle('Allotment Details');
+  const today = new Date().toLocaleDateString('en-GB');
+  const cartItems = Object.values(allocWiz.cart);
+  body.innerHTML = `
+    <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
+      ${cartItems.map(i => `${i.product_name} × ${i.quantity}`).join('<br>')}
+    </div>
+    <form id="allotmentForm" style="display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <label style="font-size:13px;color:#64748b;">Allotment Date</label>
+        <input value="${today}" disabled style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f3f4f6;">
+      </div>
+      <p style="font-size:12px;color:#94a3b8;">Return window: 7 days from allotment date.</p>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+        <button type="button" id="backDetails" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Create Allotment</button>
+      </div>
+    </form>`;
+  document.getElementById('backDetails').addEventListener('click', renderCompanyDetailsStep);
+  document.getElementById('allotmentForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const c = allocWiz.companyDetails || {};
+    const payload = {
+      sales_person_id: allocWiz.salesPersonId || '',
+      sales_person: allocWiz.salesPerson || {},
+      items: Object.values(allocWiz.cart).map(i => {
+        const rowKey = `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
+        const chosen = (allocWiz.serialChoices[rowKey] || []).filter(Boolean);
+        return {
+          ...i,
+          // only send serial_numbers when we have exactly one per unit —
+          // otherwise leave empty so the backend falls back to auto-allocation
+          serial_numbers: chosen.length === i.quantity ? chosen : []
+        };
+      }),
+      company_name: c.company_name || '',
+      address: c.address || '',
+      gst_number: c.gst_number || '',
+      phone_number: c.phone_number || ''
+    };
+    try {
+      const res = await apiFetch('/allocation/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'allocation failed');
+      document.getElementById('allocateModal').style.display = 'none';
+      resetAllocWiz();
+      await loadAllocations();
+      await loadInventoryForAllocation();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
+  });
+}
+
+// ----- Spare-part allocation flow -----
+async function renderActiveServicesStep() {
+  const body = allocModalBody();
+  allocWizTitle('Active Services');
+  body.innerHTML = `<p style="color:#94a3b8;">Loading active services...</p>`;
+  try {
+    const res = await apiFetch('/service/active');
+    const data = await res.json();
+    const list = data.dataset || [];
+    body.innerHTML = `
+      <div id="svcList" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
+      <div style="margin-top:14px;">
+        <button type="button" id="backAllocType2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      </div>`;
+    document.getElementById('backAllocType2').addEventListener('click', renderAllocTypeStep);
+
+    const svcList = document.getElementById('svcList');
+    if (!list.length) { svcList.innerHTML = '<small style="color:#94a3b8;">No active services found.</small>'; return; }
+    svcList.innerHTML = list.map(s => `
+      <div class="svc-row" data-id="${s.service_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
+        <strong>${s.product_id ?? ''}</strong> — ${s.serial_no ?? ''}<br>
+        <small style="color:#64748b;">${s.issue ?? ''} • ${s.status ?? ''}</small>
+      </div>`).join('');
+    svcList.querySelectorAll('.svc-row').forEach(row => row.addEventListener('click', () => {
+      const s = list.find(x => x.service_id === row.dataset.id);
+      allocWiz.service = s;
+      renderSparePartFormStep();
+    }));
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') body.innerHTML = '<small style="color:#d62828;">Could not load services.</small>';
   }
 }
 
-// =========================================================
-// INIT
-// =========================================================
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('addAssemblyBtn').addEventListener('click', openAddAssemblyModal);
-  document.getElementById('applyAssemblyFilter').addEventListener('click', renderTable);
-  document.getElementById('assemblySearch').addEventListener('input', renderTable);
-  loadAvailableParts();
-  loadAssemblies();
-});
-
-// expose for the shared notification bell (common_auth.js) to refresh this page's data
-window.refreshCurrentPageData = () => { loadAssemblies(); loadAvailableParts(); };
+function renderSparePartFormStep() {
+  const body = allocModalBody();
+  allocWizTitle(`Spare Part — Service #${(allocWiz.service.service_id || '').slice(0, 8)}`);
+  body.innerHTML = `
+    <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
+      Product: ${allocWiz.service.product_id ?? ''} • Serial: ${allocWiz.service.serial_no ?? ''}<br>
+      Issue: ${allocWiz.service.issue ?? ''}
+    </div>
+    <form id="sparePartForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="part_name" placeholder="Spare Part Name" required>
+      <input name="quantity" type="number" min="1" value="1" placeholder="Quantity" required>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+        <button type="button" id="backSpare" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Allocate</button>
+      </div>
+    </form>`;
+  document.getElementById('backSpare').addEventListener('click', renderActiveServicesStep);
+  document.getElementById('sparePartForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      spare_part: {
+        service_id: allocWiz.service.service_id,
+        part_name: fd.get('part_name'),
+        quantity: Number(fd.get('quantity')) || 1
+      }
+    };
+    try {
+      const res = await apiFetch('/allocation/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'allocation failed');
+      resetAllocWiz();
+      window.location.href = data.redirect || 'service.html';
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+}
