@@ -96,7 +96,6 @@ REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
 SHIPMENT_COLLECTION = params.get("shipment_collection_name", "shipments")
 ASSEMBLY_COLLECTION = params.get("assembly_collection_name", "assemblies")
 ATTENDANCE_COLLECTION = params.get("attendance_collection_name", "attendance")
-ATTENDANCE_CONTACTS_COLLECTION = params.get("attendance_contacts_collection_name", "attendance_contacts")
 ATTENDANCE_SETTINGS_COLLECTION = params.get("attendance_settings_collection_name", "attendance_settings")
 
 # ---- Damaged-product report settings ----
@@ -230,12 +229,6 @@ class OrderStatusRequest(BaseModel):
 
 class LateThresholdRequest(BaseModel):
     late_time: str  # "HH:MM", 24-hour format — anyone clocking in after this is marked late
-
-
-class AttendanceContactRequest(BaseModel):
-    emp_code: str
-    employee_name: str = ""
-    phone_number: str  # E.164 format, e.g. +91XXXXXXXXXX — needed to send the WhatsApp reminder
 
 
 class DispatchConfirmRequest(BaseModel):
@@ -1997,6 +1990,25 @@ def get_late_threshold() -> str:
     return doc[0].get("value", "10:00") if doc else "10:00"
 
 
+def find_employee_phone(db, employee_name: str) -> Optional[str]:
+    """
+    Looks up an employee's WhatsApp/mobile number from the single accounts
+    (user) collection instead of a separate contacts list. Matches the
+    biometric device's "Employee Name" against each account's "name" field
+    case-insensitively (device exports and account records don't always
+    agree on capitalization), so "Rahul Sharma", "RAHUL SHARMA" and
+    "rahul sharma" are all treated as the same person.
+    """
+    name = (employee_name or "").strip()
+    if not name:
+        return None
+    match = db.get_data(
+        collection_name=ACCOUNTS_COLLECTION,
+        query={"name": {"$regex": f"^{re.escape(name)}$", "$options": "i"}}
+    )
+    return match[0].get("phone") if match else None
+
+
 def send_whatsapp_late_reminder(phone_number: str, employee_name: str, in_time: str) -> bool:
     """
     Sends a "you are late today" WhatsApp message via Twilio.
@@ -2050,34 +2062,6 @@ async def set_late_threshold_endpoint(request: LateThresholdRequest, user: dict 
         raise HTTPException(status_code=500, detail="late threshold could not be updated")
 
 
-@app.get("/attendance/contacts")
-async def list_attendance_contacts(user: dict = Depends(require_role("admin"))):
-    try:
-        db = mongodbclient()
-        dataset = db.get_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={})
-        return {"message": "attendance contacts", "dataset": dataset}
-    except Exception as e:
-        logging.error("attendance contacts could not be fetched")
-        raise HTTPException(status_code=500, detail="attendance contacts could not be fetched")
-
-
-@app.post("/attendance/contacts")
-async def upsert_attendance_contact(request: AttendanceContactRequest, user: dict = Depends(require_role("admin"))):
-    """Save/update the WhatsApp number for one employee (by Emp Code) — needed before late reminders can reach them."""
-    try:
-        db = mongodbclient()
-        payload = request.dict()
-        existing = db.get_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={"emp_code": request.emp_code})
-        if existing:
-            db.update_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={"emp_code": request.emp_code}, update_values=payload)
-        else:
-            db.add(collection_name=ATTENDANCE_CONTACTS_COLLECTION, dictionary=payload)
-        return {"message": "contact saved", "contact": payload}
-    except Exception as e:
-        logging.error("attendance contact could not be saved")
-        raise HTTPException(status_code=500, detail="attendance contact could not be saved")
-
-
 @app.get("/attendance/")
 async def get_attendance(date: str = Query(None), month: str = Query(None), user: dict = Depends(require_role("admin"))):
     """date="YYYY-MM-DD" for one day's list, or month="YYYY-MM" for that month's records (monthly report)."""
@@ -2107,8 +2091,10 @@ async def upload_attendance(file: UploadFile = File(...), user: dict = Depends(r
       3. compares each employee's In-Time against the configured late
          threshold and, for anyone late who hasn't already been messaged for
          that date, sends a WhatsApp "you are late today" reminder via
-         Twilio (only for employees with a saved phone number under
-         Attendance → Contacts).
+         Twilio (only for employees whose name matches an account in the
+         accounts/user collection with a phone number saved — matched
+         case-insensitively since device exports and account records don't
+         always agree on capitalization).
     """
     try:
         raw_bytes = await file.read()
@@ -2189,8 +2175,7 @@ async def upload_attendance(file: UploadFile = File(...), user: dict = Depends(r
             records_saved += 1
 
             if is_late and not reminder_already_sent:
-                contact = db.get_data(collection_name=ATTENDANCE_CONTACTS_COLLECTION, query={"emp_code": emp_code})
-                phone = contact[0].get("phone_number") if contact else None
+                phone = find_employee_phone(db, employee_name)
                 if phone:
                     if send_whatsapp_late_reminder(phone, employee_name, in_time_str):
                         db.update_data(collection_name=ATTENDANCE_COLLECTION, query={"date": att_date, "emp_code": emp_code},

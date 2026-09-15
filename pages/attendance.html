@@ -92,7 +92,6 @@
       <div class="top-actions">
         <button class="add-product" id="uploadAttendanceBtn"><i class="fa-solid fa-upload"></i> Upload Today's Attendance</button>
         <button class="export" id="setLateTimeBtn"><i class="fa-solid fa-clock"></i> Set Late Time</button>
-        <button class="export" id="manageContactsBtn"><i class="fa-solid fa-address-book"></i> WhatsApp Contacts</button>
       </div>
 
       <section class="filter-section">
@@ -170,25 +169,6 @@
       <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Anyone clocking in after this time is marked late and gets a WhatsApp reminder (if their number is saved).</p>
       <input type="time" id="lateTimeInput" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px;">
       <button id="lateTimeSaveBtn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
-    </div>
-  </div>
-
-  <!-- WhatsApp Contacts Modal -->
-  <div id="contactsModal" class="modal"
-    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:460px;max-height:80vh;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3>WhatsApp Contacts</h3>
-        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-      </div>
-      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Save each employee's WhatsApp number (with country code, e.g. +91XXXXXXXXXX) so late reminders can reach them.</p>
-      <div style="display:flex;gap:8px;margin-bottom:14px;">
-        <input id="contactEmpCode" placeholder="Emp Code" style="width:90px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
-        <input id="contactEmpName" placeholder="Employee Name" style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
-        <input id="contactPhone" placeholder="+91XXXXXXXXXX" style="width:140px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
-        <button id="contactSaveBtn" style="padding:8px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
-      </div>
-      <div id="contactsList" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
   </div>
 

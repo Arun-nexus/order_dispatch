@@ -17,7 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
   wireViewModeToggle();
   wireUploadModal();
   wireLateTimeModal();
-  wireContactsModal();
 
   document.getElementById('applyFilterBtn').addEventListener('click', () => {
     attState.date = document.getElementById('dateInput').value || todayStr();
@@ -190,49 +189,4 @@ function wireLateTimeModal() {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
-}
-
-// ---------- WhatsApp contacts ----------
-function wireContactsModal() {
-  const modal = document.getElementById('contactsModal');
-  document.getElementById('manageContactsBtn').addEventListener('click', () => { modal.style.display = 'flex'; loadContacts(); });
-  modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
-
-  document.getElementById('contactSaveBtn').addEventListener('click', async () => {
-    const emp_code = document.getElementById('contactEmpCode').value.trim();
-    const employee_name = document.getElementById('contactEmpName').value.trim();
-    const phone_number = document.getElementById('contactPhone').value.trim();
-    if (!emp_code || !phone_number) { alert('Emp Code and phone number are required.'); return; }
-    try {
-      const res = await apiFetch('/attendance/contacts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emp_code, employee_name, phone_number })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'could not save contact');
-      document.getElementById('contactEmpCode').value = '';
-      document.getElementById('contactEmpName').value = '';
-      document.getElementById('contactPhone').value = '';
-      await loadContacts();
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-    }
-  });
-}
-
-async function loadContacts() {
-  const list = document.getElementById('contactsList');
-  list.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Loading...</p>';
-  try {
-    const res = await apiFetch('/attendance/contacts');
-    const data = await res.json();
-    const contacts = (data.dataset || []).sort((a, b) => (a.employee_name || '').localeCompare(b.employee_name || ''));
-    list.innerHTML = contacts.length ? contacts.map(c => `
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f6;padding:8px 4px;font-size:13px;">
-        <span>${c.employee_name || '-'} <small style="color:#94a3b8;">(${c.emp_code})</small></span>
-        <strong>${c.phone_number}</strong>
-      </div>`).join('') : '<p style="color:#94a3b8;font-size:13px;">No contacts saved yet.</p>';
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') list.innerHTML = `<p style="color:#d62828;font-size:13px;">${err.message}</p>`;
-  }
 }
