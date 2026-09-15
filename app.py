@@ -83,6 +83,12 @@ ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
 ORDERS_COLLECTION = params["order_collection_name"]
 SERVICE_COLLECTION = params["service_collection_name"]
 INVENTORY_COLLECTION = params["inventory_collection_name"]
+# some inventory documents were created before product_id was required and
+# can have product_id == "". An empty string can never appear in a URL path
+# segment (the route just won't match), so the frontend substitutes this
+# sentinel when it needs to target such a record, and every /inventory/*/{product_id}
+# route decodes it back to "" before querying.
+EMPTY_PRODUCT_ID_SENTINEL = "__blank_id__"
 CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
 SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
@@ -2393,6 +2399,12 @@ async def available_serials(product_id: str, model_no: str = "", user: dict = De
 @app.post("/inventory/create")
 async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
+        if not request.product_id.strip():
+            # a blank product_id can never be targeted again afterwards (it can't be
+            # put in a URL path segment), so it must be rejected up front rather than
+            # silently stored
+            raise HTTPException(status_code=400, detail="product ID is required")
+
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
         serial_optional_types = ("accessories", "spare_parts", "service_parts")
@@ -2430,6 +2442,8 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
 @app.post("/inventory/update/{product_id}")
 async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
+        if product_id == EMPTY_PRODUCT_ID_SENTINEL:
+            product_id = ""
         db = inventory_manager()
         match_query = {"product_id": product_id}
         if request.model_no is not None:
@@ -2456,6 +2470,11 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
         # up sharing one identity and become impossible to tell apart afterwards.
         target_product_id = updated_values.get("product_id", product_id)
         target_model_no = updated_values.get("model_no", existing[0].get("model_no"))
+        if "product_id" in updated_values and not str(target_product_id or "").strip():
+            # a blank product_id can never be targeted again afterwards (it can't be
+            # put in a URL path segment without the frontend's sentinel workaround),
+            # so renaming TO blank must be rejected up front
+            raise HTTPException(status_code=400, detail="product ID cannot be blank")
         if target_product_id != product_id or target_model_no != existing[0].get("model_no"):
             conflict_query = {
                 "product_id": target_product_id,
@@ -2593,6 +2612,8 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 @app.post("/inventory/delete/{product_id}")
 async def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
     try:
+        if product_id == EMPTY_PRODUCT_ID_SENTINEL:
+            product_id = ""
         db = inventory_manager(product_id=product_id)
         if model_no is not None:
             existing = db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id, "model_no": model_no})
@@ -2624,6 +2645,8 @@ async def repair_damaged_product(product_id: str, model_no: Optional[str] = None
       Status column as "Send to Parent Company" instead.
     """
     try:
+        if product_id == EMPTY_PRODUCT_ID_SENTINEL:
+            product_id = ""
         db = inventory_manager()
         match_query = {"product_id": product_id, "product_type": "damaged"}
         if model_no is not None:

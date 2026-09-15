@@ -2,6 +2,17 @@ const invState = { products: [], activeProductId: null, activeModelNo: '', activ
 let invPage = 1;
 const INV_PAGE_SIZE = 20;
 
+// Some inventory documents were created before product_id was required and
+// can have product_id === "". An empty string can never appear as a URL
+// path segment (the /inventory/*/{product_id} routes simply won't match a
+// missing segment), so we substitute this sentinel whenever we need to
+// target such a record over the network — app.py decodes it back to "".
+const EMPTY_PRODUCT_ID_SENTINEL = '__blank_id__';
+function urlProductId(id) {
+  const v = (id ?? '').toString().trim();
+  return encodeURIComponent(v ? v : EMPTY_PRODUCT_ID_SENTINEL);
+}
+
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
   if (totalPages <= 1) { container.innerHTML = ''; return; }
@@ -315,7 +326,7 @@ function isSerialOptionalType(type) {
 // Flattens every non-empty cell across the whole sheet into a de-duplicated
 // list of serial numbers, so any layout (one column, one row, multiple
 // columns) works without asking the user to format the file a certain way.
-function parseSerialsFromFile(file, onDone, onError) {
+function parseSerialsFromFile(file, onDone, onError, { lowercase = true } = {}) {
   if (typeof XLSX === 'undefined') {
     onError('Excel reader failed to load. Check your connection and try again.');
     return;
@@ -327,17 +338,18 @@ function parseSerialsFromFile(file, onDone, onError) {
       const workbook = XLSX.read(data, { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      const serials = [];
+      const values = [];
       rows.forEach(row => {
         (row || []).forEach(cell => {
           const val = String(cell ?? '').trim();
-          if (val && val.toLowerCase() !== 'serial number' && val.toLowerCase() !== 'serial no') {
-            serials.push(val.toLowerCase());
+          if (val && val.toLowerCase() !== 'serial number' && val.toLowerCase() !== 'serial no'
+            && val.toLowerCase() !== 'hologram number' && val.toLowerCase() !== 'hologram no') {
+            values.push(lowercase ? val.toLowerCase() : val);
           }
         });
       });
-      const unique = [...new Set(serials)];
-      if (!unique.length) { onError('No serial numbers were found in that file.'); return; }
+      const unique = [...new Set(values)];
+      if (!unique.length) { onError('No values were found in that file.'); return; }
       onDone(unique);
     } catch (err) {
       onError('Could not read that file. Please upload a valid Excel or CSV file.');
@@ -664,7 +676,7 @@ async function handleRepairClick(p) {
 
   try {
     const qs = p.model_no ? `?model_no=${encodeURIComponent(p.model_no)}` : '';
-    const res = await apiFetch(`/inventory/repair/${encodeURIComponent(p.product_id)}${qs}`, { method: 'POST' });
+    const res = await apiFetch(`/inventory/repair/${urlProductId(p.product_id)}${qs}`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'repair action failed');
     alert(data.mode === 'product'
@@ -1018,7 +1030,7 @@ function renderHologramUI() {
 // the quantity that's actually on record right now.
 async function submitHologramChange({ add = [], remove = [] }) {
   try {
-    const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
+    const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1096,7 +1108,7 @@ function wireHologramControls() {
       preview.textContent = `${holograms.length} hologram number(s) read from file — adding...`;
       preview.style.color = '#0369a1';
       submitHologramChange({ add: holograms });
-    }, (msg) => { preview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; });
+    }, (msg) => { preview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; }, { lowercase: false });
   });
 
   const overflowClose = document.getElementById('hologramOverflowCloseBtn');
@@ -1714,7 +1726,7 @@ function wireModals() {
       // invState.activeProductId / invState.activeModelNo are the ORIGINAL id and
       // model number, used to locate the record being edited. Any new id/model
       // typed into the form travels inside updated_values as a rename request.
-      const res = await apiFetch(`/inventory/update/${invState.activeProductId}`, {
+      const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, model_no: invState.activeModelNo })
@@ -1732,7 +1744,7 @@ function wireModals() {
   const deleteBtn = document.querySelector('#deleteModal .delete-btn');
   if (deleteBtn) deleteBtn.addEventListener('click', async () => {
     try {
-      const res = await apiFetch(`/inventory/delete/${invState.activeProductId}?model_no=${encodeURIComponent(invState.activeModelNo || '')}`, { method: 'POST' });
+      const res = await apiFetch(`/inventory/delete/${urlProductId(invState.activeProductId)}?model_no=${encodeURIComponent(invState.activeModelNo || '')}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'delete failed');
       document.getElementById('deleteModal').style.display = 'none';
