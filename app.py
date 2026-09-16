@@ -298,6 +298,7 @@ class InventoryUpdateRequest(BaseModel):
     updated_values: dict
     new_serial_numbers: list[str] = []
     remove_serial_numbers: list[str] = []
+    faulty_serial_numbers: list[str] = []     # pulled off this lot and pushed into the "damaged" category instead of just discarded
     new_hologram_numbers: list[str] = []      # serial-wise hologram numbers to add (spare_parts / service_parts only)
     remove_hologram_numbers: list[str] = []
     model_no: Optional[str] = None   # disambiguates which lot-document to touch when a product_id has multiple model_no variants
@@ -1118,8 +1119,8 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             # in the order can now be edited (qty/price/tax/serials), not
             # just items[0], and each item keeps its own price instead of
             # sharing one combined price across the whole order.
-            new_items = updated.pop("items")
-            if not new_items:
+            new_items_raw = updated.pop("items")
+            if not new_items_raw:
                 raise HTTPException(status_code=400, detail="order must contain at least one product")
 
             # Reconcile inventory against whatever changed between the old and
@@ -1132,6 +1133,29 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
             # record afterwards shouldn't touch live stock (same guard the
             # cancellation branch above uses).
             old_items = order.get("items", [])
+
+            # Pair each incoming item with the original line it came from,
+            # via "original_index" (sent by the Edit Order modal for every
+            # row that's still present after the person may have removed
+            # some). This replaces a fragile zip(old_items, new_items) that
+            # matched purely by POSITION — removing a middle product shifted
+            # every item after it by one slot, so the backend thought that
+            # product had "changed into" the next one, and the real last
+            # item (now past the end of the shorter list) never got its
+            # stock/serials restocked at all. Falls back to positional index
+            # if a client doesn't send it, so nothing breaks if an older
+            # frontend build is still deployed somewhere.
+            new_items = []
+            kept_indices = set()
+            for i, raw in enumerate(new_items_raw):
+                item = dict(raw)
+                try:
+                    orig_idx = int(item.pop("original_index", i))
+                except (TypeError, ValueError):
+                    orig_idx = i
+                kept_indices.add(orig_idx)
+                new_items.append((orig_idx, item))
+
             if not order.get("dispatch"):
                 inv_db = inventory_manager()
                 # process ALL restocks (freed-up serials/quantity) before ANY
@@ -1142,10 +1166,28 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                 restores = []   # (product_id, product_name, model_no, qty, serials)
                 deductions = [] # (product_id, product_name, model_no, qty, serials)
 
-                for old_item, new_item in zip(old_items, new_items):
-                    product_id = old_item.get("product_id", "")
-                    product_name = old_item.get("product_name", "")
-                    model_no = old_item.get("model_no", "") or ""
+                # any old line whose index isn't among the surviving rows was
+                # removed entirely in this edit — its full quantity/serials
+                # go back to stock, same as a cancellation would do for it.
+                for idx, old_item in enumerate(old_items):
+                    if idx in kept_indices:
+                        continue
+                    qty = int(old_item.get("quantity", 0) or 0)
+                    if qty <= 0:
+                        continue
+                    restores.append((
+                        old_item.get("product_id", ""),
+                        old_item.get("product_name", ""),
+                        old_item.get("model_no", "") or "",
+                        qty,
+                        list(old_item.get("serial_numbers", []) or [])
+                    ))
+
+                for orig_idx, new_item in new_items:
+                    old_item = old_items[orig_idx] if 0 <= orig_idx < len(old_items) else {}
+                    product_id = old_item.get("product_id", new_item.get("product_id", ""))
+                    product_name = old_item.get("product_name", new_item.get("product_name", ""))
+                    model_no = old_item.get("model_no", new_item.get("model_no", "")) or ""
                     old_serials = set(old_item.get("serial_numbers", []) or [])
                     new_serials = set(new_item.get("serial_numbers", []) or [])
                     old_qty = int(old_item.get("quantity", 0) or 0)
@@ -1205,7 +1247,7 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
                         raise HTTPException(status_code=400, detail=f"{product_name or product_id}: {e}")
 
             computed_items = []
-            for raw_item in new_items:
+            for _orig_idx, raw_item in new_items:
                 item = dict(raw_item)
                 quantity = item.get("quantity", 0)
                 price = item.get("price", 0)
@@ -2712,6 +2754,14 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 
         SERIAL_OPTIONAL_TYPES = ("accessories", "spare_parts", "service_parts")
 
+        # Both a straight removal (write-off, gone from stock entirely) and a
+        # "mark faulty" (pulled off this lot but pushed into the Damaged
+        # Product category instead of discarded — handled further down)
+        # take the unit off THIS lot the same way, so they're combined here
+        # for that part. Kept as two separate request fields so the faulty
+        # ones can still be told apart afterwards for the damaged-category push.
+        pulled_off_serials = set(request.remove_serial_numbers or []) | set(request.faulty_serial_numbers or [])
+
         # serial numbers are optional for accessories / spare_parts / service_parts,
         # so quantity is free to move independently of the serial list for those
         # types — only sync serials with quantity for product/damaged
@@ -2724,11 +2774,11 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
                     raise HTTPException(status_code=400,
                                          detail=f"serial number(s) already exist on this product: {', '.join(duplicates)}")
             serials = list(current_serials)
-            if request.remove_serial_numbers:
-                serials = [s for s in serials if s not in request.remove_serial_numbers]
+            if pulled_off_serials:
+                serials = [s for s in serials if s not in pulled_off_serials]
             if request.new_serial_numbers:
                 serials = serials + request.new_serial_numbers
-            if request.remove_serial_numbers or request.new_serial_numbers:
+            if pulled_off_serials or request.new_serial_numbers:
                 updated_values["serial_numbers"] = serials
 
         # whenever quantity changes, keep serial_numbers in sync instead of letting
@@ -2737,12 +2787,12 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
             new_quantity = int(updated_values["quantity"])
             serials = list(current_serials)
 
-            if request.remove_serial_numbers:
-                missing = [s for s in request.remove_serial_numbers if s not in serials]
+            if pulled_off_serials:
+                missing = [s for s in pulled_off_serials if s not in serials]
                 if missing:
                     raise HTTPException(status_code=400,
                                          detail=f"serial number(s) not found on this product: {', '.join(missing)}")
-                serials = [s for s in serials if s not in request.remove_serial_numbers]
+                serials = [s for s in serials if s not in pulled_off_serials]
 
             if request.new_serial_numbers:
                 if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
@@ -2811,6 +2861,44 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 
             updated_values["hologram_numbers"] = current_hologram
             updated_values.pop("hologram_no", None)  # migrated to hologram_numbers list
+
+        # Faulty units pulled off this lot (folded into pulled_off_serials
+        # above, alongside plain removals) get pushed into the Damaged
+        # Product category instead of just being discarded — merges into an
+        # existing damaged entry for the same product_id+model_no, or
+        # creates one, same pattern used when an order return comes back
+        # faulty. Uses the lot's ORIGINAL product_id/product_name/model_no
+        # (from `existing`, before this same request's own rename, if any) —
+        # these are the exact physical units that were on file under that
+        # identity.
+        if request.faulty_serial_numbers:
+            src_product_id = existing[0].get("product_id", product_id)
+            src_product_name = existing[0].get("product_name", "")
+            src_model_no = existing[0].get("model_no", "") or ""
+            damage_reason = "marked faulty during inventory edit"
+            existing_damaged = db.get_data(
+                collection_name=INVENTORY_COLLECTION,
+                query={"product_id": src_product_id, "model_no": src_model_no, "product_type": "damaged"}
+            )
+            if existing_damaged:
+                entry = existing_damaged[0]
+                merged_serials = (entry.get("serial_numbers") or []) + list(request.faulty_serial_numbers)
+                new_damaged_quantity = int(entry.get("quantity", 0) or 0) + len(request.faulty_serial_numbers)
+                db.update(
+                    collection_name=INVENTORY_COLLECTION,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"serial_numbers": merged_serials, "quantity": new_damaged_quantity, "reason": damage_reason}
+                )
+            else:
+                inventory_manager(
+                    product_name=src_product_name,
+                    product_id=src_product_id,
+                    quantity=len(request.faulty_serial_numbers),
+                    model_no=src_model_no,
+                    serial_numbers=list(request.faulty_serial_numbers),
+                    product_type="damaged",
+                    reason=damage_reason,
+                ).add(collection_name=INVENTORY_COLLECTION)
 
         db.update(collection_name=INVENTORY_COLLECTION, query=match_query,
                    update_values=updated_values)

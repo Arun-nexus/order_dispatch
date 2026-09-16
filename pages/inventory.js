@@ -1,4 +1,4 @@
-const invState = { products: [], activeProductId: null, activeModelNo: '', activeCategory: null, searchQuery: '', activeFilters: null, editSerials: [], editRemovedSerials: [], editHolograms: [], editHologramQuantity: 0 };
+const invState = { products: [], activeProductId: null, activeModelNo: '', activeProductType: 'product', activeCategory: null, searchQuery: '', activeFilters: null, editSerials: [], editRemovedSerials: [], editFaultySerials: [], editHolograms: [], editHologramQuantity: 0 };
 let invPage = 1;
 const INV_PAGE_SIZE = 20;
 
@@ -633,8 +633,9 @@ function columnsForCategory(category) {
         { label: 'Product ID', cell: idCell },
         { label: 'Model No.', cell: modelCell },
         { label: 'Received Date', cell: p => p.damage_date ?? p.purchase_date ?? '' },
+        { label: 'Quantity', cell: qtyCell },
         { label: 'Warranty Period', cell: warrantyPeriodCell },
-        { label: 'Reason of Damage', cell: p => p.reason_of_damage ?? '—' },
+        { label: 'Reason of Damage', cell: p => p.reason_of_damage ?? p.reason ?? '—' },
         { label: 'Status', cell: p => p.damage_status ?? 'Damaged' }
       ];
     default: // no category filter active — table stays exactly as it is today
@@ -982,8 +983,10 @@ function openEditModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
   invState.activeModelNo = p.model_no || '';
+  invState.activeProductType = p.product_type || 'product';
   invState.editSerials = [...(p.serial_numbers || [])];
   invState.editRemovedSerials = [];
+  invState.editFaultySerials = [];
 
   const modal = document.getElementById('editModal');
   const form = modal.querySelector('form');
@@ -1199,7 +1202,7 @@ function wireEditSerialFileUpload() {
     parseSerialsFromFile(file, (serials) => {
       const modal = document.getElementById('editModal');
       const quantityInput = modal.querySelector('form').elements['quantity'];
-      const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
+      const keptCount = invState.editSerials.length - invState.editRemovedSerials.length - invState.editFaultySerials.length;
       quantityInput.value = keptCount + serials.length;
       renderEditSerialsUI();
       const newInputs = document.querySelectorAll('#newSerialsBox .new-serial-input');
@@ -1209,39 +1212,63 @@ function wireEditSerialFileUpload() {
   });
 }
 
+// Cycles one serial number through: normal -> faulty -> marked for removal
+// -> normal. A lot that's already IN the Damaged Product category skips the
+// "faulty" step (it's already damaged) and goes straight to removal.
+function cycleEditSerialState(s) {
+  const typeSelect = document.getElementById('editProductType');
+  const currentType = (typeSelect ? typeSelect.value : invState.activeProductType) || 'product';
+  const isRemoved = invState.editRemovedSerials.includes(s);
+  const isFaulty = invState.editFaultySerials.includes(s);
+
+  if (isRemoved) {
+    invState.editRemovedSerials = invState.editRemovedSerials.filter(x => x !== s);
+  } else if (isFaulty) {
+    invState.editFaultySerials = invState.editFaultySerials.filter(x => x !== s);
+    invState.editRemovedSerials.push(s);
+  } else if (currentType === 'damaged') {
+    invState.editRemovedSerials.push(s);
+  } else {
+    invState.editFaultySerials.push(s);
+  }
+  renderEditSerialsUI();
+}
+
 // Keeps the serial-number list in sync with whatever quantity is typed into
 // the edit form: shows current serials (removable if quantity is going down),
-// and prompts for new serial numbers if quantity is going up.
+// and prompts for new serial numbers if quantity is going up. Each serial
+// chip cycles through three states on click: normal -> faulty (goes to the
+// Damaged Product category on save) -> marked for removal (write-off, gone
+// from stock entirely) -> back to normal.
 function renderEditSerialsUI() {
   const modal = document.getElementById('editModal');
   const quantityInput = modal.querySelector('form').elements['quantity'];
   const targetQuantity = Number(quantityInput.value) || 0;
-  const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
+  const keptCount = invState.editSerials.length - invState.editRemovedSerials.length - invState.editFaultySerials.length;
   const typeSelect = document.getElementById('editProductType');
   const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
 
   const currentList = document.getElementById('currentSerialsList');
   currentList.innerHTML = invState.editSerials.map(s => {
     const removed = invState.editRemovedSerials.includes(s);
-    return `<span data-serial="${s}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;
-      background:${removed ? '#fee2e2' : '#eef3fb'};color:${removed ? '#991b1b' : '#005ca9'};text-decoration:${removed ? 'line-through' : 'none'};">
-      ${s}
+    const faulty = invState.editFaultySerials.includes(s);
+    const bg = removed ? '#fee2e2' : (faulty ? '#fff4e5' : '#eef3fb');
+    const color = removed ? '#991b1b' : (faulty ? '#b45309' : '#005ca9');
+    const icon = removed ? '↺' : (faulty ? '✕' : '×');
+    const title = removed
+      ? 'Marked for removal — click to restore to normal'
+      : (faulty ? 'Marked faulty — click to mark for removal instead' : 'Click to mark this unit faulty');
+    return `<span data-serial="${s}" title="${title}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;
+      background:${bg};color:${color};text-decoration:${removed ? 'line-through' : 'none'};">
+      ${faulty ? '<i class="fa-solid fa-triangle-exclamation" style="font-size:10px;"></i>' : ''}${s}
       <button type="button" class="serial-toggle-btn" data-serial="${s}" style="border:none;background:none;cursor:pointer;color:inherit;font-weight:700;">
-        ${removed ? '↺' : '×'}
+        ${icon}
       </button>
     </span>`;
   }).join('') || '<span style="font-size:12px;color:#94a3b8;">No serial numbers on file.</span>';
 
   currentList.querySelectorAll('.serial-toggle-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const s = btn.dataset.serial;
-      if (invState.editRemovedSerials.includes(s)) {
-        invState.editRemovedSerials = invState.editRemovedSerials.filter(x => x !== s);
-      } else {
-        invState.editRemovedSerials.push(s);
-      }
-      renderEditSerialsUI();
-    });
+    btn.addEventListener('click', () => cycleEditSerialState(btn.dataset.serial));
   });
 
   const msgBox = document.getElementById('serialDeltaMsg');
@@ -1280,7 +1307,7 @@ function renderEditSerialsUI() {
       newBox.appendChild(input);
     }
   } else if (diff < 0) {
-    msgBox.textContent = `Quantity decreased — remove ${-diff} serial number(s) above (click × to mark for removal).`;
+    msgBox.textContent = `Quantity decreased — mark ${-diff} serial number(s) above as faulty or for removal (click a chip to cycle through: faulty → removal → normal).`;
     msgBox.style.color = '#b45309';
     newBox.innerHTML = '';
   } else {
@@ -1737,7 +1764,8 @@ function wireModals() {
 
     const new_serial_numbers = [...e.target.querySelectorAll('.new-serial-input')].map(i => i.value.trim().toLowerCase());
     const remove_serial_numbers = [...invState.editRemovedSerials];
-    const keptCount = invState.editSerials.length - remove_serial_numbers.length;
+    const faulty_serial_numbers = [...invState.editFaultySerials];
+    const keptCount = invState.editSerials.length - remove_serial_numbers.length - faulty_serial_numbers.length;
 
     const typeSelect = document.getElementById('editProductType');
     const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
@@ -1762,7 +1790,7 @@ function wireModals() {
         }
       }
       if (targetQuantity < keptCount) {
-        showResponseModal('Remove more serial numbers', `Quantity is ${targetQuantity} but ${keptCount} serial number(s) are still on file — mark ${keptCount - targetQuantity} more for removal.`, false);
+        showResponseModal('Mark more serial numbers', `Quantity is ${targetQuantity} but ${keptCount} serial number(s) are still on file — mark ${keptCount - targetQuantity} more as faulty or for removal.`, false);
         return;
       }
     }
@@ -1786,7 +1814,7 @@ function wireModals() {
       const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, model_no: invState.activeModelNo })
+        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers, model_no: invState.activeModelNo })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');

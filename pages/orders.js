@@ -297,9 +297,15 @@ function openEditOrderModal(o) {
   const itemsBox = content.querySelector('#editItemsBox');
   itemsBox.innerHTML = items.map((it, idx) => `
     <div class="editItemRow" data-idx="${idx}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">
-        ${it.product_name ?? ''}
-        <small style="color:#94a3b8;font-weight:400;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
+        <div style="font-size:13px;font-weight:600;">
+          ${it.product_name ?? ''}
+          <small style="color:#94a3b8;font-weight:400;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>
+        </div>
+        <button type="button" class="removeItemBtn" title="Remove this product from the order"
+          style="border:none;background:none;color:#d62828;cursor:pointer;font-size:14px;padding:2px 4px;">
+          <i class="fa-solid fa-trash"></i>
+        </button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <label style="font-size:11px;color:#64748b;width:70px;">Qty
@@ -316,6 +322,33 @@ function openEditOrderModal(o) {
         <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
       </label>
     </div>`).join('');
+
+  // an order can't be saved with zero products — the "remove product"
+  // action below just deletes that row from the form; it hides the remove
+  // button entirely once only one row is left, and if someone still fires
+  // it (or the count somehow drops to zero) it just no-ops with a message
+  // instead of leaving an order with no products to be submitted.
+  function updateRemoveButtonsVisibility() {
+    const rows = itemsBox.querySelectorAll('.editItemRow');
+    const onlyOne = rows.length <= 1;
+    rows.forEach(row => {
+      const btn = row.querySelector('.removeItemBtn');
+      if (btn) btn.style.display = onlyOne ? 'none' : 'inline-block';
+    });
+  }
+
+  itemsBox.querySelectorAll('.removeItemBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (itemsBox.querySelectorAll('.editItemRow').length <= 1) {
+        alert('An order needs at least one product — this is the last one left.');
+        return;
+      }
+      btn.closest('.editItemRow').remove();
+      updateRemoveButtonsVisibility();
+    });
+  });
+
+  updateRemoveButtonsVisibility();
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
@@ -347,7 +380,8 @@ function openEditOrderModal(o) {
         quantity,
         price,
         tax_rate,
-        serial_numbers
+        serial_numbers,
+        original_index: idx
       };
     });
 
