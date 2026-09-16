@@ -62,9 +62,10 @@
           <p>Manage products and stock availability</p>
         </div>
         <div class="right-header">
-          <div class="search">
+          <div class="search" style="position:relative;">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search Product...">
+            <input type="text" id="headerSearchInput" placeholder="Search Product..." autocomplete="off">
+            <div id="headerSearchSuggestions" style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:1200;"></div>
           </div>
           <button><i class="fa-regular fa-bell"></i></button>
           <button><i class="fa-regular fa-envelope"></i></button>

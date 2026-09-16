@@ -387,13 +387,70 @@ function wireCategoryFilter() {
 }
 
 function wireHeaderSearch() {
-  const input = document.querySelector('.search input');
+  const input = document.getElementById('headerSearchInput') || document.querySelector('.search input');
+  const suggestBox = document.getElementById('headerSearchSuggestions');
   if (!input) return;
+
   input.addEventListener('input', () => {
     invState.searchQuery = input.value.trim().toLowerCase();
     invPage = 1;
     renderInventoryTable(getFilteredInventory());
+    renderSearchSuggestions(input, suggestBox);
   });
+
+  input.addEventListener('focus', () => renderSearchSuggestions(input, suggestBox));
+
+  document.addEventListener('click', e => {
+    if (!suggestBox) return;
+    if (e.target !== input && !suggestBox.contains(e.target)) suggestBox.style.display = 'none';
+  });
+}
+
+// Shows up to 8 matching product names/IDs (deduped) from whatever is
+// currently loaded in the table, so the person can jump straight to a match
+// instead of reading the whole filtered table to find it. Purely a picker —
+// selecting one just fills the search box with that exact value, which then
+// drives the same getFilteredInventory() the table already uses.
+function renderSearchSuggestions(input, suggestBox) {
+  if (!suggestBox) return;
+  const q = input.value.trim().toLowerCase();
+  if (!q) { suggestBox.style.display = 'none'; suggestBox.innerHTML = ''; return; }
+
+  const seen = new Set();
+  const matches = [];
+  for (const p of invState.products) {
+    const name = p.product_name || '';
+    const id = p.product_id || '';
+    if (!name.toLowerCase().includes(q) && !id.toLowerCase().includes(q)) continue;
+    const key = `${name}||${id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matches.push({ name, id, type: p.product_type || 'product' });
+    if (matches.length >= 8) break;
+  }
+
+  if (!matches.length) { suggestBox.style.display = 'none'; suggestBox.innerHTML = ''; return; }
+
+  suggestBox.innerHTML = matches.map(m => `
+    <div class="search-suggestion-item" data-value="${(m.name || m.id).replace(/"/g, '&quot;')}"
+      style="padding:9px 12px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #f1f5f9;">
+      <span>${m.name || '(no name)'}</span>
+      <span style="color:#94a3b8;">${m.id || ''}</span>
+    </div>`).join('');
+
+  suggestBox.querySelectorAll('.search-suggestion-item').forEach(item => {
+    item.addEventListener('mouseenter', () => item.style.background = '#f8fafc');
+    item.addEventListener('mouseleave', () => item.style.background = '');
+    item.addEventListener('click', () => {
+      input.value = item.dataset.value;
+      invState.searchQuery = input.value.trim().toLowerCase();
+      invPage = 1;
+      renderInventoryTable(getFilteredInventory());
+      suggestBox.style.display = 'none';
+    });
+  });
+
+  suggestBox.style.display = 'block';
 }
 
 // Combines whatever category tab / header search / "Apply Filter" criteria
@@ -1141,7 +1198,7 @@ function wireEditSerialFileUpload() {
     if (!file) return;
     parseSerialsFromFile(file, (serials) => {
       const modal = document.getElementById('editModal');
-      const quantityInput = modal.querySelectorAll('form input')[5];
+      const quantityInput = modal.querySelector('form').elements['quantity'];
       const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
       quantityInput.value = keptCount + serials.length;
       renderEditSerialsUI();
@@ -1157,7 +1214,7 @@ function wireEditSerialFileUpload() {
 // and prompts for new serial numbers if quantity is going up.
 function renderEditSerialsUI() {
   const modal = document.getElementById('editModal');
-  const quantityInput = modal.querySelectorAll('form input')[5];
+  const quantityInput = modal.querySelector('form').elements['quantity'];
   const targetQuantity = Number(quantityInput.value) || 0;
   const keptCount = invState.editSerials.length - invState.editRemovedSerials.length;
   const typeSelect = document.getElementById('editProductType');
