@@ -1,5 +1,14 @@
 const userState = { users: [] };
 
+// Display-only label for the role column — the underlying role value
+// (u.role, sent to/from the backend) stays 'distributor' etc. always.
+// This only changes what's shown in this table.
+const USER_ROLE_LABELS = { distributor: 'Employee-Sales Person' };
+function displayRole(role) {
+  if (!role) return '';
+  return USER_ROLE_LABELS[role] || (role.charAt(0).toUpperCase() + role.slice(1));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadUsers();
   wireTopActions();
@@ -49,7 +58,7 @@ function renderTable(users) {
     tr.innerHTML = `
       <td>${u.username ?? ''}</td>
       <td>${u.full_name ?? ''}</td>
-      <td><span class="stock ${roleBadgeClass(u.role)}">${u.role ?? ''}</span></td>
+      <td><span class="stock ${roleBadgeClass(u.role)}">${displayRole(u.role)}</span></td>
       <td>${u.company_name ?? ''}</td>
       <td>${u.mobile_no ?? u.phone ?? ''}</td>
       <td>${u.role === 'distributor' ? (u.manager || '-') : '-'}</td>
