@@ -88,7 +88,7 @@ function wireStaticModals() {
 
 function distributorOptions(selectedUsername, excludeUsername) {
   const distributors = userState.users.filter(u => u.role === 'distributor' && u.username !== excludeUsername);
-  if (!distributors.length) return '<option value="">No existing distributors yet</option>';
+  if (!distributors.length) return '<option value="">No existing employee-sales persons yet</option>';
   return '<option value="">Select Team Manager (optional)</option>' +
     distributors.map(d => `<option value="${d.username}" ${d.username === selectedUsername ? 'selected' : ''}>${d.name || d.username} (${d.username})</option>`).join('');
 }
@@ -121,12 +121,12 @@ function openUserModal(existingUser) {
         <option value="service_manager" ${existingUser?.role === 'service_manager' ? 'selected' : ''}>Service Manager</option>
         <option value="assembly" ${existingUser?.role === 'assembly' ? 'selected' : ''}>Assembly</option>
         <option value="technician" ${existingUser?.role === 'technician' ? 'selected' : ''}>Technician</option>
-        <option value="distributor" ${existingUser?.role === 'distributor' ? 'selected' : ''}>Distributor</option>
+        <option value="distributor" ${existingUser?.role === 'distributor' ? 'selected' : ''}>Employee-Sales Person</option>
       </select>
       <div id="managerBox" style="display:none;">
         <label style="font-size:13px;color:#64748b;">Team Manager</label>
         <select name="manager" id="managerSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-top:6px;"></select>
-        <p style="font-size:12px;color:#94a3b8;margin-top:4px;">If this distributor reports to another distributor (sales manager), select them here — leave blank if they don't have one.</p>
+        <p style="font-size:12px;color:#94a3b8;margin-top:4px;">If this employee-sales person reports to another employee-sales person (sales manager), select them here — leave blank if they don't have one.</p>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
         <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
