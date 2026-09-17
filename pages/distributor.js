@@ -345,11 +345,32 @@ function renderNewCustomerStep() {
   });
 }
 
+// Multiple inventory entries can share the same product_id (e.g. separate
+// batches/lots). Showing them as separate rows would let the person type into
+// two different rows for "the same" product — since the cart used to be keyed
+// by product_id alone, only the last one edited would actually stick. Collapse
+// them into a single row per product+model instead.
+// A row is only "the same product" when product_id + product_name + model_no
+// ALL match — if even one differs, it's a different, independent product and
+// gets its own row and its own cart line. (Same rule as the Create Order
+// product picker in distributor_orders.js.)
+function rowKeyFor(p) { return `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`; }
+
+function dedupeProducts(rawProducts) {
+  const map = new Map();
+  for (const p of rawProducts) {
+    const key = rowKeyFor(p);
+    if (!map.has(key)) map.set(key, { ...p });
+  }
+  return Array.from(map.values());
+}
+
 function renderProductsStep() {
   const body = wizBody();
   wizTitle(`Demo Units for ${spWiz.customer?.company_name ?? ''}`);
-  const products = spState.products;
+  const products = dedupeProducts(spState.products || []);
   body.innerHTML = `
+    <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
@@ -364,28 +385,88 @@ function renderProductsStep() {
     </div>`;
   document.getElementById('backCart').addEventListener('click', () => spWiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
 
-  const rowsBox = document.getElementById('prodRows');
-  const renderRows = (list) => {
-    rowsBox.innerHTML = list.map(p => `
-      <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}</small></td>
-        <td>${p.quantity ?? 0}</td>
-        <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${spWiz.cart[p.product_id]?.quantity ?? 0}"
-              data-id="${p.product_id}" class="qtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
-      </tr>`).join('');
-    rowsBox.querySelectorAll('.qtyInput').forEach(inp => inp.addEventListener('input', () => {
-      const p = list.find(x => x.product_id === inp.dataset.id);
-      const qty = Math.max(0, Math.min(Number(inp.value) || 0, Number(p.quantity) || 0));
-      inp.value = qty;
-      if (qty > 0) spWiz.cart[p.product_id] = { product_id: p.product_id, product_name: p.product_name, quantity: qty };
-      else delete spWiz.cart[p.product_id];
-    }));
-  };
-  renderRows(products);
-  document.getElementById('prodFilter').addEventListener('input', e => {
-    const term = e.target.value.trim().toLowerCase();
-    renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term)));
+  // ---------- Category tabs: Products / Accessories / Spare Parts ----------
+  // Filters the same product table by product_type — same pattern used on
+  // the Create Order product picker, the admin Orders page and Inventory.
+  const catTabsBox = document.getElementById('prodCatTabs');
+  const categories = [
+    { type: 'product', label: 'Products' },
+    { type: 'accessories', label: 'Accessories' },
+    { type: 'spare_parts', label: 'Spare Parts' }
+  ];
+  let activeCategory = 'product';
+
+  function paintCatTab(btn, active) {
+    btn.style.border = active ? '1px solid #1665ff' : '1px solid #e2e8f0';
+    btn.style.background = active ? '#eaf1ff' : '#f8fafc';
+    btn.style.color = active ? '#1665ff' : '#334155';
+    btn.style.borderRadius = '8px';
+    btn.style.padding = '8px 14px';
+    btn.style.cursor = 'pointer';
+    btn.style.fontSize = '13px';
+  }
+
+  catTabsBox.innerHTML = categories.map(c => `<button type="button" class="prod-cat-btn" data-type="${c.type}">${c.label}</button>`).join('');
+  catTabsBox.querySelectorAll('.prod-cat-btn').forEach(btn => {
+    paintCatTab(btn, btn.dataset.type === activeCategory);
+    btn.addEventListener('click', () => {
+      activeCategory = btn.dataset.type;
+      catTabsBox.querySelectorAll('.prod-cat-btn').forEach(b => paintCatTab(b, b.dataset.type === activeCategory));
+      applyFilters();
+    });
   });
+
+  const rowsBox = document.getElementById('prodRows');
+  function productRowHtml(p) {
+    const key = rowKeyFor(p);
+    const qtyInCart = spWiz.cart[key]?.quantity ?? '';
+    return `
+      <tr>
+        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' — ' + p.model_no : ''}</small></td>
+        <td>${p.quantity ?? 0}</td>
+        <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${qtyInCart}"
+              data-row-key="${key}" class="qtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+      </tr>`;
+  }
+  function renderRows(list) { rowsBox.innerHTML = list.map(productRowHtml).join(''); }
+
+  rowsBox.addEventListener('input', (e) => {
+    const inp = e.target.closest('.qtyInput');
+    if (!inp) return;
+    const key = inp.dataset.rowKey;
+    const p = products.find(x => rowKeyFor(x) === key);
+    if (!p) return;
+    const qty = Math.max(0, Math.min(Number(inp.value) || 0, Number(p.quantity) || 0));
+    inp.value = qty;
+    if (qty > 0) spWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, model_no: p.model_no || '', quantity: qty };
+    else delete spWiz.cart[key];
+  });
+
+  function currentCategoryProducts() {
+    return products.filter(p => (p.product_type || 'product') === activeCategory);
+  }
+
+  function applyFilters() {
+    const term = document.getElementById('prodFilter').value.trim().toLowerCase();
+    const base = currentCategoryProducts();
+    const filtered = term
+      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term))
+      : base;
+    renderRows(filtered);
+  }
+
+  applyFilters();
+  if (!products.length) {
+    rowsBox.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:16px;color:#94a3b8;">
+      No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
+    </td></tr>`;
+    document.getElementById('retryInvBtn')?.addEventListener('click', async () => {
+      await loadInventoryForDemo();
+      renderProductsStep();
+    });
+  }
+
+  document.getElementById('prodFilter').addEventListener('input', applyFilters);
 
   document.getElementById('allotBtn').addEventListener('click', async () => {
     if (!Object.keys(spWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
@@ -410,7 +491,6 @@ function renderProductsStep() {
   });
 }
 
-// ---------- My Requests panel ----------
 async function loadMyRequests() {
   try {
     const res = await apiFetch('/request/mine');

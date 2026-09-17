@@ -31,7 +31,7 @@ from datetime import datetime, timezone, timedelta
 import io
 from html.parser import HTMLParser
 try:
-    from twilio.rest import Client as TwilioClient  # pip install twilio
+    from twilio.rest import Client as TwilioClient  
 except ImportError:
     TwilioClient = None
 
