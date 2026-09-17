@@ -395,11 +395,21 @@ function renderAStep2() {
       showResponseModal('Add an inventory part', 'Add at least one part from inventory — its hologram numbers supply the hologram number for each assembled unit.', false);
       return;
     }
-    const matching = inventoryParts.filter(p => Number(p.quantity) >= Number(assemblyDraft.quantity));
-    if (matching.length === 0) {
+    // mirror the backend: merge quantities of rows that share the same part
+    // name (e.g. the same part split across two rows) before checking, since
+    // that's how /assembly/create sums them up server-side
+    const summedByName = {};
+    inventoryParts.forEach(p => {
+      summedByName[p.name] = (summedByName[p.name] || 0) + Number(p.quantity || 0);
+    });
+    // only block when NOT ENOUGH (kam) — no part reaches the assembly
+    // quantity. If more than one part qualifies (zyada), that's fine: the
+    // backend just picks one and leaves the extra untouched in inventory.
+    const hologramCandidates = Object.keys(summedByName).filter(name => summedByName[name] >= Number(assemblyDraft.quantity));
+    if (hologramCandidates.length === 0) {
       showResponseModal(
         'Check part quantities',
-        `Exactly one inventory part must have quantity at least equal to the assembly quantity (${assemblyDraft.quantity}) — that part supplies the hologram number for each unit.`,
+        `At least one inventory part must have a total quantity at least equal to the assembly quantity (${assemblyDraft.quantity}) — that part supplies the hologram number for each unit.`,
         false
       );
       return;

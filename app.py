@@ -1653,24 +1653,37 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
                 detail="add at least one part from inventory — its hologram numbers supply the assembled units' hologram numbers",
             )
 
-        # exactly one inventory part must be used at a 1:1 ratio with the assembly
-        # quantity — that's the hologram-bearing part, and its hologram numbers
-        # (one per unit) become each finished unit's hologram number
+        # at least one inventory part must have enough quantity at a 1:1 ratio
+        # with the assembly quantity — that's the hologram-bearing part, and its
+        # hologram numbers (one per unit) become each finished unit's hologram
+        # number. If more than one part qualifies, that's not an error — extra
+        # (zyada) is fine, we just pick one; only a shortage (kam) blocks.
         hologram_candidates = [name for name, qty in needed_from_inventory.items() if qty >= request.quantity]
-        if len(hologram_candidates) != 1:
+        if not hologram_candidates:
             raise HTTPException(
                 status_code=400,
-                detail="exactly one part from inventory must have quantity at least equal to the assembly quantity — "
+                detail="at least one part from inventory must have quantity at least equal to the assembly quantity — "
                        "that part supplies the hologram number for each assembled unit",
             )
+        # pick the first qualifying part (in the order it was entered) as the
+        # hologram-bearing part
         hologram_part_name = hologram_candidates[0]
+
+        # how much of each inventory part actually gets consumed: the hologram
+        # part only gives up exactly `request.quantity` (one per unit) — any
+        # extra the user entered for it stays untouched in inventory. Every
+        # other part is consumed at the full quantity entered for it.
+        consume_amounts = {
+            name: (request.quantity if name == hologram_part_name else qty)
+            for name, qty in needed_from_inventory.items()
+        }
 
         inv_db = inventory_manager()
 
         # validate stock (and, for the hologram part, hologram numbers on file) is
         # sufficient for EVERY part before deducting any of them — otherwise a
         # shortage on part #2 would leave part #1 already (irreversibly) deducted
-        for part_name, qty in needed_from_inventory.items():
+        for part_name, qty in consume_amounts.items():
             have = inv_db.get_available_quantity_by_name(
                 collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts"
             )
@@ -1691,19 +1704,14 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
 
         # stock confirmed for every part — now actually deduct
         hologram_numbers: list[str] = []
-        for part_name, qty in needed_from_inventory.items():
+        for part_name, qty in consume_amounts.items():
             if part_name == hologram_part_name:
                 hologram_numbers = inv_db.allocate_hologram_numbers_by_name(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
                     product_type="spare_parts", quantity=request.quantity,
                 )
-                # any quantity of the hologram part beyond one-per-unit is
-                # consumed as plain (non-hologram) stock
-                if qty > request.quantity:
-                    inv_db.consume_quantity(
-                        collection_name=INVENTORY_COLLECTION, product_name=part_name,
-                        product_type="spare_parts", quantity=qty - request.quantity,
-                    )
+                # any quantity beyond one-per-unit is left untouched in
+                # inventory — we only take what's needed
             else:
                 inv_db.consume_quantity(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
