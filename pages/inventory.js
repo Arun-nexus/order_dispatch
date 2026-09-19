@@ -752,7 +752,71 @@ function wireTopActions() {
     document.getElementById('addModal').style.display = 'flex';
     renderAddTypeStep();
   });
-  document.querySelector('.export').addEventListener('click', (e) => openExportTypeMenu(e.currentTarget));
+  document.querySelector('.export').addEventListener('click', (e) => openExportCategoryMenu(e.currentTarget));
+}
+
+// Export step 1: pick the category (Product / Service Parts / Spare Parts / Faulty /
+// Accessories / All). Everything after this (detailed vs summary, date range) only
+// covers the chosen category.
+const EXPORT_CATEGORIES = [
+  { value: 'product', label: 'Product', icon: 'fa-box' },
+  { value: 'service_parts', label: 'Service Parts', icon: 'fa-screwdriver-wrench' },
+  { value: 'spare_parts', label: 'Spare Parts', icon: 'fa-gears' },
+  { value: 'damaged', label: 'Faulty', icon: 'fa-triangle-exclamation' },
+  { value: 'accessories', label: 'Accessories', icon: 'fa-plug' },
+  { value: 'all', label: 'All', icon: 'fa-boxes-stacked' }
+];
+let exportCategory = 'all';
+
+function exportRowsForCategory() {
+  if (exportCategory === 'all') return invState.products;
+  return invState.products.filter(p => (p.product_type || 'product') === exportCategory);
+}
+
+function exportCategoryLabel() {
+  return EXPORT_CATEGORIES.find(c => c.value === exportCategory)?.label || 'All';
+}
+
+function exportFileName(base) {
+  return exportCategory === 'all' ? `${base}.csv` : `${base}_${exportCategory}.csv`;
+}
+
+function openExportCategoryMenu(anchorBtn) {
+  document.getElementById('exportTypeMenu')?.remove();
+  document.getElementById('exportCategoryMenu')?.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 'exportCategoryMenu';
+  menu.style.cssText = 'position:absolute;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1300;min-width:220px;';
+  const rect = anchorBtn.getBoundingClientRect();
+  menu.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  menu.style.left = `${rect.left + window.scrollX}px`;
+  menu.innerHTML = `<div style="padding:6px 12px;font-size:12px;color:#64748b;">Export which category?</div>` +
+    EXPORT_CATEGORIES.map(c => `
+    <button type="button" class="export-cat-opt" data-cat="${c.value}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
+      <i class="fa-solid ${c.icon}" style="width:16px;"></i>&nbsp; ${c.label}
+    </button>`).join('');
+  document.body.appendChild(menu);
+
+  menu.querySelectorAll('.export-cat-opt').forEach(btn => {
+    btn.addEventListener('mouseenter', () => btn.style.background = '#f1f5f9');
+    btn.addEventListener('mouseleave', () => btn.style.background = 'none');
+    btn.addEventListener('click', () => {
+      exportCategory = btn.dataset.cat;
+      menu.remove();
+      openExportTypeMenu(anchorBtn);
+    });
+  });
+
+  setTimeout(() => {
+    document.addEventListener('click', function closeMenu(ev) {
+      if (!menu.isConnected) { document.removeEventListener('click', closeMenu); return; }
+      if (!menu.contains(ev.target) && ev.target !== anchorBtn) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    });
+  }, 0);
 }
 
 // Small popup so the user can pick which export they want before the usual
@@ -800,20 +864,23 @@ function openExportTypeMenu(anchorBtn) {
 
 function exportInventoryCSV() {
   openExportWizard({
-    title: 'Export Inventory',
+    title: `Export Inventory — ${exportCategoryLabel()}`,
     statusOptions: null,
     dateField: 'purchase_date',
     dateLabel: 'Purchase Date',
-    getRows: () => invState.products,
+    getRows: exportRowsForCategory,
     onConfirm: (rows) => {
       const header = rows.map(p => `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`);
-      const columns = rows.map(p => p.serial_numbers || []);
+      // parts have no serial numbers — their per-unit identifiers are hologram numbers
+      const columns = rows.map(p => (p.serial_numbers && p.serial_numbers.length)
+        ? p.serial_numbers
+        : ((p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? hologramNumbersOf(p) : []));
       const maxLen = Math.max(0, ...columns.map(c => c.length));
       const csvRows = [];
       for (let i = 0; i < maxLen; i++) {
         csvRows.push(columns.map(col => col[i] ?? ''));
       }
-      downloadCSV(header, csvRows, 'inventory.csv');
+      downloadCSV(header, csvRows, exportFileName('inventory'));
     }
   });
 }
@@ -822,18 +889,18 @@ function exportInventoryCSV() {
 // label, with the current quantity right next to it.
 function exportInventorySummaryCSV() {
   openExportWizard({
-    title: 'Export Inventory Summary',
+    title: `Export Inventory Summary — ${exportCategoryLabel()}`,
     statusOptions: null,
     dateField: 'purchase_date',
     dateLabel: 'Purchase Date',
-    getRows: () => invState.products,
+    getRows: exportRowsForCategory,
     onConfirm: (rows) => {
       const header = ['Product', 'Quantity'];
       const csvRows = rows.map(p => {
         const label = `${p.product_name || ''} (${p.product_id || ''})${p.model_no ? ' - ' + p.model_no : ''}`;
         return [label, Number(p.quantity) || 0];
       });
-      downloadCSV(header, csvRows, 'inventory_summary.csv');
+      downloadCSV(header, csvRows, exportFileName('inventory_summary'));
     }
   });
 }
