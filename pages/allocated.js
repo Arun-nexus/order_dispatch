@@ -141,7 +141,7 @@ function renderPendingRequests() {
   }
 
   box.innerHTML = pending.map(r => {
-    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen', convert_to_order: 'fa-file-invoice-dollar' };
+    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen', convert_to_order: 'fa-file-invoice-dollar', return_demo: 'fa-rotate-left' };
     const icon = iconMap[r.request_type] || 'fa-bell';
 
     let title, subtitle;
@@ -149,6 +149,10 @@ function renderPendingRequests() {
       title = `Demo Unit — ${esc(r.raised_by)}`;
       subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
         + (r.details?.remarks ? ` • Remarks: ${esc(r.details.remarks)}` : '');
+    } else if (r.request_type === 'return_demo') {
+      title = `Demo Return — ${esc(r.raised_by)}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
+        + ` • Through: ${esc(r.details?.returned_through || '-')}`;
     } else if (r.request_type === 'convert_to_order') {
       title = `Convert Demo to Order — ${esc(r.details?.customer?.company_name || '')}`;
       subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity} @ ₹${i.price}`).join(', ');
@@ -220,6 +224,19 @@ function openRequestDetailsModal(r) {
       ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
       <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>
       <div class="detail"><small>Remarks</small><p>${esc(d.remarks || '-')}</p></div>`;
+  } else if (r.request_type === 'return_demo') {
+    heading = 'Demo Unit Return';
+    const itemsRows = (d.items || []).map(i => `
+      <div class="detail"><small>Product</small><p>${esc(i.product_name)} — Qty: ${i.quantity ?? ''}${i.serial_numbers?.length ? ', SN: ' + esc(i.serial_numbers.join(', ')) : ''}</p></div>`).join('');
+    // proof file is a large base64 blob, so it is not part of the request list — loaded when this modal opens
+    const proofHtml = (d.proof && (d.proof.name || d.proof.data))
+      ? '<p id="proofBox" style="font-size:12px;color:#94a3b8;">Loading proof…</p>'
+      : '<p>Not provided</p>';
+    body = `
+      ${itemsRows}
+      <div class="detail"><small>Returned Through</small><p>${esc(d.returned_through || '-')}</p></div>
+      <div class="detail"><small>Proof of Return</small>${proofHtml}</div>
+      <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>`;
   } else if (r.request_type === 'convert_to_order') {
     heading = 'Convert Demo to Order';
     const itemsRows = (d.items || []).map(i => `
@@ -266,6 +283,20 @@ function openRequestDetailsModal(r) {
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.style.display = 'flex';
+
+  const proofBox = document.getElementById('proofBox');
+  if (proofBox) {
+    apiFetch(`/request/${r.request_id}/proof`)
+      .then(res => res.json())
+      .then(({ proof }) => {
+        if (!proof || !proof.data) { proofBox.textContent = 'Not provided'; return; }
+        const name = esc(proof.name || 'proof');
+        proofBox.outerHTML = String(proof.data).startsWith('data:image/')
+          ? `<a href="${proof.data}" download="${name}"><img src="${proof.data}" alt="proof" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid #e2e8f0;"></a>`
+          : `<a href="${proof.data}" download="${name}">Download ${name}</a>`;
+      })
+      .catch(() => { proofBox.textContent = 'Proof could not be loaded.'; });
+  }
 }
 
 function rowRequestId(e) {
@@ -615,9 +646,10 @@ function openDamageViewModal(a) {
   const modal = document.getElementById('viewAllocationModal');
   const content = modal.querySelector('.modal-content');
 
-  const imageHtml = dr.image
-    ? `<img src="${dr.image}" style="max-width:100%;border-radius:10px;margin-top:8px;">`
-    : `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">Photo already emailed and auto-deleted from the database (2-day retention).</p>`;
+  const photoHtml = src => `<img src="${src}" style="max-width:100%;border-radius:10px;margin-top:8px;">`;
+  const purgedHtml = `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">Photo already emailed and auto-deleted from the database (2-day retention).</p>`;
+  // photo is no longer sent with the allocation list (it is a large base64 blob) — loaded when opened
+  const imageHtml = dr.image ? photoHtml(dr.image) : (dr.image_purged ? purgedHtml : '<p id="damagePhotoBox" style="font-size:12px;color:#94a3b8;margin-top:6px;">Loading photo…</p>');
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -631,6 +663,14 @@ function openDamageViewModal(a) {
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.style.display = 'flex';
+
+  const box = document.getElementById('damagePhotoBox');
+  if (box) {
+    apiFetch(`/allocation/${a.allocation_id}/damage_image`)
+      .then(r => r.json())
+      .then(d => { box.outerHTML = d.image ? photoHtml(d.image) : purgedHtml; })
+      .catch(() => { box.textContent = 'Photo could not be loaded.'; });
+  }
 }
 
 function wireTopActions() {

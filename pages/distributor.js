@@ -129,6 +129,7 @@ function rowStatus(row) {
   }
   const a = row.data;
   if (a.return_status === 'returned') return { key: 'returned', label: 'Returned', cls: 'high' };
+  if (a.return_request && a.return_request.status === 'pending') return { key: 'return_pending', label: 'Return Pending Approval', cls: 'medium' };
   if (a.convert_request && a.convert_request.status === 'pending') return { key: 'convert_pending', label: 'Order Request Pending', cls: 'medium' };
   if (a.dispatch) return returnMeta(a).overdue
     ? { key: 'overdue', label: 'Dispatched · Overdue', cls: 'low' }
@@ -201,20 +202,77 @@ function renderTable(rows) {
 }
 
 // hooks filled in by the convert-to-order step
-// Convert button is always visible on demo-unit rows; it is only clickable once the unit is dispatched.
+// Convert / Return buttons are always visible on demo-unit rows; they are only clickable once the unit is dispatched
+// (and no other request for it is pending).
+function actionBtn(cls, icon, label, enabled, title, color) {
+  return `<button class="${cls}" ${enabled ? '' : 'disabled'} title="${title}"
+    style="margin-left:6px;padding:6px 10px;border:none;border-radius:8px;font-size:12px;white-space:nowrap;
+    background:${enabled ? color : '#e5e7eb'};color:${enabled ? '#fff' : '#94a3b8'};cursor:${enabled ? 'pointer' : 'not-allowed'};">
+    <i class="fa-solid ${icon}"></i> ${label}</button>`;
+}
+
 function rowActionsExtra(row, st) {
   if (row.kind !== 'alloc' || st.key === 'returned') return '';
   const enabled = st.key === 'dispatched' || st.key === 'overdue';
-  const title = enabled ? 'Convert to Order'
-    : (st.key === 'convert_pending' ? 'Order request already sent' : 'Available after dispatch');
-  const label = st.key === 'convert_pending' ? 'Request Sent' : 'Convert to Order';
-  return `<button class="convert-btn" ${enabled ? '' : 'disabled'} title="${title}"
-    style="margin-left:6px;padding:6px 10px;border:none;border-radius:8px;font-size:12px;white-space:nowrap;
-    background:${enabled ? '#1665ff' : '#e5e7eb'};color:${enabled ? '#fff' : '#94a3b8'};cursor:${enabled ? 'pointer' : 'not-allowed'};">
-    <i class="fa-solid fa-file-invoice-dollar"></i> ${label}</button>`;
+  const hint = st.key === 'convert_pending' ? 'Order request already sent'
+    : st.key === 'return_pending' ? 'Return request already sent' : 'Available after dispatch';
+  return actionBtn('convert-btn', 'fa-file-invoice-dollar', st.key === 'convert_pending' ? 'Request Sent' : 'Convert to Order', enabled, enabled ? 'Convert to Order' : hint, '#1665ff')
+    + actionBtn('return-btn', 'fa-rotate-left', st.key === 'return_pending' ? 'Return Sent' : 'Return', enabled, enabled ? 'Request return' : hint, '#f59e0b');
 }
 function wireRowActions(tbody) {
   tbody.querySelectorAll('.convert-btn:not([disabled])').forEach(b => b.addEventListener('click', e => openConvertModal(rowFromEvent(e))));
+  tbody.querySelectorAll('.return-btn:not([disabled])').forEach(b => b.addEventListener('click', e => openReturnModal(rowFromEvent(e))));
+}
+
+// ---------- Return a dispatched demo unit (needs admin approval; marked returned once approved) ----------
+function openReturnModal(row) {
+  if (!row || row.kind !== 'alloc') return;
+  const a = row.data;
+  const modal = document.getElementById('allotModal');
+  const body = wizBody();
+  wizTitle('Return Demo Unit');
+  body.innerHTML = `
+    <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">${itemsLabel(a.items)}</div>
+    <form id="returnForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="returned_through" placeholder="Returned through (courier / transport / person name)" required>
+      <label style="font-size:12px;color:#64748b;margin-bottom:-6px;">Proof of return (optional — image or PDF, max 1.5 MB)</label>
+      <input name="proof" type="file" accept="image/*,application/pdf">
+      <p style="font-size:12px;color:#94a3b8;">Sent to admin for approval. The unit is marked returned once approved.</p>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        <button type="button" id="returnCancel" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#f59e0b;color:#fff;cursor:pointer;">Send Return Request</button>
+      </div>
+    </form>`;
+  document.getElementById('returnCancel').addEventListener('click', () => modal.style.display = 'none');
+  document.getElementById('returnForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const file = fd.get('proof');
+    const payload = { returned_through: fd.get('returned_through').trim(), proof: {} };
+    try {
+      if (file && file.size) {
+        if (file.size > 1.5 * 1024 * 1024) { alert('Proof file is too large (max 1.5 MB).'); return; }
+        const data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = () => reject(new Error('could not read the proof file'));
+          r.readAsDataURL(file);
+        });
+        payload.proof = { name: file.name, type: file.type, data };
+      }
+      const res = await apiFetch(`/allocation/return_request/${a.allocation_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'request failed');
+      modal.style.display = 'none';
+      alert('Return request sent — admin will review and approve it.');
+      await loadMyAllocations();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+  modal.style.display = 'flex';
 }
 
 // ---------- Convert a dispatched demo unit into an order (needs admin approval) ----------
@@ -284,6 +342,7 @@ function openViewModal(row) {
   const items = (isReq ? d.details?.items : d.items) || [];
   const cr = (!isReq && d.convert_request && d.convert_request.status === 'pending') ? d.convert_request : null;
   const crRejected = (!isReq && d.convert_request && d.convert_request.status === 'rejected') ? d.convert_request : null;
+  const rr = (!isReq && d.return_request) ? d.return_request : null;
 
   const itemRows = items.length ? items.map(i => `<tr>
       <td>${esc(i.product_name)}</td>
@@ -312,6 +371,10 @@ function openViewModal(row) {
     if (d.status === 'rejected') html += detailRow('Rejection Reason', esc(d.reason || '-'));
   } else {
     if (crRejected) html += detailRow('Order Request Rejected', esc(crRejected.reason || '-'));
+    if (rr) {
+      html += detailRow('Returned Through', esc(rr.returned_through || '-'));
+      if (rr.status === 'rejected') html += detailRow('Return Request Rejected', esc(rr.reason || '-'));
+    }
     html += detailRow('Allotment Date', d.allotment_date ? new Date(d.allotment_date).toLocaleString() : '-');
     html += detailRow('Return Due', d.return_due_date ? new Date(d.return_due_date).toLocaleString() : '-');
     if (d.dispatch) {

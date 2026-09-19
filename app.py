@@ -29,6 +29,8 @@ import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timezone, timedelta
 import io
+import time
+import threading
 from html.parser import HTMLParser
 try:
     from twilio.rest import Client as TwilioClient  
@@ -362,17 +364,17 @@ class AssemblyUpdateRequest(BaseModel):
 
 
 @app.get("/")
-async def home():
+def home():
     return FileResponse(os.path.join(BASE_DIR, "index.html"))
 
 
 @app.get("/main_dashboard.html")
-async def dashboard():
+def dashboard():
     return FileResponse(os.path.join(BASE_DIR, "main_dashboard.html"))
 
 
 @app.post("/login/")
-async def login_page(request: LoginRequest):
+def login_page(request: LoginRequest):
     try:
         db = login()
         dataset = db.get_data(ACCOUNTS_COLLECTION, query={"username": request.username})
@@ -405,7 +407,7 @@ async def login_page(request: LoginRequest):
 
 
 @app.get("/account/")
-async def account(user: dict = Depends(get_current_user)):
+def account(user: dict = Depends(get_current_user)):
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
@@ -417,7 +419,7 @@ async def account(user: dict = Depends(get_current_user)):
 
 
 @app.get("/account/my_team")
-async def my_team(user: dict = Depends(require_role("distributor"))):
+def my_team(user: dict = Depends(require_role("distributor"))):
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION,
@@ -433,7 +435,7 @@ async def my_team(user: dict = Depends(require_role("distributor"))):
 
 
 @app.get("/allocation/team")
-async def team_allocations(user: dict = Depends(require_role("distributor"))):
+def team_allocations(user: dict = Depends(require_role("distributor"))):
     try:
         acc_db = mongodbclient()
         team = acc_db.get_data(collection_name=ACCOUNTS_COLLECTION,
@@ -444,7 +446,8 @@ async def team_allocations(user: dict = Depends(require_role("distributor"))):
 
         alloc_db = allocation_manager()
         dataset = alloc_db.get_data(collection_name=ALLOCATION_COLLECTION,
-                                     query={"allocation_type": "demo_unit", "allocated_by": {"$in": team_usernames}})
+                                     query={"allocation_type": "demo_unit", "allocated_by": {"$in": team_usernames}},
+                                     projection={"damage_report.image": 0})
         return {"message": "team demo unit allocations", "dataset": dataset}
     except Exception as e:
         logging.error("fetching team allocations failed")
@@ -452,7 +455,7 @@ async def team_allocations(user: dict = Depends(require_role("distributor"))):
 
 
 @app.get("/account/technicians")
-async def list_technicians(user: dict = Depends(get_current_user)):
+def list_technicians(user: dict = Depends(get_current_user)):
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"role": "technician"})
@@ -468,7 +471,7 @@ async def list_technicians(user: dict = Depends(get_current_user)):
 
 
 @app.get("/account/distributors")
-async def list_distributors(user: dict = Depends(get_current_user)):
+def list_distributors(user: dict = Depends(get_current_user)):
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"role": "distributor"})
@@ -484,7 +487,7 @@ async def list_distributors(user: dict = Depends(get_current_user)):
 
 
 @app.get("/account/users")
-async def list_system_users(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def list_system_users(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     """Safe (no password) list of every system user, used by the allocation wizard."""
     try:
         db = mongodbclient()
@@ -501,7 +504,7 @@ async def list_system_users(user: dict = Depends(require_role("admin", "accounts
 
 
 @app.post("/account/create_account/")
-async def create_account(request: CreateAccountRequest, user: dict = Depends(require_role("admin"))):
+def create_account(request: CreateAccountRequest, user: dict = Depends(require_role("admin"))):
     try:
         if request.password != request.confirm_password:
             raise HTTPException(status_code=400, detail="confirm password is not same as password")
@@ -550,7 +553,7 @@ async def create_account(request: CreateAccountRequest, user: dict = Depends(req
 
 
 @app.post("/login/delete_account/{username}")
-async def delete_account(username: str, user: dict = Depends(require_role("admin"))):
+def delete_account(username: str, user: dict = Depends(require_role("admin"))):
     try:
         db = login()
         db.delete(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
@@ -563,7 +566,7 @@ async def delete_account(username: str, user: dict = Depends(require_role("admin
 
 
 @app.post("/login/update_account/{username}")
-async def update_account(username: str, updated_values: UpdateAccountRequest, user: dict = Depends(require_role("admin"))):
+def update_account(username: str, updated_values: UpdateAccountRequest, user: dict = Depends(require_role("admin"))):
     try:
         db = login()
         db.update(collection_name=ACCOUNTS_COLLECTION, query={"username": username},
@@ -834,7 +837,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
 
 @app.post("/order/create_order/")
-async def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         order_id = _fulfill_order(
             customer_id=request.customer_id,
@@ -857,7 +860,7 @@ async def create_order(request: CreateOrderRequest, user: dict = Depends(require
 
 
 @app.get("/track_order/{order_id}")
-async def track_order(order_id: str, user: dict = Depends(get_current_user)):
+def track_order(order_id: str, user: dict = Depends(get_current_user)):
     try:
         db = order_manager()
         dataset = db.get_data(ORDERS_COLLECTION, query={"order_id": order_id})
@@ -874,7 +877,7 @@ async def track_order(order_id: str, user: dict = Depends(get_current_user)):
 
 
 @app.post("/order/confirm_delivery/{order_id}")
-async def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "accounts"))):
+def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = order_manager()
         result = db.update(
@@ -896,7 +899,7 @@ async def confirm_delivery(order_id: str, user: dict = Depends(require_role("adm
 
 
 @app.post("/order/delete/{order_id}")
-async def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
+def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = order_manager()
         existing = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
@@ -932,7 +935,7 @@ async def delete_order(order_id: str, user: dict = Depends(require_role("admin")
 
 
 @app.post("/order/update/{order_id}")
-async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "accounts"))):
+def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = order_manager()
         updated = dict(updated_value.updated_order_value)
@@ -1353,7 +1356,7 @@ async def update_order(order_id: str, updated_value: OrderUpdatedValue, user: di
 
 
 @app.get("/order/")
-async def order(user: dict = Depends(get_current_user)):
+def order(user: dict = Depends(get_current_user)):
     try:
         db = order_manager()
         dataset = db.get_data(collection_name=ORDERS_COLLECTION, query={})
@@ -1448,7 +1451,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
 
 
 @app.get("/shipment/")
-async def shipment(user: dict = Depends(require_role("admin", "accounts"))):
+def shipment(user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         dataset = db.get_data(collection_name=SHIPMENT_COLLECTION, query={})
@@ -1460,7 +1463,7 @@ async def shipment(user: dict = Depends(require_role("admin", "accounts"))):
 
 
 @app.get("/shipment/{shipment_id}")
-async def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "accounts"))):
+def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         result = db.shipment_tracking(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id)
@@ -1473,7 +1476,7 @@ async def track_shipment(shipment_id: str, user: dict = Depends(require_role("ad
 
 
 @app.post("/shipment/create")
-async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         shipment_dict = {
             "company_name": request.company_name,
@@ -1513,7 +1516,7 @@ async def create_shipment(request: CreateShipmentRequest, user: dict = Depends(r
 
 
 @app.post("/shipment/mark_received/{shipment_id}")
-async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1546,7 +1549,7 @@ async def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequ
 
 
 @app.post("/shipment/update/{shipment_id}")
-async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1570,7 +1573,7 @@ async def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user
 
 
 @app.post("/shipment/delete/{shipment_id}")
-async def delete_shipment(shipment_id: str, user: dict = Depends(require_role("admin"))):
+def delete_shipment(shipment_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = shipment_manager()
         db.delete(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1585,7 +1588,7 @@ async def delete_shipment(shipment_id: str, user: dict = Depends(require_role("a
 # =========================================================
 
 @app.get("/assembly/")
-async def assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         dataset = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={})
@@ -1597,7 +1600,7 @@ async def assembly(user: dict = Depends(require_role("assembly", "admin", "accou
 
 
 @app.get("/assembly/available_parts")
-async def available_parts_for_assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def available_parts_for_assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     """
     Spare parts currently sitting in inventory — the pool an assembly's parts
     are pulled from. This stock is fed by shipments: a shipment part marked
@@ -1636,7 +1639,7 @@ async def available_parts_for_assembly(user: dict = Depends(require_role("assemb
 
 
 @app.get("/assembly/{assembly_id}")
-async def track_assembly(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def track_assembly(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         result = db.assembly_tracking(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
@@ -1649,7 +1652,7 @@ async def track_assembly(assembly_id: str, user: dict = Depends(require_role("as
 
 
 @app.post("/assembly/create")
-async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         parts_used = [part.dict() for part in request.parts_used]
 
@@ -1768,7 +1771,7 @@ async def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(r
 
 
 @app.post("/assembly/mark_completed/{assembly_id}")
-async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1810,7 +1813,7 @@ async def mark_assembly_completed(assembly_id: str, user: dict = Depends(require
 
 
 @app.post("/assembly/update/{assembly_id}")
-async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1830,7 +1833,7 @@ async def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user
 
 
 @app.post("/assembly/delete/{assembly_id}")
-async def delete_assembly(assembly_id: str, user: dict = Depends(require_role("admin"))):
+def delete_assembly(assembly_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = assembly_manager()
         db.delete(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1888,6 +1891,59 @@ def send_damage_report_email(allocation_id: str, product_label: str, issue: str,
     except Exception as e:
         logging.error(f"failed to send damage report email for allocation {allocation_id}: {e}")
         return False
+
+
+# ---------- performance helpers ----------
+_bg_lock = threading.Lock()
+_bg_last = {}
+_bg_running = set()
+
+
+def run_in_background(name: str, fn, min_interval: int = 1800):
+    """Runs housekeeping jobs (image purge / Drive migration) off the request path, at most once
+    per `min_interval` seconds and never two copies at once, so page loads no longer wait for them."""
+    now = time.time()
+    with _bg_lock:
+        if name in _bg_running or now - _bg_last.get(name, 0) < min_interval:
+            return
+        _bg_running.add(name)
+        _bg_last[name] = now
+
+    def _job():
+        try:
+            fn()
+        except Exception as e:
+            logging.error(f"background job {name} failed: {e}")
+        finally:
+            with _bg_lock:
+                _bg_running.discard(name)
+
+    threading.Thread(target=_job, daemon=True).start()
+
+
+def ensure_indexes():
+    """Idempotent — creates indexes on the fields the list/lookup queries filter by."""
+    wanted = {
+        ALLOCATION_COLLECTION: ["allocation_id", "allocated_by", "allocation_type", "return_status"],
+        ORDERS_COLLECTION: ["order_id", "status", "creator.raised_by"],
+        REQUESTS_COLLECTION: ["request_id", "raised_by", "status"],
+        INVENTORY_COLLECTION: ["product_id", "product_type"],
+        ACCOUNTS_COLLECTION: ["username", "role"],
+        CUSTOMER_COLLECTION: ["customer_id"],
+        SERVICE_COLLECTION: ["service_id"],
+    }
+    db = mongodbclient().database
+    for coll, fields in wanted.items():
+        for field in fields:
+            try:
+                db[coll].create_index(field, background=True)
+            except Exception as e:
+                logging.error(f"index {coll}.{field} skipped: {e}")
+
+
+@app.on_event("startup")
+def _create_indexes_on_startup():
+    threading.Thread(target=ensure_indexes, daemon=True).start()
 
 
 def purge_stale_damage_images():
@@ -1968,9 +2024,9 @@ def migrate_stale_dispatch_media():
 
 
 @app.get("/dispatch/")
-async def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
-        migrate_stale_dispatch_media()
+        run_in_background("migrate_dispatch_media", migrate_stale_dispatch_media, 600)
         odb = order_manager()
         all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": "processing"})
         pending_orders = [o for o in all_orders if not o.get("dispatch")]
@@ -2113,12 +2169,12 @@ def send_whatsapp_late_reminder(phone_number: str, employee_name: str, in_time: 
 
 
 @app.get("/attendance/late_threshold")
-async def get_late_threshold_endpoint(user: dict = Depends(require_role("admin"))):
+def get_late_threshold_endpoint(user: dict = Depends(require_role("admin"))):
     return {"late_time": get_late_threshold()}
 
 
 @app.post("/attendance/late_threshold")
-async def set_late_threshold_endpoint(request: LateThresholdRequest, user: dict = Depends(require_role("admin"))):
+def set_late_threshold_endpoint(request: LateThresholdRequest, user: dict = Depends(require_role("admin"))):
     try:
         db = mongodbclient()
         existing = db.get_data(collection_name=ATTENDANCE_SETTINGS_COLLECTION, query={"key": "late_threshold"})
@@ -2134,7 +2190,7 @@ async def set_late_threshold_endpoint(request: LateThresholdRequest, user: dict 
 
 
 @app.get("/attendance/")
-async def get_attendance(date: str = Query(None), month: str = Query(None), user: dict = Depends(require_role("admin"))):
+def get_attendance(date: str = Query(None), month: str = Query(None), user: dict = Depends(require_role("admin"))):
     """date="YYYY-MM-DD" for one day's list, or month="YYYY-MM" for that month's records (monthly report)."""
     try:
         db = mongodbclient()
@@ -2271,7 +2327,7 @@ async def upload_attendance(file: UploadFile = File(...), user: dict = Depends(r
 
 
 @app.post("/dispatch/confirm/order/{order_id}")
-async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = order_manager()
         matches = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
@@ -2302,7 +2358,7 @@ async def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest,
 
 
 @app.post("/dispatch/confirm/spare_part/{allocation_id}")
-async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -2330,7 +2386,7 @@ async def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfi
 
 
 @app.get("/service/")
-async def services(user: dict = Depends(get_current_user)):
+def services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
         dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={})
@@ -2342,7 +2398,7 @@ async def services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/services/create")
-async def create_service(request: ServiceRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def create_service(request: ServiceRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         service = service_detail(product_id=request.product_id, serial_no=request.serial_no)
         service.add_service(
@@ -2370,7 +2426,7 @@ async def create_service(request: ServiceRequest, user: dict = Depends(require_r
 
 
 @app.post("/service/delete/{service_id}")
-async def delete_service(service_id: str, user: dict = Depends(require_role("admin"))):
+def delete_service(service_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.delete_service(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -2382,7 +2438,7 @@ async def delete_service(service_id: str, user: dict = Depends(require_role("adm
 
 
 @app.post("/service/update/{service_id}")
-async def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.update_service_status(
@@ -2423,7 +2479,7 @@ async def update_service(service_id: str, request: ServiceUpdateRequest, user: d
 
 
 @app.post("/service/request_status_update/{service_id}")
-async def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
+def request_status_update(service_id: str, request: ServiceUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         req = request_manager(
             request_type="status_update",
@@ -2446,7 +2502,7 @@ async def request_status_update(service_id: str, request: ServiceUpdateRequest, 
 
 
 @app.get("/service/my")
-async def my_services(user: dict = Depends(get_current_user)):
+def my_services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
         dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={"technician_alloted": user["username"]})
@@ -2458,7 +2514,7 @@ async def my_services(user: dict = Depends(get_current_user)):
 
 
 @app.post("/service/update_charges/{service_id}")
-async def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def update_service_charges(service_id: str, request: ServiceChargeRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail()
         db.set_service_charges(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, service_charges=request.service_charges)
@@ -2469,7 +2525,7 @@ async def update_service_charges(service_id: str, request: ServiceChargeRequest,
 
 
 @app.post("/service/upload_media/{service_id}")
-async def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
+def upload_service_media(service_id: str, request: ServiceMediaRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         db = service_detail()
         db.attach_media(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, image=request.image, video=request.video)
@@ -2484,7 +2540,7 @@ async def upload_service_media(service_id: str, request: ServiceMediaRequest, us
 
 
 @app.post("/service/request_spare_part/{service_id}")
-async def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
+def request_spare_part(service_id: str, request: SparePartRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
     try:
         db = service_detail()
         db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=request.note)
@@ -2503,7 +2559,7 @@ async def request_spare_part(service_id: str, request: SparePartRequest, user: d
 
 
 @app.post("/service/manager_confirm/{service_id}")
-async def manager_confirm(service_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def manager_confirm(service_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.manager_confirm_return(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -2514,7 +2570,7 @@ async def manager_confirm(service_id: str, user: dict = Depends(require_role("se
 
 
 @app.post("/service/extend_warranty/{service_id}")
-async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = service_detail(product_id="", serial_no="")
         db.extend_warranty(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, warranty_until=request.warranty_until)
@@ -2525,7 +2581,7 @@ async def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user:
 
 
 @app.get("/inventory/")
-async def inventory(user: dict = Depends(get_current_user)):
+def inventory(user: dict = Depends(get_current_user)):
     try:
         db = inventory_manager()
         dataset = db.get_data(collection_name=INVENTORY_COLLECTION, query={})
@@ -2555,7 +2611,7 @@ async def inventory(user: dict = Depends(get_current_user)):
 
 
 @app.get("/inventory/serial_history/{serial_number}")
-async def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
+def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     """
     Full lifetime trail for one serial number, stitched together from every
     collection that could mention it — inventory (current stock), assembly
@@ -2705,7 +2761,7 @@ def productTypeLabelPy(product_type):
 
 
 @app.get("/inventory/available_serials")
-async def available_serials(product_id: str, model_no: str = "", user: dict = Depends(require_role("admin", "accounts"))):
+def available_serials(product_id: str, model_no: str = "", user: dict = Depends(require_role("admin", "accounts"))):
     """
     Lists every serial number currently on file for product_id (scoped to
     model_no when one is given), oldest lot first — same order the allocator
@@ -2723,7 +2779,7 @@ async def available_serials(product_id: str, model_no: str = "", user: dict = De
 
 
 @app.post("/inventory/create")
-async def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
@@ -2796,7 +2852,7 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
 
 
 @app.post("/inventory/update/{product_id}")
-async def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         db = inventory_manager()
         match_query = {"product_id": product_id}
@@ -2982,7 +3038,7 @@ async def update_inventory(product_id: str, request: InventoryUpdateRequest, use
 
 
 @app.post("/inventory/delete/{product_id}")
-async def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
+def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
     try:
         db = inventory_manager(product_id=product_id)
         if model_no is not None:
@@ -3002,7 +3058,7 @@ async def delete_product(product_id: str, model_no: Optional[str] = None, user: 
 
 
 @app.post("/inventory/repair/{product_id}")
-async def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,
@@ -3056,7 +3112,7 @@ async def repair_damaged_product(product_id: str, model_no: Optional[str] = None
 
 
 @app.get("/customer/")
-async def customers(user: dict = Depends(get_current_user)):
+def customers(user: dict = Depends(get_current_user)):
     try:
         db = customer_manager()
         if user["role"] in ("admin", "accounts"):
@@ -3076,7 +3132,7 @@ async def customers(user: dict = Depends(get_current_user)):
 
 
 @app.get("/customer/search")
-async def search_customer(term: str = "", user: dict = Depends(get_current_user)):
+def search_customer(term: str = "", user: dict = Depends(get_current_user)):
     try:
         db = customer_manager()
         dataset = db.search(collection_name=CUSTOMER_COLLECTION, term=term) if term else db.get_data(CUSTOMER_COLLECTION, query={})
@@ -3091,7 +3147,7 @@ async def search_customer(term: str = "", user: dict = Depends(get_current_user)
 
 
 @app.post("/customer/create")
-async def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
+def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
     try:
         new_customer = customer_manager(
             company_name=request.company_name,
@@ -3130,7 +3186,7 @@ async def create_customer(request: CustomerRequest, user: dict = Depends(require
 
 
 @app.post("/customer/update/{customer_id}")
-async def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = customer_manager()
         result = db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
@@ -3148,7 +3204,7 @@ async def update_customer(customer_id: str, request: CustomerUpdateRequest, user
 
 
 @app.post("/customer/delete/{customer_id}")
-async def delete_customer(customer_id: str, user: dict = Depends(require_role("admin"))):
+def delete_customer(customer_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = customer_manager()
         db.delete(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id})
@@ -3160,7 +3216,7 @@ async def delete_customer(customer_id: str, user: dict = Depends(require_role("a
 
 
 @app.get("/salesperson/search")
-async def search_salesperson(term: str = "", user: dict = Depends(get_current_user)):
+def search_salesperson(term: str = "", user: dict = Depends(get_current_user)):
     try:
         db = sales_person_manager()
         dataset = db.search(collection_name=SALESPERSON_COLLECTION, term=term) if term else db.get_data(SALESPERSON_COLLECTION, query={})
@@ -3171,7 +3227,7 @@ async def search_salesperson(term: str = "", user: dict = Depends(get_current_us
 
 
 @app.post("/salesperson/create")
-async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def create_salesperson(request: SalesPersonRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         new_sp = sales_person_manager(
             name=request.name,
@@ -3199,7 +3255,7 @@ async def create_salesperson(request: SalesPersonRequest, user: dict = Depends(r
 
 
 @app.get("/service/active")
-async def active_services(user: dict = Depends(get_current_user)):
+def active_services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
         dataset = db.get_service_data(collection_name=SERVICE_COLLECTION,
@@ -3211,7 +3267,7 @@ async def active_services(user: dict = Depends(get_current_user)):
 
 
 @app.get("/service/available_hologram_parts")
-async def available_hologram_parts(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def available_hologram_parts(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     """
     Powers the "Update Status" -> Completed -> spare part swap form on the
     Service page: instead of letting the technician type a free-text new
@@ -3241,11 +3297,12 @@ async def available_hologram_parts(user: dict = Depends(require_role("admin", "a
 
 
 @app.get("/allocation/")
-async def allocations(user: dict = Depends(get_current_user)):
+def allocations(user: dict = Depends(get_current_user)):
     try:
-        purge_stale_damage_images()
+        run_in_background("purge_damage_images", purge_stale_damage_images)
         db = allocation_manager()
-        dataset = db.get_data(collection_name=ALLOCATION_COLLECTION, query={})
+        # damage photos are base64 blobs — fetched on demand via /allocation/{id}/damage_image
+        dataset = db.get_data(collection_name=ALLOCATION_COLLECTION, query={}, projection={"damage_report.image": 0})
         return {"message": "allocation dataset", "dataset": dataset}
     except Exception as e:
         logging.error("fetching allocations failed")
@@ -3253,7 +3310,7 @@ async def allocations(user: dict = Depends(get_current_user)):
 
 
 @app.post("/allocation/send_to_dispatch/{allocation_id}")
-async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -3280,7 +3337,7 @@ async def send_allocation_to_dispatch(allocation_id: str, user: dict = Depends(r
 
 
 @app.post("/allocation/report_damage/{allocation_id}")
-async def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
+def report_damage(allocation_id: str, request: DamageReportRequest, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
     try:
         if not request.image:
             raise HTTPException(status_code=400, detail="a photo of the damaged product is required")
@@ -3334,12 +3391,26 @@ async def report_damage(allocation_id: str, request: DamageReportRequest, user: 
         raise HTTPException(status_code=500, detail="damage report could not be saved")
 
 
+@app.get("/allocation/{allocation_id}/damage_image")
+def allocation_damage_image(allocation_id: str, user: dict = Depends(get_current_user)):
+    try:
+        docs = allocation_manager().get_data(collection_name=ALLOCATION_COLLECTION,
+                                             query={"allocation_id": allocation_id},
+                                             projection={"damage_report.image": 1})
+        image = ((docs[0].get("damage_report") or {}).get("image")) if docs else None
+        return {"image": image}
+    except Exception:
+        logging.error("fetching damage image failed")
+        raise HTTPException(status_code=500, detail="damage image cannot be fetched")
+
+
 @app.get("/allocation/mine")
-async def my_allocations(user: dict = Depends(require_role("distributor"))):
+def my_allocations(user: dict = Depends(require_role("distributor"))):
     try:
         db = allocation_manager()
         dataset = db.get_data(collection_name=ALLOCATION_COLLECTION,
-                               query={"allocation_type": "demo_unit", "allocated_by": user["username"]})
+                               query={"allocation_type": "demo_unit", "allocated_by": user["username"]},
+                               projection={"damage_report.image": 0})
         return {"message": "my demo unit allocations", "dataset": dataset}
     except Exception as e:
         logging.error("fetching my allocations failed")
@@ -3467,7 +3538,7 @@ def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id:
 
 
 @app.post("/allocation/create_demo_unit")
-async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         allocation_id = _fulfill_demo_unit(
             customer_id=request.customer_id,
@@ -3524,6 +3595,11 @@ class RequestApproveModel(BaseModel):
     invoice_date: str = ""
 
 
+class ReturnRequestModel(BaseModel):
+    returned_through: str                 # courier / transport / person name etc.
+    proof: dict = {}                      # optional: {"name": str, "type": str, "data": "<data URL>"}
+
+
 class ConvertToOrderRequest(BaseModel):
     company_name: str
     company_address: str
@@ -3533,7 +3609,7 @@ class ConvertToOrderRequest(BaseModel):
 
 
 @app.post("/request/demo_unit")
-async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = Depends(require_role("distributor"))):
+def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = Depends(require_role("distributor"))):
     try:
         if not request.items:
             raise HTTPException(status_code=400, detail="add at least one product")
@@ -3556,7 +3632,7 @@ async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = De
 
 
 @app.post("/allocation/convert_to_order/{allocation_id}")
-async def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, user: dict = Depends(require_role("distributor"))):
+def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, user: dict = Depends(require_role("distributor"))):
     """Distributor asks to turn a dispatched demo unit into an order. Raises an approval request."""
     try:
         if not request.company_name.strip() or not request.company_address.strip():
@@ -3577,6 +3653,8 @@ async def convert_demo_to_order(allocation_id: str, request: ConvertToOrderReque
             raise HTTPException(status_code=400, detail="this demo unit was already returned")
         if (alloc.get("convert_request") or {}).get("status") == "pending":
             raise HTTPException(status_code=400, detail="an order request is already pending for this demo unit")
+        if (alloc.get("return_request") or {}).get("status") == "pending":
+            raise HTTPException(status_code=400, detail="a return request is pending for this demo unit")
 
         customer = {
             "company_name": request.company_name.strip(),
@@ -3606,6 +3684,57 @@ async def convert_demo_to_order(allocation_id: str, request: ConvertToOrderReque
     except Exception as e:
         logging.error(f"convert to order request failed! {e}")
         raise HTTPException(status_code=500, detail="order request could not be raised")
+
+
+@app.post("/allocation/return_request/{allocation_id}")
+def raise_demo_return_request(allocation_id: str, request: ReturnRequestModel, user: dict = Depends(require_role("distributor"))):
+    """Distributor reports a dispatched demo unit as returned; it is marked returned once approved."""
+    try:
+        through = request.returned_through.strip()
+        if not through:
+            raise HTTPException(status_code=400, detail="enter who/what the unit was returned through")
+
+        proof = {}
+        if request.proof and request.proof.get("data"):
+            data = str(request.proof.get("data"))
+            if len(data) > 2_500_000:          # ~1.8 MB file once base64-encoded
+                raise HTTPException(status_code=400, detail="proof file is too large (max 1.5 MB)")
+            if not data.startswith(("data:image/", "data:application/pdf")):
+                raise HTTPException(status_code=400, detail="proof must be an image or a PDF")
+            proof = {"name": str(request.proof.get("name", "proof"))[:120], "type": request.proof.get("type", ""), "data": data}
+
+        adb = allocation_manager()
+        matches = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="demo unit not found")
+        alloc = matches[0]
+        if alloc.get("allocation_type") != "demo_unit" or alloc.get("allocated_by") != user["username"]:
+            raise HTTPException(status_code=403, detail="this is not your demo unit")
+        if alloc.get("return_status") == "returned":
+            raise HTTPException(status_code=400, detail="this demo unit was already returned")
+        if not alloc.get("dispatch"):
+            raise HTTPException(status_code=400, detail="only dispatched demo units can be returned")
+        if (alloc.get("return_request") or {}).get("status") == "pending":
+            raise HTTPException(status_code=400, detail="a return request is already pending for this demo unit")
+        if (alloc.get("convert_request") or {}).get("status") == "pending":
+            raise HTTPException(status_code=400, detail="an order request is pending for this demo unit")
+
+        req = request_manager(
+            request_type="return_demo",
+            raised_by=user["username"],
+            details={"allocation_id": allocation_id, "returned_through": through,
+                     "items": alloc.get("items", []), "proof": proof}
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+        adb.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id},
+                        update_values={"return_request": {"request_id": req.request_id, "status": "pending",
+                                                          "returned_through": through, "has_proof": bool(proof)}})
+        return {"message": "return request sent for approval", "request_id": req.request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"return request failed! {e}")
+        raise HTTPException(status_code=500, detail="return request could not be raised")
 
 
 def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver: str, invoice_no: str, invoice_date: str):
@@ -3663,7 +3792,7 @@ def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver:
 
 
 @app.post("/request/order")
-async def raise_order_request(request: OrderRequestModel, user: dict = Depends(require_role("distributor"))):
+def raise_order_request(request: OrderRequestModel, user: dict = Depends(require_role("distributor"))):
     try:
         if not request.items:
             raise HTTPException(status_code=400, detail="add at least one product")
@@ -3694,7 +3823,7 @@ async def raise_order_request(request: OrderRequestModel, user: dict = Depends(r
 
 
 @app.post("/request/service")
-async def raise_service_request(request: ServiceRequestModel, user: dict = Depends(require_role("technician", "distributor"))):
+def raise_service_request(request: ServiceRequestModel, user: dict = Depends(require_role("technician", "distributor"))):
     try:
         req = request_manager(
             request_type="service",
@@ -3720,21 +3849,35 @@ async def raise_service_request(request: ServiceRequestModel, user: dict = Depen
 
 
 @app.get("/request/")
-async def all_requests(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def all_requests(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
-        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={})
+        # return-proof files are base64 blobs — fetched on demand via /request/{id}/proof
+        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={}, projection={"details.proof.data": 0})
         return {"message": "requests", "dataset": dataset}
     except Exception as e:
         logging.error("fetching requests failed")
         raise HTTPException(status_code=500, detail="requests cannot be fetched")
 
 
+@app.get("/request/{request_id}/proof")
+def request_proof(request_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    try:
+        docs = request_manager().get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id},
+                                          projection={"details.proof": 1})
+        proof = ((docs[0].get("details") or {}).get("proof")) if docs else None
+        return {"proof": proof or {}}
+    except Exception:
+        logging.error("fetching request proof failed")
+        raise HTTPException(status_code=500, detail="proof cannot be fetched")
+
+
 @app.get("/request/mine")
-async def my_requests(user: dict = Depends(get_current_user)):
+def my_requests(user: dict = Depends(get_current_user)):
     try:
         db = request_manager()
-        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={"raised_by": user["username"]})
+        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={"raised_by": user["username"]},
+                              projection={"details.proof.data": 0})
         return {"message": "my requests", "dataset": dataset}
     except Exception as e:
         logging.error("fetching my requests failed")
@@ -3742,7 +3885,7 @@ async def my_requests(user: dict = Depends(get_current_user)):
 
 
 @app.post("/request/approve/{request_id}")
-async def approve_request(request_id: str, body: RequestApproveModel = None, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def approve_request(request_id: str, body: RequestApproveModel = None, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -3769,6 +3912,20 @@ async def approve_request(request_id: str, body: RequestApproveModel = None, use
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and demo unit allotted", "allocation_ids": ids}
+
+        if req["request_type"] == "return_demo":
+            details = req["details"]
+            aid = details.get("allocation_id")
+            # same logic as a manual return: marks returned + puts the unit back into stock
+            return_allocation(aid, user)
+            allocation_manager().update_data(
+                collection_name=ALLOCATION_COLLECTION, query={"allocation_id": aid},
+                update_values={"return_request": {"request_id": request_id, "status": "approved",
+                                                  "returned_through": details.get("returned_through", ""),
+                                                  "has_proof": bool(details.get("proof"))}})
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "return approved and demo unit marked as returned"}
 
         if req["request_type"] == "convert_to_order":
             if not body or not body.invoice_no.strip() or not body.invoice_date.strip():
@@ -3885,7 +4042,7 @@ async def approve_request(request_id: str, body: RequestApproveModel = None, use
 
 
 @app.post("/request/reject/{request_id}")
-async def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -3901,12 +4058,13 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
                 svc_db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
                                     update_values={"video": ""})
 
-        if existing[0]["request_type"] == "convert_to_order":
+        if existing[0]["request_type"] in ("convert_to_order", "return_demo"):
             aid = existing[0]["details"].get("allocation_id")
+            field = "convert_request" if existing[0]["request_type"] == "convert_to_order" else "return_request"
             if aid:
                 allocation_manager().update_data(
                     collection_name=ALLOCATION_COLLECTION, query={"allocation_id": aid},
-                    update_values={"convert_request": {"request_id": request_id, "status": "rejected", "reason": request.reason}})
+                    update_values={field: {"request_id": request_id, "status": "rejected", "reason": request.reason}})
 
         db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                        status="rejected", resolved_by=user["username"], reason=request.reason)
@@ -3919,7 +4077,7 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
 
 
 @app.post("/allocation/create")
-async def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         if not request.items and not request.spare_part:
             raise HTTPException(status_code=400, detail="add at least one product or a spare part")
@@ -4032,7 +4190,7 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
 
 @app.post("/allocation/return/{allocation_id}")
-async def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
+def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
 
     try:
         db = allocation_manager()
