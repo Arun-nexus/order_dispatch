@@ -9,7 +9,8 @@ class allocation_manager(mongodbclient):
     RETURN_WINDOW_DAYS = 7
 
     def __init__(self, sales_person=None, items=None, spare_part=None, company_name=None, address=None,
-                 customer=None, allocated_by=None, gst_number=None, phone_number=None):
+                 customer=None, allocated_by=None, gst_number=None, phone_number=None,
+                 allocation_type=None, request_id=None, remarks=None):
         """
         sales_person: dict snapshot -> {sales_person_id, name, company_name, address, contact_number, email}
                        (used for allocation_type='product': admin/employee allotting stock to a sales person)
@@ -33,6 +34,9 @@ class allocation_manager(mongodbclient):
         self.spare_part = spare_part or {}
         self.customer = customer or {}
         self.allocated_by = allocated_by
+        self.allocation_type = allocation_type      # optional override, e.g. 'demo_unit'
+        self.request_id = request_id                # approved request this allocation came from
+        self.remarks = remarks or ""
         self.company_name = company_name
         self.address = address
         self.gst_number = gst_number or ""
@@ -48,6 +52,8 @@ class allocation_manager(mongodbclient):
 
             if self.spare_part:
                 allocation_type = "spare_part"
+            elif self.allocation_type:
+                allocation_type = self.allocation_type
             elif self.customer:
                 allocation_type = "demo_unit"
             else:
@@ -59,6 +65,8 @@ class allocation_manager(mongodbclient):
                 "sales_person": self.sales_person,
                 "customer": self.customer,
                 "allocated_by": self.allocated_by,
+                "request_id": self.request_id,
+                "remarks": self.remarks,
                 "items": self.items,
                 "spare_part": self.spare_part,
                 "company_name": self.company_name,

@@ -1,4 +1,8 @@
 const doState = { orders: [], products: [] };
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 let doPage = 1;
 const DO_PAGE_SIZE = 7;
 
@@ -50,7 +54,28 @@ async function loadOrders() {
     // /request/order — those come back with creator.type === "request" and
     // creator.raised_by set to whoever raised it. Filter to just this user's.
     const mine = (data.dataset || []).filter(o => o.creator?.raised_by === uname);
-    doState.orders = mine.slice().reverse();
+
+    // Demo-to-order conversions waiting for approval (or refused) show up here as rows
+    // until admin approves; after approval the real order replaces them.
+    let convertRows = [];
+    try {
+      const rr = await apiFetch('/request/mine');
+      if (rr.ok) {
+        convertRows = ((await rr.json()).dataset || [])
+          .filter(r => r.request_type === 'convert_to_order' && (r.status === 'pending' || r.status === 'rejected'))
+          .map(r => {
+            const items = r.details?.items || [];
+            const amount = items.reduce((s, i) => s + (i.price || 0) * (i.quantity || 0) * (1 + (i.tax_rate || 0) / 100), 0);
+            return {
+              _isRequest: true, order_id: r.request_id, customer: r.details?.customer || {}, items,
+              payment_mode: '-', total_mrp: Number(amount.toFixed(2)), order_date: r.created_at,
+              status: r.status === 'rejected' ? 'request_rejected' : 'under_approval', reason: r.reason
+            };
+          });
+      }
+    } catch (e) { console.error(e); }
+
+    doState.orders = [...convertRows, ...mine.slice().reverse()];
     doPage = 1;
     renderCards(doState.orders);
     renderTable(doState.orders);
@@ -75,6 +100,7 @@ async function loadInventoryForOrders() {
 
 function renderCards(orders) {
   const today = new Date().toDateString();
+  orders = orders.filter(o => !o._isRequest);
   const todaysOrders = orders.filter(o => o.order_date && new Date(o.order_date).toDateString() === today);
   const todaysAmount = todaysOrders.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
 
@@ -87,12 +113,13 @@ function renderCards(orders) {
 }
 
 function statusClass(status) {
-  const map = { placed: 'pending', processing: 'pending', delivered: 'delivered', cancelled: 'cancel' };
+  const map = { placed: 'pending', processing: 'pending', delivered: 'delivered', cancelled: 'cancel', under_approval: 'pending', request_rejected: 'cancel' };
   return map[status] || 'pending';
 }
 
-function statusLabel(status) {
-  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled' };
+function statusLabel(status, o) {
+  if (status === 'processing' && o?.dispatch) return 'Dispatched';
+  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled', under_approval: 'Under Approval', request_rejected: 'Rejected' };
   return map[status] || status || '';
 }
 
@@ -122,13 +149,13 @@ function renderTable(orders) {
     const tr = document.createElement('tr');
     tr.dataset.orderId = o.order_id;
     tr.innerHTML = `
-      <td>${o.order_id ? o.order_id.slice(0, 8) : '-'}</td>
+      <td>${o.order_id ? o.order_id.slice(0, 8) : '-'}${o._isRequest ? '<br><small style="color:#94a3b8;">Request</small>' : ''}</td>
       <td>${companyName}</td>
       <td>${productLabel}</td>
       <td>${o.payment_mode ?? ''}</td>
       <td>₹${o.total_mrp ?? 0}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="${statusClass(o.status)}">${statusLabel(o.status)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${o.remark}</small>` : ''}</td>
+      <td><span class="${statusClass(o.status)}">${statusLabel(o.status, o)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${o.remark}</small>` : ''}</td>
       <td><button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button></td>`;
     tbody.appendChild(tr);
   });
@@ -172,7 +199,9 @@ function wireFilter() {
     const wantedStatus = statusVal === 'delivered' ? 'delivered' : (statusVal === 'pending' ? null : null);
     const filtered = doState.orders.filter(o => {
       if (statusVal === 'delivered') return o.status === 'delivered';
-      if (statusVal === 'pending') return o.status !== 'delivered' && o.status !== 'cancelled';
+      if (statusVal === 'under_approval') return o.status === 'under_approval';
+      if (statusVal === 'dispatched') return o.status === 'processing' && !!o.dispatch;
+      if (statusVal === 'pending') return !o._isRequest && o.status !== 'delivered' && o.status !== 'cancelled';
       return true;
     });
     doPage = 1;
@@ -202,26 +231,34 @@ function openViewOrderModal(o) {
 
   const itemsRows = items.length
     ? items.map(it => `<tr>
-        <td>${it.product_name ?? ''}</td>
+        <td>${esc(it.product_name)}</td>
+        <td>${esc((it.serial_numbers || []).join(', ')) || '-'}</td>
         <td>${it.quantity ?? 0}</td>
         <td>₹${it.price ?? 0}</td>
         <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
       </tr>`).join('')
-    : `<tr><td colspan="4" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+    : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h3>Order Details</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div class="detail"><small>Order ID</small><p>${o.order_id ?? ''}</p></div>
-    <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
+    <div class="detail"><small>${o._isRequest ? 'Request ID' : 'Order ID'}</small><p>${o.order_id ?? ''}</p></div>
+    <div class="detail"><small>Company</small><p>${esc(customer.company_name ?? '-')}</p></div>
+    <div class="detail"><small>Address</small><p>${esc(customer.company_address ?? '-')}</p></div>
+    ${customer.gst_number ? `<div class="detail"><small>GST No.</small><p>${esc(customer.gst_number)}</p></div>` : ''}
     <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
-      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Qty</th><th>Price</th><th>Line Total</th></tr></thead>
+      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Serial No.</th><th>Qty</th><th>Price</th><th>Line Total</th></tr></thead>
       <tbody>${itemsRows}</tbody>
     </table>
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
-    <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
+    <div class="detail"><small>Status</small><p>${statusLabel(o.status, o)}</p></div>
+    ${o.status === 'request_rejected' ? `<div class="detail"><small>Rejection Reason</small><p>${esc(o.reason || '-')}</p></div>` : ''}
+    ${o.dispatch ? `<div class="detail"><small>Docket No.</small><p>${esc(o.dispatch.docket_no || '-')}</p></div>
+    <div class="detail"><small>Invoice No. / Date</small><p>${esc(o.dispatch.invoice_no || '-')} / ${esc(o.dispatch.invoice_date || '-')}</p></div>
+    <div class="detail"><small>Mode of Delivery</small><p>${esc(o.dispatch.mode_of_delivery || '-')}</p></div>` : ''}
+    ${o.converted_from_demo ? '<div class="detail"><small>Source</small><p>Converted from demo unit</p></div>' : ''}
     <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;

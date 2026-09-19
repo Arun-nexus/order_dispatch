@@ -1,4 +1,8 @@
-const spState = { allocations: [], products: [], myRequests: [] };
+const spState = { allocations: [], products: [], myRequests: [], rows: [], statusFilter: '' };
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 let spPage = 1;
 const SP_PAGE_SIZE = 7;
 
@@ -59,8 +63,7 @@ async function loadMyAllocations() {
     spState.allocations = merged.slice().reverse();
     spPage = 1;
     renderWelcome();
-    renderCards();
-    renderTable(spState.allocations);
+    refreshView();
   } catch (err) {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load your demo units.');
@@ -82,13 +85,6 @@ function renderWelcome() {
   if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function statusPillClass(a) {
-  const meta = returnMeta(a);
-  if (a.return_status === 'returned') return 'delivered';
-  if (meta.overdue) return 'cancelled';
-  return 'pending';
-}
-
 async function loadInventoryForDemo() {
   try {
     const res = await apiFetch('/inventory/');
@@ -108,16 +104,60 @@ function returnMeta(a) {
   return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false };
 }
 
-function renderCards() {
-  const allocations = spState.allocations;
-  document.getElementById('cardTotal').textContent = allocations.length;
-  document.getElementById('cardNotReturned').textContent = allocations.filter(a => a.return_status !== 'returned').length;
-  document.getElementById('cardOverdue').textContent = allocations.filter(a => returnMeta(a).overdue).length;
+// One table row per allocated unit, plus one row per request still waiting
+// for (or refused at) approval.
+function rebuildRows() {
+  const reqRows = spState.myRequests
+    .filter(r => r.request_type === 'demo_unit' && (r.status === 'pending' || r.status === 'rejected'))
+    .map(r => ({ kind: 'req', id: r.request_id, date: r.created_at, data: r }));
+  const allocRows = spState.allocations.map(a => ({ kind: 'alloc', id: a.allocation_id, date: a.allotment_date || a.created_at, data: a }));
+  spState.rows = [...reqRows, ...allocRows];
 }
 
-function renderTable(allocations) {
-  const sorted = [...allocations].sort((a, b) =>
-    new Date(b.allotment_date || b.created_at || 0) - new Date(a.allotment_date || a.created_at || 0));
+function refreshView() {
+  rebuildRows();
+  renderCards();
+  renderTable(filteredRows());
+}
+
+// Lifecycle: Under Approval -> Approved -> Processing (sent to dispatch) -> Dispatched
+function rowStatus(row) {
+  if (row.kind === 'req') {
+    return row.data.status === 'rejected'
+      ? { key: 'rejected', label: 'Rejected', cls: 'low' }
+      : { key: 'under_approval', label: 'Under Approval', cls: 'medium' };
+  }
+  const a = row.data;
+  if (a.return_status === 'returned') return { key: 'returned', label: 'Returned', cls: 'high' };
+  if (a.convert_request && a.convert_request.status === 'pending') return { key: 'convert_pending', label: 'Order Request Pending', cls: 'medium' };
+  if (a.dispatch) return returnMeta(a).overdue
+    ? { key: 'overdue', label: 'Dispatched · Overdue', cls: 'low' }
+    : { key: 'dispatched', label: 'Dispatched', cls: 'high' };
+  if (a.sent_to_dispatch) return { key: 'processing', label: 'Processing', cls: 'medium' };
+  return { key: 'approved', label: 'Approved', cls: 'medium' };
+}
+
+function renderCards() {
+  const allocations = spState.allocations;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('cardTotal', allocations.length);
+  set('cardNotReturned', allocations.filter(a => a.return_status !== 'returned').length);
+  set('cardOverdue', spState.rows.filter(r => rowStatus(r).key === 'overdue').length);
+  set('cardPendingRequests', spState.rows.filter(r => r.kind === 'req' && r.data.status === 'pending').length);
+  set('cardRejectedRequests', spState.rows.filter(r => r.kind === 'req' && r.data.status === 'rejected').length);
+}
+
+function filteredRows() {
+  const f = spState.statusFilter;
+  return f ? spState.rows.filter(r => rowStatus(r).key === f) : spState.rows;
+}
+
+function itemsLabel(items) {
+  return (items || []).map(i => `${esc(i.product_name)} x${i.quantity}${i.serial_numbers?.length ? ` <small style="color:#94a3b8;">(${esc(i.serial_numbers.join(', '))})</small>` : ''}`).join(', ');
+}
+
+function renderTable(rows) {
+  const sorted = [...rows].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / SP_PAGE_SIZE));
   spPage = Math.min(Math.max(1, spPage), totalPages);
@@ -126,100 +166,181 @@ function renderTable(allocations) {
 
   const tbody = document.querySelector('.table-container tbody');
   tbody.innerHTML = '';
+  if (!pageRows.length) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8;">No demo units yet.</td></tr>';
 
-  pageRows.forEach(a => {
-    const meta = returnMeta(a);
-    const productLabel = (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+  pageRows.forEach(row => {
+    const st = rowStatus(row);
+    const isReq = row.kind === 'req';
+    const d = row.data;
+    const creator = isReq ? d.raised_by : d.allocated_by;
+    const remarks = isReq ? d.details?.remarks : d.remarks;
     const tr = document.createElement('tr');
-    tr.dataset.id = a.allocation_id;
-    const category = a.allocation_type === 'demo_unit' ? 'Demo' : (a.allocation_type ? 'Order' : '-');
+    tr.dataset.key = `${row.kind}:${row.id}`;
     tr.innerHTML = `
-      <td>${creatorLabel(a.allocated_by)}</td>
-      <td>${category}</td>
-      <td>${a.customer?.company_name ?? ''}</td>
-      <td>${productLabel}</td>
-      <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td>${a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="stock ${meta.cls}">${meta.label}</span></td>
+      <td>${esc(creatorLabel(creator))}</td>
+      <td>Demo</td>
+      <td>${remarks ? esc(remarks) : '-'}</td>
+      <td>${itemsLabel(isReq ? d.details?.items : d.items)}</td>
+      <td>${row.date ? new Date(row.date).toLocaleDateString('en-GB') : '-'}</td>
+      <td>${!isReq && d.return_due_date ? new Date(d.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td><span class="stock ${st.cls}">${st.label}</span></td>
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
+        ${rowActionsExtra(row, st)}
       </td>`;
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', e => openViewModal(rowAllocation(e))));
+  tbody.querySelectorAll('.view-btn').forEach(b => b.addEventListener('click', e => openViewModal(rowFromEvent(e))));
+  wireRowActions(tbody);
 
   renderTablePagination(document.querySelector('.pagination'), spPage, totalPages, p => {
     spPage = p;
-    renderTable(allocations);
+    renderTable(rows);
   });
 }
 
-function rowAllocation(e) {
-  const tr = e.target.closest('tr');
-  return spState.allocations.find(a => a.allocation_id === tr.dataset.id);
+// hooks filled in by the convert-to-order step
+// Convert button is always visible on demo-unit rows; it is only clickable once the unit is dispatched.
+function rowActionsExtra(row, st) {
+  if (row.kind !== 'alloc' || st.key === 'returned') return '';
+  const enabled = st.key === 'dispatched' || st.key === 'overdue';
+  const title = enabled ? 'Convert to Order'
+    : (st.key === 'convert_pending' ? 'Order request already sent' : 'Available after dispatch');
+  const label = st.key === 'convert_pending' ? 'Request Sent' : 'Convert to Order';
+  return `<button class="convert-btn" ${enabled ? '' : 'disabled'} title="${title}"
+    style="margin-left:6px;padding:6px 10px;border:none;border-radius:8px;font-size:12px;white-space:nowrap;
+    background:${enabled ? '#1665ff' : '#e5e7eb'};color:${enabled ? '#fff' : '#94a3b8'};cursor:${enabled ? 'pointer' : 'not-allowed'};">
+    <i class="fa-solid fa-file-invoice-dollar"></i> ${label}</button>`;
+}
+function wireRowActions(tbody) {
+  tbody.querySelectorAll('.convert-btn:not([disabled])').forEach(b => b.addEventListener('click', e => openConvertModal(rowFromEvent(e))));
 }
 
-async function markReturned(a) {
-  if (!a) return;
-  if (!confirm('Mark this demo unit as returned by the customer?')) return;
-  try {
-    const res = await apiFetch(`/allocation/return/${a.allocation_id}`, { method: 'POST' });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'update failed');
-    await loadMyAllocations();
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-  }
+// ---------- Convert a dispatched demo unit into an order (needs admin approval) ----------
+function openConvertModal(row) {
+  if (!row || row.kind !== 'alloc') return;
+  const a = row.data;
+  const modal = document.getElementById('allotModal');
+  const body = wizBody();
+  wizTitle('Convert to Order');
+  body.innerHTML = `
+    <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">${itemsLabel(a.items)}</div>
+    <form id="convertForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="company_name" placeholder="Company Name" required>
+      <input name="company_address" placeholder="Company Address" required>
+      <input name="gst_number" placeholder="GST Number (optional)">
+      <input name="price" type="number" min="1" step="0.01" placeholder="Price per unit (₹)" required>
+      <input name="tax_rate" type="number" min="0" step="0.01" placeholder="Tax rate % (optional)">
+      <p style="font-size:12px;color:#94a3b8;">Sent to admin for approval. Once approved this unit moves to My Orders.</p>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        <button type="button" id="convertCancel" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
+      </div>
+    </form>`;
+  document.getElementById('convertCancel').addEventListener('click', () => modal.style.display = 'none');
+  document.getElementById('convertForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      company_name: fd.get('company_name'), company_address: fd.get('company_address'),
+      gst_number: fd.get('gst_number') || '', price: Number(fd.get('price')), tax_rate: Number(fd.get('tax_rate')) || 0
+    };
+    try {
+      const res = await apiFetch(`/allocation/convert_to_order/${a.allocation_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'request failed');
+      modal.style.display = 'none';
+      alert('Order request sent — admin will review and approve it.');
+      await loadMyAllocations();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+  modal.style.display = 'flex';
 }
 
-function openViewModal(a) {
-  if (!a) return;
+function rowFromEvent(e) {
+  const key = e.target.closest('tr').dataset.key;
+  return spState.rows.find(r => `${r.kind}:${r.id}` === key);
+}
+
+function detailRow(label, value) {
+  return `<div class="detail"><small>${label}</small><p>${value}</p></div>`;
+}
+
+// Same layout as the order details modal on the Orders page.
+function openViewModal(row) {
+  if (!row) return;
   const modal = document.getElementById('viewAllocationModal');
   const content = modal.querySelector('.modal-content');
-  const meta = returnMeta(a);
-  content.innerHTML = `
+  content.style.maxHeight = '86vh';
+  content.style.overflowY = 'auto';
+  const st = rowStatus(row);
+  const d = row.data;
+  const isReq = row.kind === 'req';
+  const items = (isReq ? d.details?.items : d.items) || [];
+  const cr = (!isReq && d.convert_request && d.convert_request.status === 'pending') ? d.convert_request : null;
+  const crRejected = (!isReq && d.convert_request && d.convert_request.status === 'rejected') ? d.convert_request : null;
+
+  const itemRows = items.length ? items.map(i => `<tr>
+      <td>${esc(i.product_name)}</td>
+      <td>${esc((i.serial_numbers || []).join(', ')) || '-'}</td>
+      <td>${i.quantity ?? 0}</td>
+      <td>${cr ? '₹' + (cr.price ?? 0) : '-'}</td>
+    </tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">No items</td></tr>';
+
+  let html = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>Demo Unit Details</h3>
+      <h3>${isReq ? 'Demo Unit Request' : 'Demo Unit Details'}</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div class="detail"><small>Allocation ID</small><p>${a.allocation_id ?? ''}</p></div>
-    <div class="detail"><small>Customer</small><p>${a.customer?.company_name ?? ''} — ${a.customer?.contractor_person ?? ''} (${a.customer?.contractor_number ?? ''})</p></div>
-    <div class="detail"><small>Products</small><p>${(a.items || []).map(i => `${i.product_name} x${i.quantity}${i.serial_numbers?.length ? ' (' + i.serial_numbers.join(', ') + ')' : ''}`).join('<br>')}</p></div>
-    <div class="detail"><small>Allotment Date</small><p>${a.allotment_date ? new Date(a.allotment_date).toLocaleString() : '-'}</p></div>
-    <div class="detail"><small>Return Due</small><p>${a.return_due_date ? new Date(a.return_due_date).toLocaleString() : '-'}</p></div>
-    <div class="detail"><small>Status</small><p>${meta.label}</p></div>`;
+    ${detailRow(isReq ? 'Request ID' : 'Allocation ID', esc(row.id))}
+    ${detailRow('Requested By', esc(creatorLabel(isReq ? d.raised_by : d.allocated_by)))}
+    ${cr ? detailRow('Company', esc(cr.customer?.company_name || '-')) + detailRow('Address', esc(cr.customer?.company_address || '-')) : ''}
+    <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
+      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Serial No.</th><th>Qty</th><th>Price</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    ${detailRow('Remarks', esc((isReq ? d.details?.remarks : d.remarks) || '-'))}
+    ${detailRow('Status', st.label)}`;
+
+  if (isReq) {
+    html += detailRow('Requested On', row.date ? new Date(row.date).toLocaleString() : '-');
+    if (d.status === 'rejected') html += detailRow('Rejection Reason', esc(d.reason || '-'));
+  } else {
+    if (crRejected) html += detailRow('Order Request Rejected', esc(crRejected.reason || '-'));
+    html += detailRow('Allotment Date', d.allotment_date ? new Date(d.allotment_date).toLocaleString() : '-');
+    html += detailRow('Return Due', d.return_due_date ? new Date(d.return_due_date).toLocaleString() : '-');
+    if (d.dispatch) {
+      const x = d.dispatch;
+      html += detailRow('Docket No.', esc(x.docket_no || '-'))
+        + detailRow('Invoice No. / Date', `${esc(x.invoice_no || '-')} / ${esc(x.invoice_date || '-')}`)
+        + detailRow('Mode of Delivery', esc(x.mode_of_delivery || '-'));
+    }
+  }
+
+  content.innerHTML = html;
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.style.display = 'flex';
 }
 
 function wireFilter() {
   document.querySelector('.filter-btn').addEventListener('click', () => {
-    const status = document.getElementById('statusFilter').value;
-    const filtered = allocations_filtered(status);
+    spState.statusFilter = document.getElementById('statusFilter').value;
     spPage = 1;
-    renderTable(filtered);
-  });
-}
-
-function allocations_filtered(status) {
-  if (!status || status === 'All Status') return spState.allocations;
-  return spState.allocations.filter(a => {
-    const meta = returnMeta(a);
-    if (status === 'pending') return a.return_status !== 'returned' && !meta.overdue;
-    if (status === 'overdue') return meta.overdue && a.return_status !== 'returned';
-    if (status === 'returned') return a.return_status === 'returned';
-    return true;
+    renderTable(filteredRows());
   });
 }
 
 // ---------- Allot Demo Unit wizard ----------
-const spWiz = { customerId: '', customer: null, cart: {} };
+const spWiz = { cart: {}, remarks: '' };
 
 function resetSpWiz() {
-  spWiz.customerId = '';
-  spWiz.customer = null;
   spWiz.cart = {};
+  spWiz.remarks = '';
 }
 
 function injectAllotModal() {
@@ -228,7 +349,7 @@ function injectAllotModal() {
   if (btn) btn.addEventListener('click', () => {
     resetSpWiz();
     modal.style.display = 'flex';
-    renderCustomerTypeStep();
+    renderProductsStep();
   });
   modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
 }
@@ -246,104 +367,6 @@ function wizBody() {
   return document.getElementById('wizStepBody');
 }
 function wizTitle(t) { document.getElementById('wizTitle').textContent = t; }
-
-function renderCustomerTypeStep() {
-  const body = wizBody();
-  wizTitle('Customer');
-  body.innerHTML = `
-    <p style="color:#64748b;margin-bottom:14px;">Existing customer or a new one?</p>
-    <div style="display:flex;gap:10px;">
-      <button id="btnExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-address-book"></i><br>Existing
-      </button>
-      <button id="btnNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-user-plus"></i><br>New
-      </button>
-    </div>`;
-  document.getElementById('btnExisting').addEventListener('click', renderExistingCustomerStep);
-  document.getElementById('btnNew').addEventListener('click', renderNewCustomerStep);
-}
-
-function renderExistingCustomerStep() {
-  const body = wizBody();
-  wizTitle('Select Customer');
-  body.innerHTML = `
-    <input id="custSearch" placeholder="Search company, GST or contact person" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
-    <div id="custResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
-    <div style="margin-top:14px;">
-      <button type="button" id="backBtn1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-    </div>`;
-  document.getElementById('backBtn1').addEventListener('click', renderCustomerTypeStep);
-
-  const searchInput = document.getElementById('custSearch');
-  const resultsBox = document.getElementById('custResults');
-  const runSearch = async () => {
-    resultsBox.innerHTML = '<small style="color:#94a3b8;">Searching...</small>';
-    try {
-      const term = searchInput.value.trim();
-      const res = await apiFetch(`/customer/search?term=${encodeURIComponent(term)}`);
-      const data = await res.json();
-      const list = data.dataset || [];
-      if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No customers found.</small>'; return; }
-      resultsBox.innerHTML = list.map(c => `
-        <div class="cust-row" data-id="${c.customer_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
-          <strong>${c.company_name ?? ''}</strong><br>
-          <small style="color:#64748b;">${c.gst_number ?? ''} • ${c.contractor_person ?? ''} • ${c.contractor_number ?? ''}</small>
-        </div>`).join('');
-      resultsBox.querySelectorAll('.cust-row').forEach(row => row.addEventListener('click', () => {
-        const c = list.find(x => x.customer_id === row.dataset.id);
-        spWiz.customerId = c.customer_id;
-        spWiz.customer = c;
-        renderProductsStep();
-      }));
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') resultsBox.innerHTML = '<small style="color:#d62828;">Search failed.</small>';
-    }
-  };
-  let debounce;
-  searchInput.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(runSearch, 300); });
-  runSearch();
-}
-
-function renderNewCustomerStep() {
-  const body = wizBody();
-  wizTitle('New Customer');
-  body.innerHTML = `
-    <form id="newCustForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="company_name" placeholder="Company Name" required>
-      <input name="company_address" placeholder="Company Address" required>
-      <input name="gst_number" placeholder="GST Number" required>
-      <input name="contractor_person" placeholder="Contact Person" required>
-      <input name="contractor_number" placeholder="Contact Number" required>
-      <input name="contractor_email" type="email" placeholder="Contact Email">
-      <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="backBtn2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
-      </div>
-    </form>`;
-  document.getElementById('backBtn2').addEventListener('click', renderCustomerTypeStep);
-  document.getElementById('newCustForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const payload = {
-      company_name: fd.get('company_name'), company_address: fd.get('company_address'),
-      gst_number: fd.get('gst_number'), contractor_person: fd.get('contractor_person'),
-      contractor_number: fd.get('contractor_number'), contractor_email: fd.get('contractor_email') || ''
-    };
-    try {
-      const res = await apiFetch('/customer/create', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'customer creation failed');
-      spWiz.customerId = data.customer_id;
-      spWiz.customer = data.customer || payload;
-      renderProductsStep();
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-    }
-  });
-}
 
 // Multiple inventory entries can share the same product_id (e.g. separate
 // batches/lots). Showing them as separate rows would let the person type into
@@ -367,7 +390,7 @@ function dedupeProducts(rawProducts) {
 
 function renderProductsStep() {
   const body = wizBody();
-  wizTitle(`Demo Units for ${spWiz.customer?.company_name ?? ''}`);
+  wizTitle('Request Demo Unit');
   const products = dedupeProducts(spState.products || []);
   body.innerHTML = `
     <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
@@ -378,12 +401,14 @@ function renderProductsStep() {
         <tbody id="prodRows"></tbody>
       </table>
     </div>
+    <textarea id="demoRemarks" rows="2" placeholder="Remarks (optional)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-top:10px;resize:vertical;">${esc(spWiz.remarks)}</textarea>
     <p style="font-size:12px;color:#94a3b8;margin-top:8px;">Return window: 7 days from allotment date.</p>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
-      <button type="button" id="backCart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="backCart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
       <button type="button" id="allotBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
     </div>`;
-  document.getElementById('backCart').addEventListener('click', () => spWiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
+  document.getElementById('backCart').addEventListener('click', () => { document.getElementById('allotModal').style.display = 'none'; });
+  document.getElementById('demoRemarks').addEventListener('input', e => { spWiz.remarks = e.target.value; });
 
   // ---------- Category tabs: Products / Accessories / Spare Parts ----------
   // Filters the same product table by product_type — same pattern used on
@@ -471,9 +496,8 @@ function renderProductsStep() {
   document.getElementById('allotBtn').addEventListener('click', async () => {
     if (!Object.keys(spWiz.cart).length) { alert('Add quantity for at least one product.'); return; }
     const payload = {
-      customer_id: spWiz.customerId || '',
-      customer: spWiz.customer || {},
-      items: Object.values(spWiz.cart)
+      items: Object.values(spWiz.cart),
+      remarks: spWiz.remarks.trim()
     };
     try {
       const res = await apiFetch('/request/demo_unit', {
@@ -497,45 +521,8 @@ async function loadMyRequests() {
     if (!res.ok) throw new Error('failed to fetch requests');
     const data = await res.json();
     spState.myRequests = (data.dataset || []).filter(r => r.request_type === 'demo_unit' || r.request_type === 'order');
-    renderMyRequests(spState.myRequests);
-    renderPendingRequestsCard();
+    refreshView();
   } catch (err) {
     console.error(err);
   }
-}
-
-function renderPendingRequestsCard() {
-  const card = document.getElementById('cardPendingRequests');
-  if (card) card.textContent = spState.myRequests.filter(r => r.status === 'pending' && r.request_type === 'demo_unit').length;
-
-  const rejectedCard = document.getElementById('cardRejectedRequests');
-  if (rejectedCard) rejectedCard.textContent = spState.myRequests.filter(r => r.status === 'rejected' && r.request_type === 'demo_unit').length;
-}
-
-function requestStatusClass(status) {
-  if (status === 'approved') return 'delivered';
-  if (status === 'rejected') return 'cancelled';
-  return 'pending';
-}
-
-function renderMyRequests(requests) {
-  const box = document.getElementById('myRequestsList');
-  if (!box) return;
-  const sorted = [...requests].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-  box.innerHTML = sorted.length ? sorted.map(r => {
-    const isOrder = r.request_type === 'order';
-    const productLabel = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
-    const customerLabel = r.details?.customer?.company_name || 'New customer';
-    return `
-      <div class="order-item">
-        <div class="order-left">
-          <div class="order-icon"><i class="fa-solid ${isOrder ? 'fa-cart-shopping' : 'fa-paper-plane'}"></i></div>
-          <div>
-            <h4>${customerLabel} · ${isOrder ? 'Order' : 'Demo Unit'}</h4>
-            <p>${productLabel}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
-          </div>
-        </div>
-        <span class="status ${requestStatusClass(r.status)}">${r.status}</span>
-      </div>`;
-  }).join('') : '<p style="color:#94a3b8;padding:10px;">No requests raised yet.</p>';
 }

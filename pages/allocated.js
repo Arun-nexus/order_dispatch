@@ -1,3 +1,6 @@
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 const allocState = { allocations: [], products: [], requests: [], searchQuery: '', activeFilters: null };
 let allocPage = 1;
 const ALLOC_PAGE_SIZE = 7;
@@ -138,13 +141,17 @@ function renderPendingRequests() {
   }
 
   box.innerHTML = pending.map(r => {
-    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen' };
+    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen', convert_to_order: 'fa-file-invoice-dollar' };
     const icon = iconMap[r.request_type] || 'fa-bell';
 
     let title, subtitle;
     if (r.request_type === 'demo_unit') {
-      title = `Demo Unit — ${r.details?.customer?.company_name || 'New customer'}`;
-      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+      title = `Demo Unit — ${esc(r.raised_by)}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
+        + (r.details?.remarks ? ` • Remarks: ${esc(r.details.remarks)}` : '');
+    } else if (r.request_type === 'convert_to_order') {
+      title = `Convert Demo to Order — ${esc(r.details?.customer?.company_name || '')}`;
+      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity} @ ₹${i.price}`).join(', ');
     } else if (r.request_type === 'order') {
       title = `Order — ${r.details?.customer?.company_name || 'New customer'}`;
       subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
@@ -205,8 +212,26 @@ function openRequestDetailsModal(r) {
 
   let heading, body;
 
-  if (r.request_type === 'demo_unit' || r.request_type === 'order') {
-    heading = r.request_type === 'demo_unit' ? 'Demo Unit Request' : 'Order Request';
+  if (r.request_type === 'demo_unit') {
+    heading = 'Demo Unit Request';
+    const itemsRows = (d.items || []).map(i => `
+      <div class="detail"><small>Product</small><p>${esc(i.product_name)} — Qty: ${i.quantity ?? ''}</p></div>`).join('');
+    body = `
+      ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
+      <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>
+      <div class="detail"><small>Remarks</small><p>${esc(d.remarks || '-')}</p></div>`;
+  } else if (r.request_type === 'convert_to_order') {
+    heading = 'Convert Demo to Order';
+    const itemsRows = (d.items || []).map(i => `
+      <div class="detail"><small>Product</small><p>${esc(i.product_name)} — Qty: ${i.quantity ?? ''}, Price: ₹${i.price ?? '-'}${i.serial_numbers?.length ? ', SN: ' + esc(i.serial_numbers.join(', ')) : ''}</p></div>`).join('');
+    body = `
+      ${itemsRows}
+      <div class="detail"><small>Company</small><p>${esc(d.customer?.company_name || '-')}</p></div>
+      <div class="detail"><small>Address</small><p>${esc(d.customer?.company_address || '-')}</p></div>
+      <div class="detail"><small>GST No.</small><p>${esc(d.customer?.gst_number || '-')}</p></div>
+      <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>`;
+  } else if (r.request_type === 'order') {
+    heading = 'Order Request';
     const itemsRows = (d.items || []).map(i => `
       <div class="detail"><small>Product</small><p>${i.product_name ?? ''} — Qty: ${i.quantity ?? ''}, Price: ₹${i.price ?? '-'}</p></div>`).join('');
     body = `
@@ -247,10 +272,45 @@ function rowRequestId(e) {
   return e.target.closest('.order-item').dataset.id;
 }
 
-async function approveRequest(requestId) {
-  if (!confirm('Approve this request?')) return;
+function openInvoiceModal(r) {
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+  const d = r.details || {};
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Invoice Details</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div class="detail"><small>Company</small><p>${esc(d.customer?.company_name || '-')}</p></div>
+    <div class="detail"><small>Products</small><p>${(d.items || []).map(i => `${esc(i.product_name)} x${i.quantity} @ ₹${i.price}`).join('<br>')}</p></div>
+    <form id="invoiceForm" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+      <input name="invoice_no" placeholder="Invoice Number" required>
+      <input name="invoice_date" type="date" required>
+      <div style="display:flex;justify-content:space-between;margin-top:6px;">
+        <button type="button" id="invoiceCancel" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Approve &amp; Create Order</button>
+      </div>
+    </form>`;
+  const close = () => modal.style.display = 'none';
+  content.querySelector('.close').addEventListener('click', close);
+  document.getElementById('invoiceCancel').addEventListener('click', close);
+  document.getElementById('invoiceForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    await approveRequest(r.request_id, { invoice_no: fd.get('invoice_no'), invoice_date: fd.get('invoice_date') });
+    close();
+  });
+  modal.style.display = 'flex';
+}
+
+async function approveRequest(requestId, extra) {
+  const req = allocState.requests.find(x => x.request_id === requestId);
+  if (req && req.request_type === 'convert_to_order' && !extra) return openInvoiceModal(req);
+  if (!extra && !confirm('Approve this request?')) return;
   try {
-    const res = await apiFetch(`/request/approve/${requestId}`, { method: 'POST' });
+    const opts = { method: 'POST' };
+    if (extra) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(extra); }
+    const res = await apiFetch(`/request/approve/${requestId}`, opts);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'approval failed');
     await loadPendingRequests();
@@ -367,7 +427,7 @@ function renderAllocationsTable(allocations) {
     const tr = document.createElement('tr');
     tr.dataset.id = a.allocation_id;
     tr.innerHTML = `
-      <td>${isSpare ? 'Spare Part' : 'Product'}</td>
+      <td>${isSpare ? 'Spare Part' : (a.allocation_type === 'demo_unit' ? 'Demo' : 'Product')}</td>
       <td>${productLabel}</td>
       <td>${serialLabel}</td>
       <td>${whoLabel}</td>
@@ -461,7 +521,8 @@ function openViewAllocationModal(a) {
          return `${i.product_name}${idModel ? ' (' + idModel + ')' : ''} x${i.quantity}${i.serial_numbers?.length ? ' — SN: ' + i.serial_numbers.join(', ') : ''}`;
        }).join('<br>')}</p></div>
        <div class="detail"><small>Sales Person</small><p>${a.sales_person?.name ?? ''} — ${a.sales_person?.contact_number ?? ''}</p></div>
-       <div class="detail"><small>Company / Address</small><p>${a.company_name ?? ''}, ${a.address ?? ''}</p></div>`;
+       <div class="detail"><small>Company / Address</small><p>${a.company_name ?? ''}, ${a.address ?? ''}</p></div>
+       ${a.remarks ? `<div class="detail"><small>Remarks</small><p>${esc(a.remarks)}</p></div>` : ''}`;
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -765,115 +826,59 @@ function renderAllocTypeStep() {
     <p style="color:#64748b;margin-bottom:14px;">What are you allocating?</p>
     <div style="display:flex;gap:10px;">
       <button id="btnAllocProduct" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-box"></i><br>Product to Sales Person
+        <i class="fa-solid fa-box"></i><br>Product to User
       </button>
       <button id="btnAllocSpare" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
         <i class="fa-solid fa-screwdriver-wrench"></i><br>Spare Part to Service
       </button>
     </div>`;
-  document.getElementById('btnAllocProduct').addEventListener('click', () => { allocWiz.type = 'product'; renderSalesPersonTypeStep(); });
+  document.getElementById('btnAllocProduct').addEventListener('click', () => { allocWiz.type = 'product'; renderSystemUserStep(); });
   document.getElementById('btnAllocSpare').addEventListener('click', () => { allocWiz.type = 'spare'; renderActiveServicesStep(); });
 }
 
 // ----- Product allocation flow -----
-function renderSalesPersonTypeStep() {
+// Allocation can only go to a registered system user (no free-typed sales persons).
+async function renderSystemUserStep() {
   const body = allocModalBody();
-  allocWizTitle('Sales Person');
+  allocWizTitle('Select User');
   body.innerHTML = `
-    <p style="color:#64748b;margin-bottom:14px;">Existing sales person or a new one?</p>
-    <div style="display:flex;gap:10px;">
-      <button id="btnSpExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-address-book"></i><br>Existing
-      </button>
-      <button id="btnSpNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-user-plus"></i><br>New
-      </button>
-    </div>
-    <div style="margin-top:14px;">
-      <button type="button" id="backAllocType" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-    </div>`;
-  document.getElementById('backAllocType').addEventListener('click', renderAllocTypeStep);
-  document.getElementById('btnSpExisting').addEventListener('click', renderExistingSalesPersonStep);
-  document.getElementById('btnSpNew').addEventListener('click', renderNewSalesPersonStep);
-}
-
-function renderExistingSalesPersonStep() {
-  const body = allocModalBody();
-  allocWizTitle('Select Sales Person');
-  body.innerHTML = `
-    <input id="spSearch" placeholder="Search name, company or contact" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <input id="spSearch" placeholder="Search user" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div id="spResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
     <div style="margin-top:14px;">
       <button type="button" id="backSp1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
     </div>`;
-  document.getElementById('backSp1').addEventListener('click', renderSalesPersonTypeStep);
+  document.getElementById('backSp1').addEventListener('click', renderAllocTypeStep);
 
   const searchInput = document.getElementById('spSearch');
   const resultsBox = document.getElementById('spResults');
-  const runSearch = async () => {
-    resultsBox.innerHTML = '<small style="color:#94a3b8;">Searching...</small>';
-    try {
-      const term = searchInput.value.trim();
-      const res = await apiFetch(`/salesperson/search?term=${encodeURIComponent(term)}`);
-      const data = await res.json();
-      const list = data.dataset || [];
-      if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No sales persons found.</small>'; return; }
-      resultsBox.innerHTML = list.map(sp => `
-        <div class="sp-row" data-id="${sp.sales_person_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
-          <strong>${sp.name ?? ''}</strong><br>
-          <small style="color:#64748b;">${sp.company_name ?? ''} • ${sp.contact_number ?? ''}</small>
-        </div>`).join('');
-      resultsBox.querySelectorAll('.sp-row').forEach(row => row.addEventListener('click', () => {
-        const sp = list.find(x => x.sales_person_id === row.dataset.id);
-        allocWiz.salesPersonId = sp.sales_person_id;
-        allocWiz.salesPerson = sp;
-        renderProductCartStep();
-      }));
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') resultsBox.innerHTML = '<small style="color:#d62828;">Search failed.</small>';
-    }
-  };
-  let debounce;
-  searchInput.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(runSearch, 300); });
-  runSearch();
-}
-
-function renderNewSalesPersonStep() {
-  const body = allocModalBody();
-  allocWizTitle('New Sales Person');
-  body.innerHTML = `
-    <form id="newSpForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="name" placeholder="Sales Person Name" required>
-      <input name="company_name" placeholder="Company Name" required>
-      <input name="address" placeholder="Address" required>
-      <input name="contact_number" placeholder="Contact Number" required>
-      <input name="email" type="email" placeholder="Email">
-      <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="backSp2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
-      </div>
-    </form>`;
-  document.getElementById('backSp2').addEventListener('click', renderSalesPersonTypeStep);
-  document.getElementById('newSpForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const payload = {
-      name: fd.get('name'), company_name: fd.get('company_name'), address: fd.get('address'),
-      contact_number: fd.get('contact_number'), email: fd.get('email') || ''
-    };
-    try {
-      const res = await apiFetch('/salesperson/create', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'creation failed');
-      allocWiz.salesPersonId = data.sales_person_id;
-      allocWiz.salesPerson = data.sales_person || payload;
+  resultsBox.innerHTML = '<small style="color:#94a3b8;">Loading...</small>';
+  let users = [];
+  try {
+    const res = await apiFetch('/account/users');
+    const data = await res.json();
+    users = data.dataset || [];
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') resultsBox.innerHTML = '<small style="color:#d62828;">Could not load users.</small>';
+    return;
+  }
+  const draw = () => {
+    const term = searchInput.value.trim().toLowerCase();
+    const list = users.filter(u => `${u.name || ''} ${u.username || ''} ${u.role || ''}`.toLowerCase().includes(term));
+    if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No users found.</small>'; return; }
+    resultsBox.innerHTML = list.map(u => `
+      <div class="sp-row" data-username="${u.username}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
+        <strong>${u.name || u.username}</strong><br>
+        <small style="color:#64748b;">${u.username} • ${u.role ?? ''}</small>
+      </div>`).join('');
+    resultsBox.querySelectorAll('.sp-row').forEach(row => row.addEventListener('click', () => {
+      const u = users.find(x => x.username === row.dataset.username);
+      allocWiz.salesPersonId = u.username;
+      allocWiz.salesPerson = u;
       renderProductCartStep();
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
-    }
-  });
+    }));
+  };
+  searchInput.addEventListener('input', draw);
+  draw();
 }
 
 function renderProductCartStep() {
@@ -914,7 +919,7 @@ function renderProductCartStep() {
       <button type="button" id="backCart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
       <button type="button" id="toDetailsBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
     </div>`;
-  document.getElementById('backCart').addEventListener('click', () => allocWiz.salesPersonId ? renderExistingSalesPersonStep() : renderNewSalesPersonStep());
+  document.getElementById('backCart').addEventListener('click', renderSystemUserStep);
 
   const rowsBox = document.getElementById('allocProdRows');
   const renderRows = (list) => {
@@ -1110,8 +1115,7 @@ function renderAllotmentDetailsStep() {
     e.preventDefault();
     const c = allocWiz.companyDetails || {};
     const payload = {
-      sales_person_id: allocWiz.salesPersonId || '',
-      sales_person: allocWiz.salesPerson || {},
+      allocated_to: allocWiz.salesPersonId || '',
       items: Object.values(allocWiz.cart).map(i => {
         const rowKey = `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
         const chosen = (allocWiz.serialChoices[rowKey] || []).filter(Boolean);

@@ -124,10 +124,15 @@
         <div class="filter-box">
           <i class="fa-solid fa-filter"></i>
           <select id="statusFilter">
-            <option>All Status</option>
-            <option value="pending">With Customer</option>
+            <option value="">All Status</option>
+            <option value="under_approval">Under Approval</option>
+            <option value="approved">Approved</option>
+            <option value="processing">Processing</option>
+            <option value="dispatched">Dispatched</option>
+            <option value="convert_pending">Order Request Pending</option>
             <option value="overdue">Overdue</option>
             <option value="returned">Returned</option>
+            <option value="rejected">Rejected</option>
           </select>
         </div>
         <button class="filter-btn"><i class="fa-solid fa-filter"></i> Apply Filter</button>
@@ -139,7 +144,7 @@
             <tr>
               <th>Creator</th>
               <th>Category</th>
-              <th>Customer</th>
+              <th>Remarks</th>
               <th>Product(s)</th>
               <th>Allotment Date</th>
               <th>Return Due</th>

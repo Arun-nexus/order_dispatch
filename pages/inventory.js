@@ -750,7 +750,7 @@ function wireTopActions() {
   document.querySelector('.add-product').addEventListener('click', () => {
     resetAddWizard();
     document.getElementById('addModal').style.display = 'flex';
-    renderAddChoiceStep();
+    renderAddTypeStep();
   });
   document.querySelector('.export').addEventListener('click', (e) => openExportTypeMenu(e.currentTarget));
 }
@@ -1372,155 +1372,124 @@ function addModalBody() {
 
 function addWizTitle(t) { document.getElementById('addWizTitle').textContent = t; }
 
-// Step 1: existing product vs new product
-function renderAddChoiceStep() {
+// Step 1: pick the category first — the next form asks for exactly the details
+// that category's table and view-details modal show.
+const ADD_TYPES = [
+  { type: 'product', label: 'Product', icon: 'fa-box', hint: 'Finished units with serial numbers' },
+  { type: 'spare_parts', label: 'Spare Parts', icon: 'fa-gears', hint: 'Assembly parts, tracked by quantity' },
+  { type: 'service_parts', label: 'Service Parts', icon: 'fa-screwdriver-wrench', hint: 'Purchase / warranty parts' },
+  { type: 'damaged', label: 'Faulty', icon: 'fa-triangle-exclamation', hint: 'Damaged units with reason' },
+  { type: 'accessories', label: 'Accessories', icon: 'fa-plug', hint: 'Serial numbers optional' }
+];
+
+function renderAddTypeStep() {
   const body = addModalBody();
-  addWizTitle('Add Product');
+  addWizTitle('Add to Inventory');
   body.innerHTML = `
-    <p style="color:#64748b;margin-bottom:14px;">Are you restocking an existing product or adding a new one?</p>
-    <div style="display:flex;gap:10px;">
-      <button id="btnAddExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-boxes-stacked"></i><br>Add Existing Product
-      </button>
-      <button id="btnAddNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-        <i class="fa-solid fa-plus"></i><br>New Product
-      </button>
+    <p style="color:#64748b;margin-bottom:14px;">What are you adding?</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      ${ADD_TYPES.map(t => `
+        <button type="button" class="add-type-btn" data-type="${t.type}" style="padding:16px 10px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+          <i class="fa-solid ${t.icon}"></i><br><strong>${t.label}</strong><br><small style="color:#94a3b8;">${t.hint}</small>
+        </button>`).join('')}
     </div>`;
-  document.getElementById('btnAddExisting').addEventListener('click', renderExistingProductStep);
-  document.getElementById('btnAddNew').addEventListener('click', renderNewProductStep);
+  body.querySelectorAll('.add-type-btn').forEach(btn => btn.addEventListener('click', () => {
+    addWiz.productType = btn.dataset.type;
+    if (addWiz.productType === 'spare_parts' || addWiz.productType === 'service_parts') renderPartDetailsStep();
+    else renderLotDetailsStep();
+  }));
 }
 
-// Step 2a: pick an existing product (deduped by product_id)
-function renderExistingProductStep() {
+// Spare parts / service parts: same fields as their table + view-details
+// (product it belongs to, part name, received date, warranty, quantity, hologram numbers).
+function renderPartDetailsStep() {
   const body = addModalBody();
-  addWizTitle('Select Product');
-
-  const seen = new Set();
-  const distinctProducts = [];
-  invState.products.forEach(p => {
-    if (!seen.has(p.product_id)) { seen.add(p.product_id); distinctProducts.push(p); }
-  });
-
+  const isService = addWiz.productType === 'service_parts';
+  addWizTitle(`Add ${productTypeLabel(addWiz.productType)}`);
+  const lbl = t => `<label style="font-size:12px;color:#64748b;margin-bottom:-6px;">${t}</label>`;
   body.innerHTML = `
-    <input id="productFilter" placeholder="Search product name or ID..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
-    <div id="productList" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
-    <div style="margin-top:14px;">
-      <button type="button" id="backAdd1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-    </div>`;
-  document.getElementById('backAdd1').addEventListener('click', renderAddChoiceStep);
-
-  const listBox = document.getElementById('productList');
-  const renderList = (list) => {
-    if (!list.length) { listBox.innerHTML = '<small style="color:#94a3b8;">No products found.</small>'; return; }
-    listBox.innerHTML = list.map(p => `
-      <div class="prod-row" data-id="${p.product_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
-        <strong>${p.product_name ?? ''}</strong><br>
-        <small style="color:#64748b;">${p.product_id} ${p.model_no ? '• Model ' + p.model_no : ''}</small>
-      </div>`).join('');
-    listBox.querySelectorAll('.prod-row').forEach(row => row.addEventListener('click', () => {
-      const p = list.find(x => x.product_id === row.dataset.id);
-      addWiz.productId = p.product_id;
-      addWiz.productName = p.product_name;
-      addWiz.modelNo = p.model_no || '';
-      addWiz.productType = p.product_type || 'product';
-      renderLotDetailsStep();
-    }));
-  };
-  renderList(distinctProducts);
-
-  document.getElementById('productFilter').addEventListener('input', e => {
-    const term = e.target.value.trim().toLowerCase();
-    renderList(distinctProducts.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term)));
-  });
-}
-
-// Step 2b: new product basic info
-function renderNewProductStep() {
-  const body = addModalBody();
-  addWizTitle('New Product');
-  body.innerHTML = `
-    <form id="newProductForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="product_name" placeholder="Product Name" required>
-      <input name="product_id" placeholder="Product ID" required>
-      <input name="model_no" placeholder="Model No." required>
+    <form id="partForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="parent_product_name" placeholder="Product Name (this part belongs to)" required>
+      <input name="part_name" placeholder="Part Name" required>
+      ${isService ? `<select name="part_category" required>
+        <option value="">Select type (Purchase / Warranty)</option>
+        <option value="purchase">Purchase</option>
+        <option value="warranty">Warranty</option>
+      </select>` : ''}
+      ${lbl('Shipment Received Date')}
+      <input name="purchase_date" type="date" required>
+      ${lbl(isService ? 'Warranty Until (required for Warranty type)' : 'Warranty Until (optional)')}
+      <input name="warranty_until" type="date">
+      <input name="quantity" type="number" min="1" placeholder="Quantity" required>
+      <textarea name="hologram_numbers" rows="2" placeholder="Hologram numbers (optional, one per unit — comma or new line separated)"></textarea>
+      <input name="lot_no" placeholder="Lot No. (optional)">
+      <input name="supplier_name" placeholder="Supplier Name (optional)">
+      <input name="supplier_address" placeholder="Supplier Address (optional)">
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="backAdd2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+        <button type="button" id="backPart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>`;
-  document.getElementById('backAdd2').addEventListener('click', renderAddChoiceStep);
-  const nameInput = document.querySelector('#newProductForm [name="product_name"]');
-  const idInput = document.querySelector('#newProductForm [name="product_id"]');
-  const modelInput = document.querySelector('#newProductForm [name="model_no"]');
-  const warnBox = document.createElement('p');
-  warnBox.style.cssText = 'font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 8px;display:none;';
-  modelInput.insertAdjacentElement('afterend', warnBox);
+  document.getElementById('backPart').addEventListener('click', renderAddTypeStep);
 
-  // The same product_id can legitimately list different variants (e.g. the
-  // same product in black vs grey, each with its own model_no) — so this
-  // only counts as "the same product" when name + id + model ALL match
-  // exactly. Anything less is a different product, even if the ID matches.
-  function findExactMatch() {
-    const name = nameInput.value.trim();
-    const id = idInput.value.trim();
-    const model = modelInput.value.trim();
-    if (!name || !id || !model) return null;
-    return invState.products.find(p =>
-      p.product_id === id && p.product_name === name && (p.model_no || '') === model);
-  }
-
-  function refreshDuplicateWarning() {
-    const match = findExactMatch();
-    if (match) {
-      warnBox.style.display = 'block';
-      warnBox.textContent = `This exact product (ID, name and model) already exists. Submitting will add a new lot to it instead of a separate product.`;
-    } else {
-      warnBox.style.display = 'none';
-    }
-  }
-  [nameInput, idInput, modelInput].forEach(inp => inp.addEventListener('input', refreshDuplicateWarning));
-
-  document.getElementById('newProductForm').addEventListener('submit', e => {
+  document.getElementById('partForm').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const quantity = Math.max(1, Number(fd.get('quantity')) || 1);
+    const category = isService ? (fd.get('part_category') || '') : '';
+    const warrantyUntil = fd.get('warranty_until') || '';
+    if (category === 'warranty' && !warrantyUntil) { alert('Warranty Until is required for a warranty part.'); return; }
+    const holograms = (fd.get('hologram_numbers') || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+    if (new Set(holograms).size !== holograms.length) { alert('Hologram numbers must be unique.'); return; }
+    if (holograms.length > quantity) { alert('Hologram numbers cannot be more than the quantity.'); return; }
 
-    // Someone may type in an ID/name/model combo that's already on file
-    // instead of using "Add Existing Product". Rather than let that create
-    // a second record, treat an exact match the same as picking the
-    // existing product — this just becomes a new lot for it. A partial
-    // match (e.g. same ID, different model/colour) is a different product
-    // and is allowed through as usual.
-    const existing = findExactMatch();
-    if (existing) {
-      addWiz.productId = existing.product_id;
-      addWiz.productName = existing.product_name;
-      addWiz.modelNo = existing.model_no || '';
-      renderLotDetailsStep();
-      return;
+    const payload = {
+      product_name: fd.get('part_name').trim(),
+      product_id: '',
+      model_no: '',
+      product_type: addWiz.productType,
+      parent_product_name: fd.get('parent_product_name').trim(),
+      part_category: category,
+      warranty_until: warrantyUntil,
+      hologram_numbers: holograms,
+      quantity,
+      serial_numbers: [],
+      lot_no: fd.get('lot_no') || '',
+      supplier: fd.get('supplier_name') || '',
+      supplier_address: fd.get('supplier_address') || '',
+      purchase_date: fd.get('purchase_date'),
+      price: '0',
+      tax_rate: 0
+    };
+    try {
+      const res = await apiFetch('/inventory/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'creation failed');
+      document.getElementById('addModal').style.display = 'none';
+      resetAddWizard();
+      await loadInventory();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
-
-    addWiz.productId = fd.get('product_id').trim();
-    addWiz.productName = fd.get('product_name').trim();
-    addWiz.modelNo = fd.get('model_no').trim();
-    renderLotDetailsStep();
   });
 }
 
 // Step 3: lot no, quantity, serial numbers (auto/manual), supplier + pricing
 function renderLotDetailsStep() {
   const body = addModalBody();
-  addWizTitle(`${addWiz.productName} — Lot Details`);
+  addWizTitle(`Add ${productTypeLabel(addWiz.productType)}`);
+  const isFaulty = addWiz.productType === 'damaged';
+  const req = isFaulty ? '' : 'required';   // supplier / price details are optional for faulty units
+  const lbl = t => `<label style="font-size:12px;color:#64748b;margin-bottom:-6px;">${t}</label>`;
   body.innerHTML = `
     <form id="lotForm" style="display:flex;flex-direction:column;gap:10px;">
-      <label style="font-size:13px;color:#64748b;">Type</label>
-      <select name="product_type" id="lotProductType" required>
-        <option value="product">Product</option>
-        <option value="spare_parts">Spare Parts</option>
-        <option value="service_parts">Service Parts</option>
-        <option value="damaged">Damaged Product</option>
-        <option value="accessories">Accessories</option>
-      </select>
-      <input name="lot_no" placeholder="Lot No." required>
+      <input type="hidden" name="product_type" id="lotProductType" value="${addWiz.productType}">
+      <input name="product_name" placeholder="Product Name" required>
+      <input name="product_id" placeholder="Product ID" required>
+      <input name="model_no" placeholder="Model No." required>
+      <input name="lot_no" placeholder="Lot No." ${req}>
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
       <input name="first_serial" id="firstSerialInput" placeholder="Serial No. (first unit)">
       <div id="serialOptionalMsg" style="display:none;font-size:12px;color:#64748b;">Serial numbers are optional for this type — leave blank to skip, or add them below.</div>
@@ -1538,20 +1507,22 @@ function renderLotDetailsStep() {
         <div id="manualSerialsBox" style="display:none;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
         <div id="autoPreviewBox" style="font-size:12px;color:#64748b;"></div>
       </div>
-      <input name="supplier_name" placeholder="Supplier Name" required>
-      <input name="supplier_address" placeholder="Supplier Address" required>
+      <input name="supplier_name" placeholder="Supplier Name${isFaulty ? ' (optional)' : ''}" ${req}>
+      <input name="supplier_address" placeholder="Supplier Address${isFaulty ? ' (optional)' : ''}" ${req}>
+      ${lbl(isFaulty ? 'Received Date' : 'Receiving Date')}
       <input name="purchase_date" type="date" required>
-      <input name="price" placeholder="Price" required>
-      <input name="tax_rate" type="number" placeholder="Tax Rate (%)" required>
+      <input name="price" placeholder="Price${isFaulty ? ' (optional)' : ''}" ${req}>
+      <input name="tax_rate" type="number" placeholder="Tax Rate (%)${isFaulty ? ' (optional)' : ''}" ${req}>
+      ${isFaulty ? `${lbl('Warranty Until (optional)')}
+      <input name="warranty_until" type="date">
+      <textarea name="reason" rows="2" placeholder="Reason of damage" required></textarea>` : ''}
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
         <button type="button" id="backAdd3" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save Product</button>
       </div>
     </form>`;
 
-  document.getElementById('backAdd3').addEventListener('click', () => addWiz.productId && invState.products.some(p => p.product_id === addWiz.productId) ? renderExistingProductStep() : renderNewProductStep());
-
-  document.getElementById('lotProductType').value = addWiz.productType || 'product';
+  document.getElementById('backAdd3').addEventListener('click', renderAddTypeStep);
 
   const form = document.getElementById('lotForm');
   const typeSelect = document.getElementById('lotProductType');
@@ -1721,18 +1692,20 @@ function renderLotDetailsStep() {
     }
 
     const payload = {
-      product_name: addWiz.productName,
-      product_id: addWiz.productId,
-      model_no: addWiz.modelNo,
+      product_name: fd.get('product_name').trim(),
+      product_id: fd.get('product_id').trim(),
+      model_no: fd.get('model_no').trim(),
       product_type: fd.get('product_type') || 'product',
+      warranty_until: fd.get('warranty_until') || '',
+      reason: (fd.get('reason') || '').trim(),
       lot_no: fd.get('lot_no'),
       quantity,
       serial_numbers: serials,
       supplier: fd.get('supplier_name'),
       supplier_address: fd.get('supplier_address'),
       purchase_date: fd.get('purchase_date'),
-      price: fd.get('price'),
-      tax_rate: Number(fd.get('tax_rate'))
+      price: fd.get('price') || '0',
+      tax_rate: Number(fd.get('tax_rate')) || 0
     };
 
     try {

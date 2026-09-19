@@ -9,7 +9,8 @@ class inventory_manager(mongodbclient):
     def __init__(self, product_name=None, product_id=None, quantity=None,
                  purchase_date=None, lot_no=None, supplier=None, price=None, tax_rate=None,
                  model_no=None, supplier_address=None, serial_numbers=None, product_type=None,
-                 warranty_until=None, reason=""):
+                 warranty_until=None, reason="",
+                 parent_product_name="", part_category=None, hologram_numbers=None):
 
         super().__init__()
 
@@ -33,6 +34,10 @@ class inventory_manager(mongodbclient):
         # service/serial it was pulled from when it's already out of warranty)
         self.warranty_until = warranty_until
         self.reason = reason
+        # spare_parts / service_parts only
+        self.parent_product_name = parent_product_name or ""
+        self.part_category = part_category or None      # service_parts: "purchase" | "warranty"
+        self.hologram_numbers = list(hologram_numbers or [])
 
     def add(self, collection_name):
         try:
@@ -52,6 +57,10 @@ class inventory_manager(mongodbclient):
                 "warranty_until": self.warranty_until,
                 "reason": self.reason,
             }
+            if self.product_type in ("spare_parts", "service_parts"):
+                product_dic["parent_product_name"] = self.parent_product_name
+                product_dic["part_category"] = self.part_category
+                product_dic["hologram_numbers"] = self.hologram_numbers
             product = super().add(collection_name=collection_name, dictionary=product_dic)
             logging.info("product added successfully")
             return product
@@ -149,6 +158,46 @@ class inventory_manager(mongodbclient):
 
         except Exception as e:
             logging.error("adding/merging inventory entry failed!")
+            raise Exception(e)
+
+    def add_part(self, collection_name):
+        """
+        Manual add for spare_parts / service_parts (same shape the shipment sync creates):
+        tracked by quantity, no serials, auto-generated product_id. Merges into an existing
+        entry only when part name + parent product + type + category + received date +
+        warranty date all match; hologram numbers (if given) are appended to it.
+        """
+        try:
+            warranty_until = self.warranty_until or None
+            match_query = {
+                "product_name": self.product_name,
+                "parent_product_name": self.parent_product_name,
+                "product_type": self.product_type,
+                "purchase_date": self.purchase_date,
+                "warranty_until": warranty_until,
+            }
+            if self.part_category:
+                match_query["part_category"] = self.part_category
+
+            existing = self.get_data(collection_name=collection_name, query=match_query)
+            if existing:
+                entry = existing[0]
+                holograms = list(entry.get("hologram_numbers") or []) + self.hologram_numbers
+                self.update_data(
+                    collection_name=collection_name,
+                    query={"_id": ObjectId(entry["_id"])},
+                    update_values={"quantity": int(entry.get("quantity", 0) or 0) + int(self.quantity or 0),
+                                   "hologram_numbers": holograms}
+                )
+                return {"mode": "merged", "product_id": entry.get("product_id"), "quantity_added": self.quantity}
+
+            self.product_id = f"SP-{uuid.uuid4().hex[:8].upper()}"
+            self.warranty_until = warranty_until
+            self.model_no = ""
+            self.serial_numbers = []
+            return self.add(collection_name=collection_name)
+        except Exception as e:
+            logging.error("adding spare/service part failed!")
             raise Exception(e)
 
     def restock_returned_units(self, collection_name, product_id, product_name, model_no, quantity, serial_numbers=None):

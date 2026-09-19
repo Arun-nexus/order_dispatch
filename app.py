@@ -207,8 +207,7 @@ class SparePartAllocation(BaseModel):
 
 
 class CreateAllocationRequest(BaseModel):
-    sales_person_id: str = ""
-    sales_person: dict = {}
+    allocated_to: str = ""  # username of a registered system user
     items: list[AllocationItem] = []
     spare_part: SparePartAllocation | None = None
     company_name: str = ""
@@ -292,6 +291,11 @@ class InventoryRequest(BaseModel):
     supplier_address: str = ""
     serial_numbers: list[str] = []
     product_type: str = "product"  # "product" | "spare_parts" | "service_parts" | "damaged" | "accessories"
+    parent_product_name: str = ""     # spare_parts / service_parts: which product the part belongs to
+    part_category: str = ""           # service_parts: "purchase" | "warranty"
+    warranty_until: str = ""          # YYYY-MM-DD, parts + damaged
+    reason: str = ""                  # damaged: reason of damage
+    hologram_numbers: list[str] = []  # spare_parts / service_parts, optional, one per unit
 
 
 class InventoryUpdateRequest(BaseModel):
@@ -477,6 +481,23 @@ async def list_distributors(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("distributor list cannot be fetched")
         raise HTTPException(status_code=500, detail="distributor list cannot be fetched")
+
+
+@app.get("/account/users")
+async def list_system_users(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    """Safe (no password) list of every system user, used by the allocation wizard."""
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
+        users = [
+            {"username": a.get("username"), "name": a.get("name") or a.get("username"), "role": a.get("role"),
+             "contact_number": a.get("phone", ""), "email": a.get("email", ""), "company_name": a.get("company_name", "")}
+            for a in dataset
+        ]
+        return {"message": "system users", "dataset": users}
+    except Exception:
+        logging.error("system users cannot be fetched")
+        raise HTTPException(status_code=500, detail="users cannot be fetched")
 
 
 @app.post("/account/create_account/")
@@ -2713,6 +2734,40 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
         if len(set(request.serial_numbers)) != len(request.serial_numbers):
             raise HTTPException(status_code=400, detail="serial numbers must be unique")
 
+        if request.product_type in ("spare_parts", "service_parts"):
+            if not request.parent_product_name.strip():
+                raise HTTPException(status_code=400, detail="product name (the part belongs to) is required")
+            if request.product_type == "service_parts" and request.part_category not in ("purchase", "warranty"):
+                raise HTTPException(status_code=400, detail="select purchase or warranty for a service part")
+            holograms = [h.strip() for h in request.hologram_numbers if h and h.strip()]
+            if len(set(holograms)) != len(holograms):
+                raise HTTPException(status_code=400, detail="hologram numbers must be unique")
+            if len(holograms) > request.quantity:
+                raise HTTPException(status_code=400, detail="hologram numbers cannot outnumber the quantity")
+            if holograms:
+                taken = inventory_manager().get_data(collection_name=INVENTORY_COLLECTION,
+                                                     query={"hologram_numbers": {"$in": holograms}})
+                if taken:
+                    used = sorted({h for t in taken for h in (t.get("hologram_numbers") or []) if h in holograms})
+                    raise HTTPException(status_code=400, detail=f"hologram number(s) already on file: {', '.join(used)}")
+            part = inventory_manager(
+                product_name=request.product_name.strip(),
+                quantity=request.quantity,
+                purchase_date=request.purchase_date,
+                lot_no=request.lot_no,
+                supplier=request.supplier,
+                supplier_address=request.supplier_address,
+                price=request.price or 0,
+                tax_rate=request.tax_rate,
+                product_type=request.product_type,
+                warranty_until=request.warranty_until,
+                parent_product_name=request.parent_product_name.strip(),
+                part_category=request.part_category if request.product_type == "service_parts" else None,
+                hologram_numbers=holograms,
+            )
+            part.add_part(collection_name=INVENTORY_COLLECTION)
+            return {"message": "part was listed successfully"}
+
         inventory_item = inventory_manager(
             product_name=request.product_name,
             product_id=request.product_id,
@@ -2725,7 +2780,9 @@ async def create_inventory(request: InventoryRequest, user: dict = Depends(requi
             model_no=request.model_no,
             supplier_address=request.supplier_address,
             serial_numbers=request.serial_numbers,
-            product_type=request.product_type
+            product_type=request.product_type,
+            warranty_until=(request.warranty_until or None) if request.product_type == "damaged" else None,
+            reason=request.reason if request.product_type == "damaged" else ""
         )
         inventory_item.add_or_merge(collection_name=INVENTORY_COLLECTION)
         logging.info("product listed successfully on inventory")
@@ -3353,6 +3410,62 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
     return allocation.allocation_id
 
 
+def _user_snapshot(username: str) -> dict:
+    """Snapshot of a registered system user, stored on allocations as `sales_person`."""
+    acc = mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
+    if not acc:
+        raise HTTPException(status_code=404, detail=f"user '{username}' not found")
+    acc = acc[0]
+    return {
+        "sales_person_id": acc.get("username"),
+        "username": acc.get("username"),
+        "name": acc.get("name") or acc.get("username"),
+        "role": acc.get("role"),
+        "company_name": acc.get("company_name", ""),
+        "address": "",
+        "contact_number": acc.get("phone", ""),
+        "email": acc.get("email", ""),
+    }
+
+
+def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id: str):
+    """Approved demo request: deduct stock and allocate straight to the requesting user.
+    No customer/company details at this stage. One allocation document per unit."""
+    if not items:
+        raise HTTPException(status_code=400, detail="add at least one product")
+    snapshot = _user_snapshot(requester)
+    inventory_db = inventory_manager()
+
+    need = {}
+    for item in items:
+        key = (item["product_id"], item.get("model_no") or "")
+        need[key] = need.get(key, 0) + item["quantity"]
+    for (pid, model_no), qty in need.items():
+        available = inventory_db.get_available_quantity(INVENTORY_COLLECTION, pid, model_no=model_no or None)
+        if available < qty:
+            name = next((i["product_name"] for i in items if i["product_id"] == pid), pid)
+            raise HTTPException(status_code=400, detail=f"insufficient stock for {name}: only {available} available")
+
+    ids = []
+    for item in items:
+        serials = inventory_db.allocate_units(
+            collection_name=INVENTORY_COLLECTION, product_id=item["product_id"],
+            quantity=item["quantity"], model_no=item.get("model_no") or None)
+        for i in range(item["quantity"]):
+            serial = serials[i] if i < len(serials) else None
+            alloc = allocation_manager(
+                sales_person=snapshot,
+                items=[{"product_id": item["product_id"], "product_name": item["product_name"],
+                        "model_no": item.get("model_no", ""), "quantity": 1,
+                        "serial_numbers": [serial] if serial else []}],
+                allocated_by=requester, allocation_type="demo_unit",
+                request_id=request_id, remarks=remarks)
+            alloc.add(collection_name=ALLOCATION_COLLECTION)
+            ids.append(alloc.allocation_id)
+    logging.info(f"demo request {request_id} allocated to {requester}: {ids}")
+    return ids
+
+
 @app.post("/allocation/create_demo_unit")
 async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
@@ -3372,9 +3485,8 @@ async def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict
 
 
 class DemoUnitRequestModel(BaseModel):
-    customer_id: str = ""
-    customer: dict = {}
     items: list[AllocationItem]
+    remarks: str = ""
 
 
 class ServiceRequestModel(BaseModel):
@@ -3406,21 +3518,32 @@ class RequestRejectModel(BaseModel):
     reason: str = ""
 
 
+class RequestApproveModel(BaseModel):
+    # only used when approving a convert_to_order request
+    invoice_no: str = ""
+    invoice_date: str = ""
+
+
+class ConvertToOrderRequest(BaseModel):
+    company_name: str
+    company_address: str
+    gst_number: str = ""
+    price: float
+    tax_rate: float = 0
+
+
 @app.post("/request/demo_unit")
 async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = Depends(require_role("distributor"))):
     try:
         if not request.items:
             raise HTTPException(status_code=400, detail="add at least one product")
-        if not request.customer_id and not request.customer.get("company_name"):
-            raise HTTPException(status_code=400, detail="customer details are required")
 
         req = request_manager(
             request_type="demo_unit",
             raised_by=user["username"],
             details={
-                "customer_id": request.customer_id,
-                "customer": request.customer,
-                "items": [item.dict() for item in request.items]
+                "items": [item.dict() for item in request.items],
+                "remarks": (request.remarks or "").strip()
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
@@ -3430,6 +3553,113 @@ async def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = De
     except Exception as e:
         logging.error("raising demo unit request failed!")
         raise HTTPException(status_code=500, detail="request could not be raised")
+
+
+@app.post("/allocation/convert_to_order/{allocation_id}")
+async def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, user: dict = Depends(require_role("distributor"))):
+    """Distributor asks to turn a dispatched demo unit into an order. Raises an approval request."""
+    try:
+        if not request.company_name.strip() or not request.company_address.strip():
+            raise HTTPException(status_code=400, detail="company name and address are required")
+        if request.price <= 0:
+            raise HTTPException(status_code=400, detail="enter a valid price")
+
+        adb = allocation_manager()
+        matches = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="demo unit not found")
+        alloc = matches[0]
+        if alloc.get("allocation_type") != "demo_unit" or alloc.get("allocated_by") != user["username"]:
+            raise HTTPException(status_code=403, detail="this is not your demo unit")
+        if not alloc.get("dispatch"):
+            raise HTTPException(status_code=400, detail="only dispatched demo units can be converted to an order")
+        if alloc.get("return_status") == "returned":
+            raise HTTPException(status_code=400, detail="this demo unit was already returned")
+        if (alloc.get("convert_request") or {}).get("status") == "pending":
+            raise HTTPException(status_code=400, detail="an order request is already pending for this demo unit")
+
+        customer = {
+            "company_name": request.company_name.strip(),
+            "company_address": request.company_address.strip(),
+            "gst_number": request.gst_number.strip(),
+        }
+        items = [{
+            "product_id": i.get("product_id"), "product_name": i.get("product_name"),
+            "model_no": i.get("model_no", ""), "serial_numbers": i.get("serial_numbers", []),
+            "quantity": i.get("quantity", 1), "price": request.price, "tax_rate": request.tax_rate
+        } for i in alloc.get("items", [])]
+
+        req = request_manager(
+            request_type="convert_to_order",
+            raised_by=user["username"],
+            details={"allocation_id": allocation_id, "customer": customer, "items": items,
+                     "price": request.price, "tax_rate": request.tax_rate}
+        )
+        req.add(collection_name=REQUESTS_COLLECTION)
+        adb.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id},
+                        update_values={"convert_request": {"request_id": req.request_id, "status": "pending",
+                                                           "price": request.price, "tax_rate": request.tax_rate,
+                                                           "customer": customer}})
+        return {"message": "order request sent for approval", "request_id": req.request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"convert to order request failed! {e}")
+        raise HTTPException(status_code=500, detail="order request could not be raised")
+
+
+def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver: str, invoice_no: str, invoice_date: str):
+    """Moves an approved demo unit into Orders: same products/serials/company/price, dispatch info
+    carried over (with the entered invoice details), and the allocation entry is removed.
+    Stock is NOT touched — the units were already deducted when the demo was allotted."""
+    cust = dict(details.get("customer") or {})
+    new_customer = customer_manager(
+        company_name=cust.get("company_name"),
+        company_address=cust.get("company_address"),
+        gst_number=cust.get("gst_number"),
+        contractor_person="",
+        contractor_number="",
+        contractor_email="",
+    )
+    new_customer.add(collection_name=CUSTOMER_COLLECTION)
+    customer_manager().update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
+                                    update_values={"created_by": raised_by})
+    customer_snapshot = {
+        "customer_id": new_customer.customer_id,
+        "company_name": new_customer.company_name,
+        "company_address": new_customer.company_address,
+        "gst_number": new_customer.gst_number,
+        "contractor_person": "", "contractor_number": "", "contractor_email": "",
+        "created_by": raised_by,
+    }
+
+    price = details.get("price", 0)
+    tax_rate = details.get("tax_rate", 0)
+    order_items = [{
+        "product_id": i.get("product_id"), "product_name": i.get("product_name"),
+        "model_no": i.get("model_no", ""), "serial_numbers": i.get("serial_numbers", []),
+        "quantity": i.get("quantity", 1), "price": price, "tax_rate": tax_rate
+    } for i in alloc.get("items", [])]
+
+    order = order_manager(
+        customer=customer_snapshot, items=order_items,
+        payment_mode="Demo Conversion", payment_details={}, discount=0,
+        creator={"type": "request", "raised_by": raised_by, "approved_by": approver}
+    )
+    order.add(collection_name=ORDERS_COLLECTION)
+
+    dispatch = dict(alloc.get("dispatch") or {})
+    dispatch.update({
+        "invoice_no": invoice_no, "invoice_date": invoice_date,
+        "bill_to_address": {"company_name": customer_snapshot["company_name"], "address": customer_snapshot["company_address"]},
+    })
+    order.update(collection_name=ORDERS_COLLECTION, query={"order_id": order.order_id},
+                 update_values={"status": "processing", "dispatch": dispatch,
+                                "converted_from_demo": {"allocation_id": alloc.get("allocation_id"),
+                                                        "allotment_date": alloc.get("allotment_date")}})
+    allocation_manager().delete(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": alloc.get("allocation_id")})
+    logging.info(f"demo allocation {alloc.get('allocation_id')} converted to order {order.order_id}")
+    return order.order_id
 
 
 @app.post("/request/order")
@@ -3512,7 +3742,7 @@ async def my_requests(user: dict = Depends(get_current_user)):
 
 
 @app.post("/request/approve/{request_id}")
-async def approve_request(request_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+async def approve_request(request_id: str, body: RequestApproveModel = None, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -3524,15 +3754,35 @@ async def approve_request(request_id: str, user: dict = Depends(require_role("ad
 
         if req["request_type"] == "demo_unit":
             details = req["details"]
-            allocation_id = _fulfill_demo_unit(
-                customer_id=details.get("customer_id", ""),
-                customer=details.get("customer", {}),
-                items=details.get("items", []),
-                allocated_by=req["raised_by"]
-            )
+            if details.get("customer") or details.get("customer_id"):   # legacy requests raised with customer details
+                allocation_id = _fulfill_demo_unit(
+                    customer_id=details.get("customer_id", ""),
+                    customer=details.get("customer", {}),
+                    items=details.get("items", []),
+                    allocated_by=req["raised_by"]
+                )
+                ids = [allocation_id]
+            else:
+                ids = _fulfill_demo_request(
+                    items=details.get("items", []), requester=req["raised_by"],
+                    remarks=details.get("remarks", ""), request_id=request_id)
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
-            return {"message": "request approved and demo unit allotted", "allocation_id": allocation_id}
+            return {"message": "request approved and demo unit allotted", "allocation_ids": ids}
+
+        if req["request_type"] == "convert_to_order":
+            if not body or not body.invoice_no.strip() or not body.invoice_date.strip():
+                raise HTTPException(status_code=400, detail="invoice number and invoice date are required")
+            details = req["details"]
+            found = allocation_manager().get_data(collection_name=ALLOCATION_COLLECTION,
+                                                  query={"allocation_id": details.get("allocation_id")})
+            if not found:
+                raise HTTPException(status_code=404, detail="demo unit allocation no longer exists")
+            order_id = _convert_demo_to_order(found[0], details, req["raised_by"], user["username"],
+                                              body.invoice_no.strip(), body.invoice_date.strip())
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            return {"message": "request approved and demo unit converted to order", "order_id": order_id}
 
         if req["request_type"] == "order":
             details = req["details"]
@@ -3651,6 +3901,13 @@ async def reject_request(request_id: str, request: RequestRejectModel, user: dic
                 svc_db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
                                     update_values={"video": ""})
 
+        if existing[0]["request_type"] == "convert_to_order":
+            aid = existing[0]["details"].get("allocation_id")
+            if aid:
+                allocation_manager().update_data(
+                    collection_name=ALLOCATION_COLLECTION, query={"allocation_id": aid},
+                    update_values={"convert_request": {"request_id": request_id, "status": "rejected", "reason": request.reason}})
+
         db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                        status="rejected", resolved_by=user["username"], reason=request.reason)
         return {"message": "request rejected"}
@@ -3669,31 +3926,9 @@ async def create_allocation(request: CreateAllocationRequest, user: dict = Depen
 
         sales_person_snapshot = {}
         if request.items:
-            sp_db = sales_person_manager()
-            if request.sales_person_id:
-                existing = sp_db.get_data(SALESPERSON_COLLECTION, query={"sales_person_id": request.sales_person_id})
-                if not existing:
-                    raise HTTPException(status_code=404, detail="selected sales person not found")
-                sales_person_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
-            else:
-                if not request.sales_person.get("name"):
-                    raise HTTPException(status_code=400, detail="sales person details are required")
-                new_sp = sales_person_manager(
-                    name=request.sales_person.get("name"),
-                    company_name=request.sales_person.get("company_name"),
-                    address=request.sales_person.get("address"),
-                    contact_number=request.sales_person.get("contact_number"),
-                    email=request.sales_person.get("email"),
-                )
-                new_sp.add(collection_name=SALESPERSON_COLLECTION)
-                sales_person_snapshot = {
-                    "sales_person_id": new_sp.sales_person_id,
-                    "name": new_sp.name,
-                    "company_name": new_sp.company_name,
-                    "address": new_sp.address,
-                    "contact_number": new_sp.contact_number,
-                    "email": new_sp.email,
-                }
+            if not request.allocated_to:
+                raise HTTPException(status_code=400, detail="select a system user to allocate to")
+            sales_person_snapshot = _user_snapshot(request.allocated_to)
 
         inventory_db = inventory_manager()
         # keyed by (product_id, model_no): two variants sharing the same
