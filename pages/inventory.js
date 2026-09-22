@@ -466,12 +466,14 @@ function getFilteredInventory() {
 
   const q = invState.searchQuery;
   if (q) {
+    // serial-number matching moved out of this quick search — the list no
+    // longer carries serial_numbers (that was the bulk of its payload).
+    // Use the "Record" search (top-actions) to look up a product by serial.
     list = list.filter(p =>
       (p.product_name || '').toLowerCase().includes(q) ||
       (p.product_id || '').toLowerCase().includes(q) ||
       (p.model_no || '').toLowerCase().includes(q) ||
-      (p.supplier || '').toLowerCase().includes(q) ||
-      (p.serial_numbers || []).some(s => (s || '').toLowerCase().includes(q))
+      (p.supplier || '').toLowerCase().includes(q)
     );
   }
 
@@ -557,7 +559,9 @@ function hologramNumbersOf(p) {
 
 function statusFromHologram(p) {
   if (p.product_type !== 'spare_parts' && p.product_type !== 'service_parts') return 'Pending';
-  const count = hologramNumbersOf(p).length;
+  // the main list only sends hologram_count (a number); the full hologram_numbers
+  // array is only present after fetchProductDetail (view/edit modals)
+  const count = typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length;
   const qty = Number(p.quantity) || 0;
   if (count === 0) return 'Pending';
   if (qty && count >= qty) return 'Active';
@@ -698,15 +702,39 @@ function renderInventoryTable(products) {
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewModal(rowProduct(e))));
-  tbody.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', e => openEditModal(rowProduct(e))));
+  tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', async e => openViewModal(await fetchProductDetail(rowProduct(e)))));
+  tbody.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', async e => openEditModal(await fetchProductDetail(rowProduct(e)))));
   tbody.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', e => openDeleteModal(rowProduct(e))));
-  tbody.querySelectorAll('.repair-btn').forEach(btn => btn.addEventListener('click', e => handleRepairClick(rowProduct(e))));
+  tbody.querySelectorAll('.repair-btn').forEach(btn => btn.addEventListener('click', async e => handleRepairClick(await fetchProductDetail(rowProduct(e)))));
 
   renderTablePagination(document.querySelector('.pagination'), invPage, totalPages, p => {
     invPage = p;
     renderInventoryTable(products);
   });
+}
+
+// The main list no longer carries serial_numbers/hologram_numbers (that was
+// the bulk of its payload — this is what was making the page slow). View,
+// Edit, and Repair need that per-row detail, so they fetch it fresh here
+// instead of reading it off the cached row. Falls back to the cached row
+// (serials just won't show) if the fetch fails, so a network hiccup doesn't
+// hard-block the modal from opening at all.
+async function fetchProductDetail(p) {
+  if (!p) return p;
+  try {
+    const params = new URLSearchParams({
+      product_id: p.product_id || '',
+      model_no: p.model_no || '',
+      product_type: p.product_type || ''
+    });
+    const res = await apiFetch(`/inventory/detail?${params}`);
+    if (!res.ok) return p;
+    const data = await res.json();
+    return { ...p, ...data.product };
+  } catch (err) {
+    console.error(err);
+    return p;
+  }
 }
 
 function rowProduct(e) {
@@ -869,10 +897,13 @@ function exportInventoryCSV() {
     dateField: 'purchase_date',
     dateLabel: 'Purchase Date',
     getRows: exportRowsForCategory,
-    onConfirm: (rows) => {
-      const header = rows.map(p => `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`);
+    onConfirm: async (rows) => {
+      // the cached list no longer carries serial_numbers/hologram_numbers —
+      // fetch each row's full detail first for this "serial number wise" export
+      const fullRows = await Promise.all(rows.map(fetchProductDetail));
+      const header = fullRows.map(p => `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`);
       // parts have no serial numbers — their per-unit identifiers are hologram numbers
-      const columns = rows.map(p => (p.serial_numbers && p.serial_numbers.length)
+      const columns = fullRows.map(p => (p.serial_numbers && p.serial_numbers.length)
         ? p.serial_numbers
         : ((p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? hologramNumbersOf(p) : []));
       const maxLen = Math.max(0, ...columns.map(c => c.length));

@@ -267,9 +267,10 @@ class inventory_manager(mongodbclient):
             logging.error("data updation unsuccessful")
             raise Exception(e)
 
-    def get_data(self, collection_name, query=None, projection=None):
+    def get_data(self, collection_name, query=None, projection=None, sort=None, skip=None, limit=None):
         try:
-            dataset = super().get_data(collection_name=collection_name, query=query, projection=projection)
+            dataset = super().get_data(collection_name=collection_name, query=query, projection=projection,
+                                        sort=sort, skip=skip, limit=limit)
             logging.info("inventory data was fetched successfully")
             return dataset
         except Exception as e:

@@ -1941,9 +1941,20 @@ def ensure_indexes():
                 logging.error(f"index {coll}.{field} skipped: {e}")
 
 
+def _warm_up_db():
+    """Opens the first DB connection at startup so the first page load doesn't pay for it."""
+    try:
+        t = time.perf_counter()
+        mongodbclient().client.admin.command("ping")
+        logging.info(f"mongodb warm-up ping took {(time.perf_counter() - t) * 1000:.0f} ms")
+    except Exception as e:
+        logging.error(f"mongodb warm-up failed: {e}")
+    ensure_indexes()
+
+
 @app.on_event("startup")
 def _create_indexes_on_startup():
-    threading.Thread(target=ensure_indexes, daemon=True).start()
+    threading.Thread(target=_warm_up_db, daemon=True).start()
 
 
 def purge_stale_damage_images():
@@ -2583,8 +2594,21 @@ def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict 
 @app.get("/inventory/")
 def inventory(user: dict = Depends(get_current_user)):
     try:
-        db = inventory_manager()
-        dataset = db.get_data(collection_name=INVENTORY_COLLECTION, query={})
+        # serial_numbers and hologram_numbers were the bulk of this endpoint's
+        # payload (measured: one lot's hologram_numbers alone was 166KB) and
+        # the table doesn't render them directly — View/Edit/Repair fetch the
+        # full row on demand instead (see /inventory/detail). The one thing
+        # the table DOES need from hologram_numbers is its length, for the
+        # spare/service parts Status badge — an aggregation $size keeps that
+        # without shipping the array itself.
+        col = mongodbclient().database[INVENTORY_COLLECTION]
+        pipeline = [
+            {"$addFields": {"hologram_count": {"$size": {"$ifNull": ["$hologram_numbers", []]}}}},
+            {"$project": {"serial_numbers": 0, "hologram_numbers": 0}}
+        ]
+        dataset = list(col.aggregate(pipeline))
+        for item in dataset:
+            item["_id"] = str(item["_id"])
 
         # warranty entries don't flip on their own — work it out fresh on every
         # fetch by comparing today's date to the stored warranty_until.
@@ -2608,6 +2632,44 @@ def inventory(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("inventory dataset cannot be fetched")
         raise HTTPException(status_code=500, detail="inventory dataset cannot be fetched")
+
+
+@app.get("/inventory/detail")
+def inventory_detail(product_id: str = "", model_no: str = "", product_type: str = "",
+                      user: dict = Depends(get_current_user)):
+    """
+    Fresh, full copy of one lot — including serial_numbers/hologram_numbers,
+    which the main /inventory/ list no longer carries (they were the bulk of
+    its payload). Called on demand when View/Edit/Repair is opened on a row,
+    instead of relying on the (now-lighter) cached list.
+    """
+    try:
+        query = {"product_id": product_id, "model_no": model_no}
+        if product_type:
+            query["product_type"] = product_type
+        db = inventory_manager()
+        docs = db.get_data(collection_name=INVENTORY_COLLECTION, query=query)
+        if not docs:
+            raise HTTPException(status_code=404, detail="product not found")
+        item = docs[0]
+
+        today_dt = datetime.now(timezone.utc)
+        today = today_dt.strftime("%Y-%m-%d")
+        if item.get("warranty_until"):
+            item["warranty_status"] = "over warranty" if item["warranty_until"] < today else "under warranty"
+            if item["warranty_status"] == "under warranty":
+                try:
+                    expiry = datetime.strptime(item["warranty_until"], "%Y-%m-%d")
+                    item["warranty_days_left"] = (expiry - today_dt.replace(tzinfo=None)).days
+                except ValueError:
+                    item["warranty_days_left"] = None
+
+        return {"message": "product detail", "product": item}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("inventory detail cannot be fetched")
+        raise HTTPException(status_code=500, detail="inventory detail cannot be fetched")
 
 
 @app.get("/inventory/serial_history/{serial_number}")
