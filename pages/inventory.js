@@ -77,8 +77,11 @@ function wireSerialRecordModal() {
     const resultsBox = modal.querySelector('#serialRecordResults');
     if (!serial) { resultsBox.innerHTML = '<p style="color:#d62828;font-size:13px;">Enter a serial number to search.</p>'; return; }
     resultsBox.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching...</p>';
+    // serials are stored lowercase (see wireEditSerialFileUpload / the add-product
+    // wizard) — lowercase here too so a serial typed in a different case still matches.
+    const normalizedSerial = serial.toLowerCase();
     try {
-      const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(serial)}`);
+      const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(normalizedSerial)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'search failed');
       resultsBox.innerHTML = renderSerialTimeline(data.events || [], serial);
@@ -728,7 +731,13 @@ async function fetchProductDetail(p) {
       product_type: p.product_type || ''
     });
     const res = await apiFetch(`/inventory/detail?${params}`);
-    if (!res.ok) return p;
+    if (!res.ok) {
+      // surface the backend's actual error (e.g. a 500's real cause) in the
+      // console instead of silently falling back — makes it obvious when
+      // the fallback (serial-less cached row) is being used, and why.
+      try { console.error('fetchProductDetail failed:', res.status, await res.json()); } catch (_) {}
+      return p;
+    }
     const data = await res.json();
     return { ...p, ...data.product };
   } catch (err) {

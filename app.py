@@ -2644,7 +2644,16 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
     instead of relying on the (now-lighter) cached list.
     """
     try:
-        query = {"product_id": product_id, "model_no": model_no}
+        # model_no is only added to the query when one was actually passed in.
+        # Older lots (created before model_no existed) or model-less product
+        # types store it as null/missing, not "" — querying {"model_no": ""}
+        # against those wouldn't match, which is what was making this
+        # endpoint 404 and silently fall back to the serial-less cached row
+        # on the frontend. Matching on product_id (+ product_type) alone when
+        # no model_no was given avoids that false negative.
+        query = {"product_id": product_id}
+        if model_no:
+            query["model_no"] = model_no
         if product_type:
             query["product_type"] = product_type
         db = inventory_manager()
@@ -2652,6 +2661,13 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
         if not docs:
             raise HTTPException(status_code=404, detail="product not found")
         item = docs[0]
+        # Mongo's _id is an ObjectId, which FastAPI can't JSON-serialize on
+        # its own — this was crashing the response *after* the try/except
+        # below with a 500, since the crash happens during serialization,
+        # not inside this function. The /inventory/ list endpoint already
+        # does this same conversion; this endpoint was missing it.
+        if "_id" in item:
+            item["_id"] = str(item["_id"])
 
         today_dt = datetime.now(timezone.utc)
         today = today_dt.strftime("%Y-%m-%d")
@@ -2668,8 +2684,8 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("inventory detail cannot be fetched")
-        raise HTTPException(status_code=500, detail="inventory detail cannot be fetched")
+        logging.error(f"inventory detail cannot be fetched: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/inventory/serial_history/{serial_number}")
@@ -2685,7 +2701,11 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     and what happened to it since.
     """
     try:
-        serial_number = serial_number.strip()
+        # every serial is lowercased when it's first added to inventory (see
+        # inventory.js), so the lookup here has to match on the same
+        # lowercased value or a serial typed in with different case (as
+        # printed on the unit's physical label) would silently find nothing.
+        serial_number = serial_number.strip().lower()
         if not serial_number:
             raise HTTPException(status_code=400, detail="serial number is required")
 
@@ -2804,7 +2824,15 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                 }
             })
 
-        events.sort(key=lambda e: e.get("date") or "")
+        # dates can come back as plain "YYYY-MM-DD" strings from some
+        # collections and as native datetime objects from others — sorting
+        # a mix of the two raises a TypeError ("'<' not supported between
+        # instances of 'datetime.datetime' and 'str'"), which was another
+        # way this endpoint could 500. Stringify every date before sorting.
+        events.sort(key=lambda e: str(e.get("date") or ""))
+        for e in events:
+            if e.get("date") is not None and not isinstance(e["date"], str):
+                e["date"] = str(e["date"])
 
         logging.info(f"serial history fetched for {serial_number}: {len(events)} event(s)")
         return {"message": "serial history", "serial_number": serial_number, "events": events}
@@ -2812,8 +2840,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("serial history lookup failed")
-        raise HTTPException(status_code=500, detail="serial history could not be fetched")
+        logging.error(f"serial history lookup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def productTypeLabelPy(product_type):
