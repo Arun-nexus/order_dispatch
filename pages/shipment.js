@@ -136,7 +136,7 @@ function shipmentCardRowsHtml(list) {
     <thead><tr style="text-align:left;">
       <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Company</th>
       <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Products</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Dispatch Date</th>
+      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Order Date</th>
       <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Received Date</th>
       <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Status</th>
     </tr></thead>
