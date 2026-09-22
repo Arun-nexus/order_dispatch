@@ -366,12 +366,11 @@ function renderExistingCustomerStep() {
   runSearch();
 }
 
-// Step 2b: new customer form
 function renderNewCustomerStep() {
   wizBody().innerHTML = wizHeader('New Order — New Customer') + `
     <form id="newCustForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="company_name" placeholder="Customer Name" required>
-      <input name="company_address" placeholder="Customer Address" required>
+      <input name="company_name" placeholder="Company Name" required>
+      <input name="company_address" placeholder="Company Address" required>
       <input name="gst_number" placeholder="GST Number (if applicable)">
       <input name="contractor_person" placeholder="Contact Person" required>
       <input name="contractor_number" placeholder="Contact Number" required>
