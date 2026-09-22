@@ -221,9 +221,20 @@ function dateLabel(row) {
 }
 
 function productLabel(row) {
-  if (row.kind === 'order') return (row.data.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
-  if (row.kind === 'product_allocation') return (row.data.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+  if (row.kind === 'order' || row.kind === 'product_allocation') {
+    return (row.data.items || []).map(i => {
+      const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+      return `<div style="margin-bottom:4px;">${i.product_name ?? ''}${meta ? `<br><small style="color:#94a3b8;">${meta}</small>` : ''}</div>`;
+    }).join('');
+  }
   return row.data.spare_part?.part_name || '';
+}
+
+function quantityLabel(row) {
+  if (row.kind === 'order' || row.kind === 'product_allocation') {
+    return (row.data.items || []).map(i => `<div style="margin-bottom:4px;">${i.quantity ?? 0}</div>`).join('');
+  }
+  return row.data.spare_part?.quantity ?? '-';
 }
 
 function billToLabel(row) {
@@ -280,6 +291,7 @@ function renderTable(rows) {
       <td>${typeLabel}</td>
       <td>${dateLabel(row)}</td>
       <td>${productLabel(row)}</td>
+      <td>${quantityLabel(row)}</td>
       <td>${billToLabel(row)}</td>
       <td>${d.dispatch?.docket_no ?? '-'}</td>
       <td>${d.dispatch?.invoice_no ?? '-'}</td>
