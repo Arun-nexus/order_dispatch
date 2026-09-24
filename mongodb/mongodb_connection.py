@@ -1,6 +1,9 @@
 import pymongo
 import certifi
 import os
+import time
+import threading
+import contextvars
 from logger import logging
 from dotenv import load_dotenv
 
@@ -8,18 +11,39 @@ load_dotenv()
 
 ca = certifi.where()
 
+# Per-request DB counters (filled in by the timing middleware in app.py) so a slow request
+# can be classified as "one slow query" vs "many small queries" vs "not the DB at all".
+db_stats = contextvars.ContextVar("db_stats", default=None)
+
+
+def _track(op, collection_name, started, extra=""):
+    ms = (time.perf_counter() - started) * 1000
+    stats = db_stats.get()
+    if stats is not None:
+        stats["calls"] += 1
+        stats["ms"] += ms
+    if ms > 300:
+        logging.warning(f"SLOW DB {op} on '{collection_name}' took {ms:.0f} ms {extra}")
+
 
 class mongodbclient:
     _client = None
+    _lock = threading.Lock()   # endpoints now run in a threadpool: create the shared client only once
 
     def __init__(self):
         try:
             if mongodbclient._client is None:
-                mongodb_url = os.getenv("connection_url")
-                if mongodb_url is None:
-                    raise Exception("in environment variables connection_url is not set")
+                with mongodbclient._lock:
+                    if mongodbclient._client is None:
+                        mongodb_url = os.getenv("connection_url")
+                        if mongodb_url is None:
+                            raise Exception("in environment variables connection_url is not set")
 
-                mongodbclient._client = pymongo.MongoClient(mongodb_url, tlsCAFile=ca)
+                        # minPoolSize keeps a couple of connections warm; maxIdleTimeMS retires idle sockets
+                        # before a NAT/firewall silently drops them (that shows up as multi-second stalls).
+                        mongodbclient._client = pymongo.MongoClient(
+                            mongodb_url, tlsCAFile=ca, minPoolSize=2, maxIdleTimeMS=60000,
+                            serverSelectionTimeoutMS=10000)
 
             self.client = mongodbclient._client
             self.database = self.client[os.getenv("database_name")]
@@ -32,7 +56,9 @@ class mongodbclient:
 
     def add(self, collection_name, dictionary: dict):
         try:
+            _t = time.perf_counter()
             result = self.database[collection_name].insert_one(dictionary)
+            _track("insert", collection_name, _t)
             logging.info(f"document inserted with id: {result.inserted_id}")
             return result.inserted_id
         except Exception as e:
@@ -44,12 +70,14 @@ class mongodbclient:
             logging.info("trying to fetch data from the dataset")
             collection = self.database[collection_name]
             query = query or {}
+            _t = time.perf_counter()
             results = collection.find(query, projection)
             docs = []
             for doc in results:
                 if "_id" in doc:
                     doc["_id"] = str(doc["_id"])
                 docs.append(doc)
+            _track("find", collection_name, _t, f"docs={len(docs)} query_keys={list(query.keys())}")
             return docs
         except Exception as e:
             logging.error("unable to fetch data from database")
@@ -60,10 +88,12 @@ class mongodbclient:
             collection = self.database[collection_name]
             update_docs = {"$set": update_values}
 
+            _t = time.perf_counter()
             if many:
                 result = collection.update_many(query, update_docs)
             else:
                 result = collection.update_one(query, update_docs)
+            _track("update", collection_name, _t, f"query_keys={list(query.keys())}")
 
             logging.info(f"matched: {result.matched_count}, modified: {result.modified_count}")
             return result

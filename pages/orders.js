@@ -258,6 +258,90 @@ function closeOrderActionMenuOnClickAway(e) {
   if (menu && !menu.contains(e.target)) closeOrderActionMenu();
 }
 
+// ---------- Reading serial numbers out of an uploaded Excel/CSV file ----------
+// Same logic as inventory.js's parseSerialsFromFile — copied here since this
+// page doesn't load inventory.js. Flattens every non-empty cell across the
+// whole sheet into a de-duplicated list of serial numbers, so any layout
+// (one column, one row, multiple columns) works without asking the user to
+// format the file a certain way.
+function parseSerialsFromFile(file, onDone, onError, { lowercase = true } = {}) {
+  if (typeof XLSX === 'undefined') {
+    onError('Excel reader failed to load. Check your connection and try again.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = evt => {
+    try {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      const values = [];
+      rows.forEach(row => {
+        (row || []).forEach(cell => {
+          const val = String(cell ?? '').trim();
+          if (val && val.toLowerCase() !== 'serial number' && val.toLowerCase() !== 'serial no') {
+            values.push(lowercase ? val.toLowerCase() : val);
+          }
+        });
+      });
+      const unique = [...new Set(values)];
+      if (!unique.length) { onError('No values were found in that file.'); return; }
+      onDone(unique);
+    } catch (err) {
+      onError('Could not read that file. Please upload a valid Excel or CSV file.');
+    }
+  };
+  reader.onerror = () => onError('Could not read that file.');
+  reader.readAsArrayBuffer(file);
+}
+
+// Checks every item row's typed/uploaded serial numbers against what's
+// actually available in inventory right now, for serials that are NEW to
+// this item (a serial already on the original order isn't re-checked — it's
+// already reserved by this order, not sitting in the available pool).
+// Any serial that isn't found is silently dropped from that row's list
+// (instead of the save failing outright with a raw backend error), the
+// row's quantity is brought down to match how many valid serials are left,
+// and a report of what was removed is returned so the caller can show it
+// to the user in one popup.
+async function validateAndFixEditSerials(rows, items) {
+  const removedReport = [];
+  for (const row of rows) {
+    const idx = Number(row.dataset.idx);
+    const original = items[idx] || {};
+    const serialsInput = row.querySelector('.editSerials');
+    const qtyInput = row.querySelector('.editQty');
+    if (!serialsInput) continue;
+
+    const typedSerials = serialsInput.value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!typedSerials.length) continue;
+
+    const originalSerials = new Set((original.serial_numbers || []).map(s => (s || '').toLowerCase()));
+    const newlyTyped = typedSerials.filter(s => !originalSerials.has(s.toLowerCase()));
+    if (!newlyTyped.length) continue; // every serial here was already on the order — nothing new to check
+
+    try {
+      const params = new URLSearchParams({ product_id: original.product_id || '', model_no: original.model_no || '' });
+      const res = await apiFetch(`/inventory/available_serials?${params}`);
+      if (!res.ok) continue; // can't verify right now — leave as-is, backend will still catch a genuinely bad serial
+      const data = await res.json();
+      const available = new Set((data.serial_numbers || []).map(s => (s || '').toLowerCase()));
+
+      const invalid = newlyTyped.filter(s => !available.has(s.toLowerCase()));
+      if (invalid.length) {
+        const kept = typedSerials.filter(s => !invalid.includes(s));
+        serialsInput.value = kept.join(', ');
+        if (qtyInput) qtyInput.value = Math.max(1, kept.length);
+        removedReport.push(`${original.product_name || original.product_id || 'Item'}: ${invalid.join(', ')}`);
+      }
+    } catch (err) {
+      console.error('serial availability check failed', err);
+    }
+  }
+  return removedReport;
+}
+
 function openEditOrderModal(o) {
   orderState.activeOrderId = o.order_id;
   const modal = document.getElementById('editOrderModal');
@@ -321,6 +405,13 @@ function openEditOrderModal(o) {
       <label style="font-size:11px;color:#64748b;display:block;margin-top:8px;">Serial Numbers (comma separated)
         <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
       </label>
+      <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+        <button type="button" class="editSerialFileBtn" style="padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:none;cursor:pointer;font-size:11px;color:#64748b;">
+          <i class="fa-solid fa-file-arrow-up"></i> Upload serials from Excel/CSV
+        </button>
+        <input type="file" class="editSerialFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
+        <span class="editSerialFilePreview" style="font-size:11px;color:#0369a1;"></span>
+      </div>
     </div>`).join('');
 
   // an order can't be saved with zero products — the "remove product"
@@ -348,6 +439,28 @@ function openEditOrderModal(o) {
     });
   });
 
+  // Upload serials from Excel/CSV — replaces this row's serial list with
+  // whatever the file contains, and updates the quantity to match (same
+  // behavior as the equivalent upload on the Inventory page).
+  itemsBox.querySelectorAll('.editItemRow').forEach(row => {
+    const fileBtn = row.querySelector('.editSerialFileBtn');
+    const fileInput = row.querySelector('.editSerialFileInput');
+    const preview = row.querySelector('.editSerialFilePreview');
+    if (!fileBtn || !fileInput) return;
+    fileBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      parseSerialsFromFile(file, (serials) => {
+        row.querySelector('.editSerials').value = serials.join(', ');
+        const qtyInput = row.querySelector('.editQty');
+        if (qtyInput) qtyInput.value = serials.length;
+        preview.textContent = `${serials.length} serial number(s) loaded from file.`;
+        fileInput.value = '';
+      }, (msg) => { preview.textContent = msg; preview.style.color = '#d62828'; fileInput.value = ''; });
+    });
+  });
+
   updateRemoveButtonsVisibility();
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
@@ -362,6 +475,21 @@ function openEditOrderModal(o) {
     if (!remark) {
       alert('Please add a remark describing this edit.');
       content.querySelector('.edit-remark')?.focus();
+      return;
+    }
+
+    // Catch a serial number that isn't actually in inventory BEFORE it hits
+    // the backend and fails the whole save — instead of that error, drop
+    // the missing serial(s) from their row, bring that row's quantity down
+    // to match how many valid serials are left, and tell the user what was
+    // removed so nothing silently disappears.
+    const removedReport = await validateAndFixEditSerials(rows, items);
+    if (removedReport.length) {
+      alert(
+        'These serial number(s) aren\'t available in inventory and were removed from the order:\n\n' +
+        removedReport.join('\n') +
+        '\n\nQuantity has been adjusted to match. Review the changes and click Save again to confirm.'
+      );
       return;
     }
 

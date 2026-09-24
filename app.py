@@ -762,18 +762,6 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
         }
 
     inventory_db = inventory_manager()
-
-    # pre-check availability for every line before mutating any inventory.
-    # Two order lines can now share the same product_id (same product,
-    # different model_no lots), so check the SUMMED quantity per (product_id,
-    # model_no) against stock — not each line in isolation — otherwise two
-    # lines that individually look fine (e.g. 80 + 80 when only 100 are in
-    # stock) could both pass the check and only fail/oversell later during
-    # allocation. Keying by model_no too (not product_id alone) matters just
-    # as much: two different variants (e.g. black vs grey) can share the same
-    # product_id, and lumping their stock together would let an order for one
-    # variant silently pass a check backed by the other variant's stock — and
-    # then, during allocation, pull serials/units from the wrong variant's lot.
     qty_by_variant = {}
     for item in items:
         key = (item["product_id"], item.get("model_no") or "")
@@ -1941,9 +1929,20 @@ def ensure_indexes():
                 logging.error(f"index {coll}.{field} skipped: {e}")
 
 
+def _warm_up_db():
+    """Opens the first DB connection at startup so the first page load doesn't pay for it."""
+    try:
+        t = time.perf_counter()
+        mongodbclient().client.admin.command("ping")
+        logging.info(f"mongodb warm-up ping took {(time.perf_counter() - t) * 1000:.0f} ms")
+    except Exception as e:
+        logging.error(f"mongodb warm-up failed: {e}")
+    ensure_indexes()
+
+
 @app.on_event("startup")
 def _create_indexes_on_startup():
-    threading.Thread(target=ensure_indexes, daemon=True).start()
+    threading.Thread(target=_warm_up_db, daemon=True).start()
 
 
 def purge_stale_damage_images():
@@ -2583,8 +2582,21 @@ def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict 
 @app.get("/inventory/")
 def inventory(user: dict = Depends(get_current_user)):
     try:
-        db = inventory_manager()
-        dataset = db.get_data(collection_name=INVENTORY_COLLECTION, query={})
+        # serial_numbers and hologram_numbers were the bulk of this endpoint's
+        # payload (measured: one lot's hologram_numbers alone was 166KB) and
+        # the table doesn't render them directly — View/Edit/Repair fetch the
+        # full row on demand instead (see /inventory/detail). The one thing
+        # the table DOES need from hologram_numbers is its length, for the
+        # spare/service parts Status badge — an aggregation $size keeps that
+        # without shipping the array itself.
+        col = mongodbclient().database[INVENTORY_COLLECTION]
+        pipeline = [
+            {"$addFields": {"hologram_count": {"$size": {"$ifNull": ["$hologram_numbers", []]}}}},
+            {"$project": {"serial_numbers": 0, "hologram_numbers": 0}}
+        ]
+        dataset = list(col.aggregate(pipeline))
+        for item in dataset:
+            item["_id"] = str(item["_id"])
 
         # warranty entries don't flip on their own — work it out fresh on every
         # fetch by comparing today's date to the stored warranty_until.
@@ -2610,6 +2622,60 @@ def inventory(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="inventory dataset cannot be fetched")
 
 
+@app.get("/inventory/detail")
+def inventory_detail(product_id: str = "", model_no: str = "", product_type: str = "",
+                      user: dict = Depends(get_current_user)):
+    """
+    Fresh, full copy of one lot — including serial_numbers/hologram_numbers,
+    which the main /inventory/ list no longer carries (they were the bulk of
+    its payload). Called on demand when View/Edit/Repair is opened on a row,
+    instead of relying on the (now-lighter) cached list.
+    """
+    try:
+        # model_no is only added to the query when one was actually passed in.
+        # Older lots (created before model_no existed) or model-less product
+        # types store it as null/missing, not "" — querying {"model_no": ""}
+        # against those wouldn't match, which is what was making this
+        # endpoint 404 and silently fall back to the serial-less cached row
+        # on the frontend. Matching on product_id (+ product_type) alone when
+        # no model_no was given avoids that false negative.
+        query = {"product_id": product_id}
+        if model_no:
+            query["model_no"] = model_no
+        if product_type:
+            query["product_type"] = product_type
+        db = inventory_manager()
+        docs = db.get_data(collection_name=INVENTORY_COLLECTION, query=query)
+        if not docs:
+            raise HTTPException(status_code=404, detail="product not found")
+        item = docs[0]
+        # Mongo's _id is an ObjectId, which FastAPI can't JSON-serialize on
+        # its own — this was crashing the response *after* the try/except
+        # below with a 500, since the crash happens during serialization,
+        # not inside this function. The /inventory/ list endpoint already
+        # does this same conversion; this endpoint was missing it.
+        if "_id" in item:
+            item["_id"] = str(item["_id"])
+
+        today_dt = datetime.now(timezone.utc)
+        today = today_dt.strftime("%Y-%m-%d")
+        if item.get("warranty_until"):
+            item["warranty_status"] = "over warranty" if item["warranty_until"] < today else "under warranty"
+            if item["warranty_status"] == "under warranty":
+                try:
+                    expiry = datetime.strptime(item["warranty_until"], "%Y-%m-%d")
+                    item["warranty_days_left"] = (expiry - today_dt.replace(tzinfo=None)).days
+                except ValueError:
+                    item["warranty_days_left"] = None
+
+        return {"message": "product detail", "product": item}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"inventory detail cannot be fetched: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/inventory/serial_history/{serial_number}")
 def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     """
@@ -2623,7 +2689,11 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     and what happened to it since.
     """
     try:
-        serial_number = serial_number.strip()
+        # every serial is lowercased when it's first added to inventory (see
+        # inventory.js), so the lookup here has to match on the same
+        # lowercased value or a serial typed in with different case (as
+        # printed on the unit's physical label) would silently find nothing.
+        serial_number = serial_number.strip().lower()
         if not serial_number:
             raise HTTPException(status_code=400, detail="serial number is required")
 
@@ -2742,7 +2812,15 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                 }
             })
 
-        events.sort(key=lambda e: e.get("date") or "")
+        # dates can come back as plain "YYYY-MM-DD" strings from some
+        # collections and as native datetime objects from others — sorting
+        # a mix of the two raises a TypeError ("'<' not supported between
+        # instances of 'datetime.datetime' and 'str'"), which was another
+        # way this endpoint could 500. Stringify every date before sorting.
+        events.sort(key=lambda e: str(e.get("date") or ""))
+        for e in events:
+            if e.get("date") is not None and not isinstance(e["date"], str):
+                e["date"] = str(e["date"])
 
         logging.info(f"serial history fetched for {serial_number}: {len(events)} event(s)")
         return {"message": "serial history", "serial_number": serial_number, "events": events}
@@ -2750,8 +2828,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("serial history lookup failed")
-        raise HTTPException(status_code=500, detail="serial history could not be fetched")
+        logging.error(f"serial history lookup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def productTypeLabelPy(product_type):

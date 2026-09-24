@@ -7,7 +7,16 @@ authors = [
     { name = "Arun/nexus", email = "mspaayal05@gmail.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+
+dependencies = [
+    "fastapi>=0.141.1",
+    "fastmcp>=4.0.5",
+    "from-root>=1.3.0",
+    "pydantic>=2.13.5",
+    "pymongo>=4.18.1",
+    "uvicorn>=0.53.0",
+]
+
 
 [project.scripts]
 order-dispatch = "order_dispatch:main"

@@ -267,9 +267,24 @@ class inventory_manager(mongodbclient):
             logging.error("data updation unsuccessful")
             raise Exception(e)
 
-    def get_data(self, collection_name, query=None, projection=None):
+    def get_data(self, collection_name, query=None, projection=None, sort=None, skip=None, limit=None):
         try:
-            dataset = super().get_data(collection_name=collection_name, query=query, projection=projection)
+            # Only forward sort/skip/limit when a caller actually asked for
+            # them — the base mongodbclient.get_data() doesn't accept these
+            # keywords at all, so always passing them through (even as None)
+            # raised "unexpected keyword argument 'sort'" on every call that
+            # went through this wrapper, including ones that never touch
+            # sort/skip/limit in the first place.
+            extra = {}
+            if projection is not None:
+                extra["projection"] = projection
+            if sort is not None:
+                extra["sort"] = sort
+            if skip is not None:
+                extra["skip"] = skip
+            if limit is not None:
+                extra["limit"] = limit
+            dataset = super().get_data(collection_name=collection_name, query=query, **extra)
             logging.info("inventory data was fetched successfully")
             return dataset
         except Exception as e:
