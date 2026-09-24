@@ -221,7 +221,24 @@ class inventory_manager(mongodbclient):
         entry so the returned stock isn't silently lost.
         """
         try:
-            query = {"product_id": product_id, "product_name": product_name, "model_no": model_no or ""}
+            # Same pitfall already documented/handled at the inventory_detail
+            # endpoint: older lots (or model-less product types) store
+            # model_no as null/missing, not "". Querying a literal "" here
+            # would miss those lots entirely and wrongly fall through to the
+            # "create a new entry" branch below instead of merging — which
+            # is exactly how a return used to end up creating a second,
+            # separate inventory document instead of merging into the old
+            # one. Match null/missing the same way "" is matched instead.
+            query = {"product_id": product_id, "product_name": product_name}
+            if model_no:
+                query["model_no"] = model_no
+            else:
+                query["model_no"] = {"$in": [None, ""]}
+            # An OK return should never get merged into a "damaged" lot that
+            # happens to share the same product_id/name/model_no (e.g. an
+            # earlier faulty return of the same product) — it belongs back
+            # in the category it was actually stocked/sold under.
+            query["product_type"] = {"$ne": "damaged"}
             existing = self.get_data(collection_name=collection_name, query=query)
             if existing:
                 entry = existing[0]
