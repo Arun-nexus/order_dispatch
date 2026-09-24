@@ -1,6 +1,6 @@
 const techState = { services: [], allocations: [] };
 let techPage = 1;
-const TECH_PAGE_SIZE = 7;
+const TECH_PAGE_SIZE = 20;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;

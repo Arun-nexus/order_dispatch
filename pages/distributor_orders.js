@@ -4,7 +4,7 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 let doPage = 1;
-const DO_PAGE_SIZE = 7;
+const DO_PAGE_SIZE = 50;
 
 const PAYMENT_MODES = [
   { value: 'Credit', label: 'Credit' },

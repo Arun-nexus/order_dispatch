@@ -4,7 +4,7 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 let spPage = 1;
-const SP_PAGE_SIZE = 7;
+const SP_PAGE_SIZE = 50;
 
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
