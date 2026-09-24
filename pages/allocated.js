@@ -3,10 +3,9 @@ function esc(s) {
 }
 const allocState = { allocations: [], products: [], requests: [], searchQuery: '', activeFilters: null };
 let allocPage = 1;
-const ALLOC_PAGE_SIZE = 50;
+const ALLOC_PAGE_SIZE = 70;
 
-// Generic pagination control renderer — rebuilds the .pagination buttons based
-// on however many pages the current row count needs, and wires them up.
+
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
   if (totalPages <= 1) { container.innerHTML = ''; return; }
