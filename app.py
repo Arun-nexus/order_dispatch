@@ -446,7 +446,7 @@ def team_allocations(user: dict = Depends(require_role("distributor"))):
 
         alloc_db = allocation_manager()
         dataset = alloc_db.get_data(collection_name=ALLOCATION_COLLECTION,
-                                     query={"allocation_type": "demo_unit", "allocated_by": {"$in": team_usernames}},
+                                     query={"allocation_type": {"$in": ["demo_unit", "product"]}, "allocated_by": {"$in": team_usernames}},
                                      projection={"damage_report.image": 0})
         return {"message": "team demo unit allocations", "dataset": dataset}
     except Exception as e:
@@ -3487,7 +3487,7 @@ def my_allocations(user: dict = Depends(require_role("distributor"))):
     try:
         db = allocation_manager()
         dataset = db.get_data(collection_name=ALLOCATION_COLLECTION,
-                               query={"allocation_type": "demo_unit", "allocated_by": user["username"]},
+                               query={"allocation_type": {"$in": ["demo_unit", "product"]}, "allocated_by": user["username"]},
                                projection={"damage_report.image": 0})
         return {"message": "my demo unit allocations", "dataset": dataset}
     except Exception as e:
@@ -4216,6 +4216,7 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
                 serial = allocated_serials[i] if i < len(allocated_serials) else None
                 unit_allocation = allocation_manager(
                     sales_person=sales_person_snapshot,
+                    allocated_by=request.allocated_to,
                     items=[{
                         "product_id": item.product_id,
                         "product_name": item.product_name,
