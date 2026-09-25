@@ -603,6 +603,14 @@ function columnsForCategory(category) {
     const cls = s === 'Active' ? 'high' : (s === 'Partial' ? 'medium' : 'low');
     return `<span class="stock ${cls}">${s}</span>`;
   };
+  // Who added this lot, and — if it's since been edited by someone else —
+  // who last updated it. Mirrors how the order page attributes each order
+  // to whoever raised/actioned it.
+  const addedByCell = p => {
+    const addedBy = p.created_by ? escapeHtmlInv(p.created_by) : '—';
+    const updatedBy = p.updated_by && p.updated_by !== p.created_by ? escapeHtmlInv(p.updated_by) : '';
+    return `${addedBy}${updatedBy ? `<br><small style="color:#94a3b8;">Updated by ${updatedBy}</small>` : ''}`;
+  };
 
   switch (category) {
     case 'product':
@@ -613,7 +621,8 @@ function columnsForCategory(category) {
         { label: 'Receiving Date', cell: dateCell },
         { label: 'Quantity', cell: qtyCell },
         { label: 'Price', cell: priceCell },
-        { label: 'Tax', cell: taxCell }
+        { label: 'Tax', cell: taxCell },
+        { label: 'Added By', cell: addedByCell }
       ];
     case 'spare_parts':
       return [
@@ -622,7 +631,8 @@ function columnsForCategory(category) {
         { label: 'Shipment Received Date', cell: dateCell },
         { label: 'Warranty Period', cell: warrantyPeriodCell },
         { label: 'Quantity', cell: qtyCell },
-        { label: 'Status', cell: statusBadge }
+        { label: 'Status', cell: statusBadge },
+        { label: 'Added By', cell: addedByCell }
       ];
     case 'service_parts':
       return [
@@ -632,7 +642,8 @@ function columnsForCategory(category) {
         { label: 'Warranty Period', cell: warrantyPeriodCell },
         { label: 'Quantity', cell: qtyCell },
         { label: 'Status', cell: statusBadge },
-        { label: 'Type', cell: p => p.part_category ? (p.part_category === 'warranty' ? 'Warranty' : 'Purchase') : '—' }
+        { label: 'Type', cell: p => p.part_category ? (p.part_category === 'warranty' ? 'Warranty' : 'Purchase') : '—' },
+        { label: 'Added By', cell: addedByCell }
       ];
     case 'damaged':
       return [
@@ -643,7 +654,8 @@ function columnsForCategory(category) {
         { label: 'Quantity', cell: qtyCell },
         { label: 'Warranty Period', cell: warrantyPeriodCell },
         { label: 'Reason of Damage', cell: p => p.reason_of_damage ?? p.reason ?? '—' },
-        { label: 'Status', cell: p => p.damage_status ?? 'Damaged' }
+        { label: 'Status', cell: p => p.damage_status ?? 'Damaged' },
+        { label: 'Added By', cell: addedByCell }
       ];
     default: // no category filter active — table stays exactly as it is today
       return [
@@ -655,7 +667,8 @@ function columnsForCategory(category) {
         { label: 'Purchase Date', cell: dateCell },
         { label: 'Quantity', cell: qtyCell },
         { label: 'Price', cell: priceCell },
-        { label: 'Tax', cell: taxCell }
+        { label: 'Tax', cell: taxCell },
+        { label: 'Added By', cell: addedByCell }
       ];
   }
 }

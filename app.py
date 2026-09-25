@@ -2857,7 +2857,7 @@ def available_serials(product_id: str, model_no: str = "", user: dict = Depends(
 
 
 @app.post("/inventory/create")
-def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     try:
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
@@ -2898,6 +2898,7 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
                 parent_product_name=request.parent_product_name.strip(),
                 part_category=request.part_category if request.product_type == "service_parts" else None,
                 hologram_numbers=holograms,
+                created_by=user["username"],
             )
             part.add_part(collection_name=INVENTORY_COLLECTION)
             return {"message": "part was listed successfully"}
@@ -2916,7 +2917,8 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
             serial_numbers=request.serial_numbers,
             product_type=request.product_type,
             warranty_until=(request.warranty_until or None) if request.product_type == "damaged" else None,
-            reason=request.reason if request.product_type == "damaged" else ""
+            reason=request.reason if request.product_type == "damaged" else "",
+            created_by=user["username"],
         )
         inventory_item.add_or_merge(collection_name=INVENTORY_COLLECTION)
         logging.info("product listed successfully on inventory")
@@ -2930,7 +2932,7 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
 
 
 @app.post("/inventory/update/{product_id}")
-def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     try:
         db = inventory_manager()
         match_query = {"product_id": product_id}
@@ -2943,6 +2945,9 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
         current_type = existing[0].get("product_type", "product")
 
         updated_values = dict(request.updated_values)
+        # track who last touched this lot — same idea as an order's creator,
+        # shown on the inventory table/view so edits are attributable
+        updated_values["updated_by"] = user["username"]
         raw_effective_type = updated_values.get("product_type", current_type)
         # normalize (lowercase + strip) so a stray case/whitespace mismatch — or a
         # request that omits product_type — can never make an accessories/spare_parts/
@@ -3136,7 +3141,7 @@ def delete_product(product_id: str, model_no: Optional[str] = None, user: dict =
 
 
 @app.post("/inventory/repair/{product_id}")
-def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,

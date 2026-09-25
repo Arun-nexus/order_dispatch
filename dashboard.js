@@ -157,12 +157,13 @@ function renderTeamPanel() {
     const div = document.createElement('div');
     div.className = 'service-item';
     div.style.cursor = 'pointer';
+    const roleLabel = member.role === 'distributor' ? 'Sales' : 'Technician';
     div.innerHTML = `
       <div>
         <h4>${member.name ?? member.username}</h4>
-        <p>${member.username} • ${member.role === 'distributor' ? 'Distributor' : 'Technician'}</p>
+        <p>${member.username} • ${roleLabel}</p>
       </div>
-      <span class="status ${member.role === 'distributor' ? 'processing' : 'pending'}">${member.role === 'distributor' ? 'Distributor' : 'Technician'}</span>`;
+      <span class="status ${member.role === 'distributor' ? 'processing' : 'pending'}">${roleLabel}</span>`;
     div.addEventListener('click', () => openTeamReportModal(member));
     container.appendChild(div);
   });
@@ -208,7 +209,7 @@ function openTeamReportModal(member) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div>
         <h3 style="margin:0;">${member.name ?? member.username}</h3>
-        <p style="margin:2px 0 0;color:#64748b;font-size:13px;">${member.username} • ${member.role === 'distributor' ? 'Distributor' : 'Technician'}</p>
+        <p style="margin:2px 0 0;color:#64748b;font-size:13px;">${member.username} • ${member.role === 'distributor' ? 'Sales' : 'Technician'}</p>
       </div>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>

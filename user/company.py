@@ -11,6 +11,7 @@ class login_role(str, enum.Enum):
     assembly = "assembly"
     technician = "technician"
     distributor = "distributor"
+    inventory_manager = "inventory_manager"
 
 
 class login(mongodbclient):

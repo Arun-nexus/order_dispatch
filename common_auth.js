@@ -11,6 +11,7 @@ const ROLE_ACCESS = {
   assembly:        ['assembly.html'],
   technician:      ['technician.html','technician_dashboard.html'],
   distributor:     ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html'],
+  inventory_manager: ['inventory.html'],
 };
 
 const ROLE_HOME = {
@@ -20,6 +21,7 @@ const ROLE_HOME = {
   assembly: 'assembly.html',
   technician: 'technician.html',
   distributor: 'distributor.html',
+  inventory_manager: 'inventory.html',
 };
 
 function getToken() {

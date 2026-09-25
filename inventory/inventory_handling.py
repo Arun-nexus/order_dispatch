@@ -10,7 +10,8 @@ class inventory_manager(mongodbclient):
                  purchase_date=None, lot_no=None, supplier=None, price=None, tax_rate=None,
                  model_no=None, supplier_address=None, serial_numbers=None, product_type=None,
                  warranty_until=None, reason="",
-                 parent_product_name="", part_category=None, hologram_numbers=None):
+                 parent_product_name="", part_category=None, hologram_numbers=None,
+                 created_by=None):
 
         super().__init__()
 
@@ -38,6 +39,9 @@ class inventory_manager(mongodbclient):
         self.parent_product_name = parent_product_name or ""
         self.part_category = part_category or None      # service_parts: "purchase" | "warranty"
         self.hologram_numbers = list(hologram_numbers or [])
+        # username of whoever raised this add/update — set on create, and
+        # refreshed as updated_by whenever an existing lot is merged into
+        self.created_by = created_by
 
     def add(self, collection_name):
         try:
@@ -56,6 +60,8 @@ class inventory_manager(mongodbclient):
                 "product_type": self.product_type,
                 "warranty_until": self.warranty_until,
                 "reason": self.reason,
+                "created_by": self.created_by,
+                "updated_by": self.created_by,
             }
             if self.product_type in ("spare_parts", "service_parts"):
                 product_dic["parent_product_name"] = self.parent_product_name
@@ -145,6 +151,7 @@ class inventory_manager(mongodbclient):
                     "price": self.price,
                     "tax_rate": self.tax_rate,
                     "purchase_date": self.purchase_date,
+                    "updated_by": self.created_by,
                 }
                 self.update_data(
                     collection_name=collection_name,
@@ -187,7 +194,8 @@ class inventory_manager(mongodbclient):
                     collection_name=collection_name,
                     query={"_id": ObjectId(entry["_id"])},
                     update_values={"quantity": int(entry.get("quantity", 0) or 0) + int(self.quantity or 0),
-                                   "hologram_numbers": holograms}
+                                   "hologram_numbers": holograms,
+                                   "updated_by": self.created_by}
                 )
                 return {"mode": "merged", "product_id": entry.get("product_id"), "quantity_added": self.quantity}
 
