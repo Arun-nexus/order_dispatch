@@ -495,10 +495,10 @@ function getFilteredInventory() {
 
 function applyRolePermissions() {
   const role = getRole();
-  // matches the backend's require_role("service_manager", "admin", "accounts")
+  // matches the backend's require_role("service_manager", "admin", "accounts", "inventory_manager")
   // on /inventory/create and /inventory/update — 'employee' isn't a real role,
   // it was leftover from before roles were split into accounts/service_manager/assembly
-  const canManage = role === 'admin' || role === 'accounts' || role === 'service_manager';
+  const canManage = role === 'admin' || role === 'accounts' || role === 'service_manager' || role === 'inventory_manager';
   const canDelete = role === 'admin';
   if (!canManage) {
     const addBtn = document.querySelector('.add-product');
