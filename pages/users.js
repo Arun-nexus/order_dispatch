@@ -3,7 +3,7 @@ const userState = { users: [] };
 // Display-only label for the role column — the underlying role value
 // (u.role, sent to/from the backend) stays 'distributor' etc. always.
 // This only changes what's shown in this table.
-const USER_ROLE_LABELS = { distributor: 'Employee-Sales Person' };
+const USER_ROLE_LABELS = { distributor: 'Employee-Sales Person', inventory_manager: 'Inventory Manager' };
 function displayRole(role) {
   if (!role) return '';
   return USER_ROLE_LABELS[role] || (role.charAt(0).toUpperCase() + role.slice(1));
@@ -37,6 +37,7 @@ function renderCards() {
   document.getElementById('cardEmployees').textContent = users.filter(u => u.role === 'accounts').length;
   document.getElementById('cardTechnicians').textContent = users.filter(u => u.role === 'technician').length;
   document.getElementById('cardDistributors').textContent = users.filter(u => u.role === 'distributor').length;
+  document.getElementById('cardInventoryManagers').textContent = users.filter(u => u.role === 'inventory_manager').length;
 }
 
 function roleBadgeClass(role) {
@@ -131,6 +132,7 @@ function openUserModal(existingUser) {
         <option value="assembly" ${existingUser?.role === 'assembly' ? 'selected' : ''}>Assembly</option>
         <option value="technician" ${existingUser?.role === 'technician' ? 'selected' : ''}>Technician</option>
         <option value="distributor" ${existingUser?.role === 'distributor' ? 'selected' : ''}>Employee-Sales Person</option>
+        <option value="inventory_manager" ${existingUser?.role === 'inventory_manager' ? 'selected' : ''}>Inventory Manager</option>
       </select>
       <div id="managerBox" style="display:none;">
         <label style="font-size:13px;color:#64748b;">Team Manager</label>
