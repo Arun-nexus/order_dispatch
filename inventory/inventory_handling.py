@@ -276,6 +276,17 @@ class inventory_manager(mongodbclient):
 
     def update(self, collection_name, query, update_values, many=False):
         try:
+            # if this update sets quantity down to 0 (or below), delete the
+            # entry outright instead of leaving an empty/zero-quantity row
+            # behind — covers manual edits (e.g. the admin edit form) that
+            # set quantity directly, as opposed to the allocate/consume
+            # paths below which decrement it themselves.
+            new_quantity = update_values.get("quantity")
+            if new_quantity is not None and int(new_quantity or 0) <= 0:
+                deleted = super().delete_data(collection_name=collection_name, query=query)
+                logging.info("quantity reached 0 — inventory entry deleted instead of updated")
+                return deleted
+
             data = super().update_data(collection_name=collection_name, query=query,
                                          update_values=update_values, many=many)
             logging.info("value was updated to the inventory!")
@@ -283,6 +294,25 @@ class inventory_manager(mongodbclient):
         except Exception as e:
             logging.error("data updation unsuccessful")
             raise Exception(e)
+
+    def _decrement_or_delete(self, collection_name, entry_id, new_quantity, extra_update_values=None):
+        """
+        Shared by every allocate/consume path below: applies a quantity
+        decrement to the entry at entry_id. If the resulting quantity is 0
+        (or less), the entry is deleted outright instead of being left
+        behind as a zero-quantity row. extra_update_values (e.g. an updated
+        serial_numbers/hologram_numbers list) are applied alongside quantity
+        when the entry survives; they're moot when it's deleted along with it.
+        """
+        if new_quantity <= 0:
+            self.delete_data(collection_name=collection_name, query={"_id": ObjectId(entry_id)})
+            logging.info(f"quantity reached 0 for entry {entry_id} — deleted from inventory")
+        else:
+            update_values = {"quantity": new_quantity}
+            if extra_update_values:
+                update_values.update(extra_update_values)
+            self.update_data(collection_name=collection_name, query={"_id": ObjectId(entry_id)},
+                              update_values=update_values)
 
     def get_data(self, collection_name, query=None, projection=None, sort=None, skip=None, limit=None):
         try:
@@ -389,11 +419,7 @@ class inventory_manager(mongodbclient):
                 take = min(remaining, available)
                 if take <= 0:
                     continue
-                self.update_data(
-                    collection_name=collection_name,
-                    query={"_id": ObjectId(entry["_id"])},
-                    update_values={"quantity": available - take}
-                )
+                self._decrement_or_delete(collection_name, entry["_id"], available - take)
                 remaining -= take
 
             if remaining > 0:
@@ -442,11 +468,8 @@ class inventory_manager(mongodbclient):
                 taken = available_hologram[:take]
                 leftover_hologram = available_hologram[take:]
                 new_quantity = available_qty - take
-                self.update_data(
-                    collection_name=collection_name,
-                    query={"_id": ObjectId(entry["_id"])},
-                    update_values={"hologram_numbers": leftover_hologram, "quantity": new_quantity}
-                )
+                self._decrement_or_delete(collection_name, entry["_id"], new_quantity,
+                                           {"hologram_numbers": leftover_hologram})
                 allocated.extend(taken)
                 remaining -= take
 
@@ -514,11 +537,8 @@ class inventory_manager(mongodbclient):
 
                 leftover_serials = [s for s in (match.get("serial_numbers") or []) if s != serial]
                 new_quantity = int(match.get("quantity", 0) or 0) - 1
-                self.update_data(
-                    collection_name=collection_name,
-                    query={"_id": ObjectId(match["_id"])},
-                    update_values={"serial_numbers": leftover_serials, "quantity": new_quantity}
-                )
+                self._decrement_or_delete(collection_name, match["_id"], new_quantity,
+                                           {"serial_numbers": leftover_serials})
                 # keep our local view in sync so two requested serials from the
                 # same lot in one call don't both match the stale entry
                 match["serial_numbers"] = leftover_serials
@@ -639,11 +659,8 @@ class inventory_manager(mongodbclient):
                 taken_serials = available_serials[:serial_take]
                 leftover_serials = available_serials[serial_take:]
 
-                self.update_data(
-                    collection_name=collection_name,
-                    query={"_id": ObjectId(entry["_id"])},
-                    update_values={"serial_numbers": leftover_serials, "quantity": available_qty - take}
-                )
+                self._decrement_or_delete(collection_name, entry["_id"], available_qty - take,
+                                           {"serial_numbers": leftover_serials})
 
                 allocated.extend(taken_serials)
                 remaining -= take

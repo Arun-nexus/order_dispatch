@@ -1546,8 +1546,8 @@ function renderPartDetailsStep() {
     const category = isService ? (fd.get('part_category') || '') : '';
     const warrantyUntil = fd.get('warranty_until') || '';
     if (category === 'warranty' && !warrantyUntil) { alert('Warranty Until is required for a warranty part.'); return; }
+    // hologram numbers are allowed to repeat — no uniqueness guard here.
     const holograms = (fd.get('hologram_numbers') || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
-    if (new Set(holograms).size !== holograms.length) { alert('Hologram numbers must be unique.'); return; }
     if (holograms.length > quantity) { alert('Hologram numbers cannot be more than the quantity.'); return; }
 
     const payload = {
@@ -1790,7 +1790,10 @@ function renderLotDetailsStep() {
       }
     }
 
-    if (serials.length) {
+    // duplicate-serial guard only applies to product_type "product" — other
+    // types (accessories/damaged) are allowed to reuse a serial number
+    // (e.g. a unit moving into "damaged" under the serial it already had).
+    if (serials.length && productType === 'product') {
       if (new Set(serials).size !== serials.length) { alert('Serial numbers must be unique.'); return; }
 
       const existingSerials = new Set(invState.products.flatMap(p => p.serial_numbers || []).map(s => (s || '').toLowerCase()));
@@ -1858,15 +1861,20 @@ function wireModals() {
           showResponseModal('Missing serial numbers', 'Please fill in every new serial number field before saving.', false);
           return;
         }
-        const existingSerials = new Set(
-          invState.products.flatMap(p => p.serial_numbers || [])
-            .filter(s => !invState.editSerials.includes(s))
-            .map(s => (s || '').toLowerCase())
-        );
-        const duplicates = new_serial_numbers.filter(s => existingSerials.has(s));
-        if (duplicates.length) {
-          showResponseModal('Duplicate serial numbers', `These serial number(s) already exist in inventory: ${duplicates.join(', ')}`, false);
-          return;
+        // duplicate-serial guard only applies to product_type "product" —
+        // other types are allowed to reuse a serial number already on file.
+        const editType = typeSelect ? typeSelect.value : 'product';
+        if (editType === 'product') {
+          const existingSerials = new Set(
+            invState.products.flatMap(p => p.serial_numbers || [])
+              .filter(s => !invState.editSerials.includes(s))
+              .map(s => (s || '').toLowerCase())
+          );
+          const duplicates = new_serial_numbers.filter(s => existingSerials.has(s));
+          if (duplicates.length) {
+            showResponseModal('Duplicate serial numbers', `These serial number(s) already exist in inventory: ${duplicates.join(', ')}`, false);
+            return;
+          }
         }
       }
       if (targetQuantity < keptCount) {
