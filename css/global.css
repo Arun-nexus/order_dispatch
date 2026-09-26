@@ -1,10 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --primary: #1665ff;
-  --primary-dark: #0f4fc9;
-  --primary-light: #4c92ff;
-  --primary-gradient: linear-gradient(135deg, #1665ff, #4c92ff);
+  --primary: #23c8a7;
+  --primary-dark: #3eb19a;
+  --primary-light: #41e4c3;
+  --primary-gradient: linear-gradient(135deg, #23c8a7, #41e4c3);
   --bg-main: #eef4ff;
   --bg-white: #ffffff;
   --bg-light: #f7f9ff;
@@ -19,7 +19,7 @@
   --warning-bg: #fff4d8;
   --danger: #d62828;
   --danger-bg: #ffe3e3;
-  --info: #1665ff;
+  --info: #23c8a7;
   --info-bg: #edf4ff;
   --shadow-sm: 0 8px 18px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 15px 30px rgba(0, 0, 0, 0.08);
@@ -1891,7 +1891,7 @@ form .save-btn {
 
 .action-btn.blue{
 
-    background:#1665ff;
+    background:#23c8a7;
 
 }
 
