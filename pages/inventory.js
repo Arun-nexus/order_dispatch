@@ -888,6 +888,9 @@ function openExportTypeMenu(anchorBtn) {
     </button>
     <button type="button" class="export-type-opt" data-mode="summary" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
       <i class="fa-solid fa-layer-group" style="width:16px;"></i>&nbsp; Summary (product + quantity)
+    </button>
+    <button type="button" class="export-type-opt" data-mode="single" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
+      <i class="fa-solid fa-magnifying-glass" style="width:16px;"></i>&nbsp; Specific Product (choose one)
     </button>`;
   document.body.appendChild(menu);
 
@@ -897,6 +900,7 @@ function openExportTypeMenu(anchorBtn) {
     btn.addEventListener('click', () => {
       menu.remove();
       if (btn.dataset.mode === 'summary') exportInventorySummaryCSV();
+      else if (btn.dataset.mode === 'single') openSpecificProductPicker();
       else exportInventoryCSV();
     });
   });
@@ -956,6 +960,84 @@ function exportInventorySummaryCSV() {
       downloadCSV(header, csvRows, exportFileName('inventory_summary'));
     }
   });
+}
+
+// ---------- Export a single, specifically-chosen product ----------
+// Lets the user search/pick exactly one product (scoped to the category
+// already chosen in step 1) instead of exporting a whole category, and
+// downloads a CSV where Product Name, Product ID and Model Number are each
+// their own clearly-labelled column (rather than folded into one string).
+function openSpecificProductPicker() {
+  document.getElementById('exportSingleProductModal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'exportSingleProductModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:1300;';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:26px;width:380px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h3>Export Specific Product</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <input id="singleProductSearch" placeholder="Search by product name, ID or model no." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+      <div id="singleProductList" style="margin-top:10px;max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  modal.querySelector('.close').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+  const listBox = modal.querySelector('#singleProductList');
+  const searchInput = modal.querySelector('#singleProductSearch');
+
+  function renderList(query) {
+    const q = (query || '').trim().toLowerCase();
+    const rows = exportRowsForCategory().filter(p => !q ||
+      (p.product_name || '').toLowerCase().includes(q) ||
+      (p.product_id || '').toLowerCase().includes(q) ||
+      (p.model_no || '').toLowerCase().includes(q));
+
+    if (!rows.length) {
+      listBox.innerHTML = '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:10px;">No matching product.</p>';
+      return;
+    }
+
+    listBox.innerHTML = rows.map((p, i) => `
+      <button type="button" class="single-product-opt" data-idx="${i}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:#f8fafc;cursor:pointer;border-radius:8px;font-size:13px;color:#1e293b;">
+        <strong>${escapeHtmlInv(p.product_name || '')}</strong><br>
+        <small style="color:#64748b;">ID: ${escapeHtmlInv(p.product_id || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}</small>
+      </button>`).join('');
+
+    listBox.querySelectorAll('.single-product-opt').forEach(btn => {
+      btn.addEventListener('mouseenter', () => btn.style.background = '#eef2ff');
+      btn.addEventListener('mouseleave', () => btn.style.background = '#f8fafc');
+      btn.addEventListener('click', () => {
+        modal.remove();
+        exportSingleProductCSV(rows[Number(btn.dataset.idx)]);
+      });
+    });
+  }
+
+  searchInput.addEventListener('input', () => renderList(searchInput.value));
+  renderList('');
+  searchInput.focus();
+}
+
+async function exportSingleProductCSV(product) {
+  if (!product) return;
+  const p = await fetchProductDetail(product);
+  const isPart = p.product_type === 'spare_parts' || p.product_type === 'service_parts';
+  const unitLabel = isPart ? 'Hologram Number' : 'Serial Number';
+  const units = isPart ? hologramNumbersOf(p) : (p.serial_numbers || []);
+
+  const header = ['Product Name', 'Product ID', 'Model Number', unitLabel, 'Quantity'];
+  const qty = Number(p.quantity) || 0;
+  const csvRows = units.length
+    ? units.map(u => [p.product_name || '', p.product_id || '', p.model_no || '', u, qty])
+    : [[p.product_name || '', p.product_id || '', p.model_no || '', '', qty]];
+
+  const safeName = (p.product_name || 'product').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+  downloadCSV(header, csvRows, `product_${safeName}.csv`);
 }
 
 // ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------

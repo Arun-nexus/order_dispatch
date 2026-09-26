@@ -690,6 +690,18 @@ function wireTopActions() {
   }
 }
 
+// Distinct sales-person names across the current product allocations, for
+// the export wizard's "All / a particular sales person" filter. Spare-part
+// and demo-unit allocations don't have a sales person, so they're only ever
+// included when "All" is selected.
+function uniqueSalesPersonNames() {
+  const names = new Set();
+  allocState.allocations.forEach(a => {
+    if (a.allocation_type !== 'spare_part' && a.sales_person?.name) names.add(a.sales_person.name);
+  });
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 function exportAllocationsCSV() {
   openExportWizard({
     title: 'Export Allocations',
@@ -697,6 +709,8 @@ function exportAllocationsCSV() {
     statusField: 'return_status',
     dateField: 'allotment_date',
     dateLabel: 'Allotment Date',
+    personOptions: uniqueSalesPersonNames(),
+    personField: 'sales_person.name',
     getRows: () => allocState.allocations,
     onConfirm: (rows) => {
       const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Allotment Date', 'Return Due', 'Status'];
@@ -727,7 +741,7 @@ function downloadCSV(header, rows, filename) {
   a.click();
 }
 
-function openExportWizard({ title, statusOptions, statusField, dateField, dateLabel, getRows, onConfirm }) {
+function openExportWizard({ title, statusOptions, statusField, dateField, dateLabel, personOptions, personField, getRows, onConfirm }) {
   const field = statusField || 'status';
   let modal = document.getElementById('exportWizardModal');
   if (!modal) {
@@ -750,6 +764,12 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
           <option value="">All Statuses</option>
           ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
         </select>` : ''}
+        ${personOptions ? `
+        <label style="font-size:13px;color:#64748b;">Sales Person</label>
+        <select name="person" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="">All</option>
+          ${personOptions.map(p => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+        </select>` : ''}
         ${dateField ? `
         <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
         <input type="date" name="dateFrom">
@@ -770,11 +790,16 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
     e.preventDefault();
     const fd = new FormData(e.target);
     const status = fd.get('status');
+    const person = fd.get('person');
     const dateFrom = fd.get('dateFrom');
     const dateTo = fd.get('dateTo');
 
     const filtered = getRows().filter(row => {
       if (status && row[field] !== status) return false;
+      // "All" (empty) keeps every allocation type; picking a name only keeps
+      // that sales person's product allocations (spare parts/demo units have
+      // no sales_person, so they're excluded once a specific name is chosen).
+      if (personField && person && row.sales_person?.name !== person) return false;
       if (dateField && (dateFrom || dateTo)) {
         const rowDate = row[dateField] ? new Date(row[dateField]) : null;
         if (!rowDate) return false;

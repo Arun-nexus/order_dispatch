@@ -191,6 +191,8 @@ function renderServiceTable(services) {
       <td>${warrantyCellHtml(s)}</td>
       <td><span class="${statusBadge(s.status)}">${(s.status ?? '').replace('_', ' ')}</span></td>
       <td>${returnCell}</td>
+      <td>${s.created_by ?? ''}</td>
+      <td>${s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '-'}</td>
       <td>${actionsHtml}</td>`;
     tbody.appendChild(tr);
   });
@@ -268,7 +270,8 @@ function openViewModal(s) {
   const modal = document.getElementById('viewModal');
   if (!modal) return;
   const values = modal.querySelectorAll('.detail p');
-  const fields = [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None', s.service_charges != null ? `₹${s.service_charges}` : 'Not set'];
+  const listedOn = s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '-';
+  const fields = [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None', s.service_charges != null ? `₹${s.service_charges}` : 'Not set', s.created_by || '-', listedOn];
   values.forEach((el, i) => el.textContent = fields[i] ?? '');
   modal.style.display = 'flex';
 }
@@ -354,8 +357,8 @@ function exportServicesCSV() {
     dateLabel: 'Purchase Date',
     getRows: () => svcState.services,
     onConfirm: (rows) => {
-      const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Location', 'Status'];
-      const csvRows = rows.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.location, s.status]);
+      const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Location', 'Status', 'Created By', 'Listed On'];
+      const csvRows = rows.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.location, s.status, s.created_by || '', s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '']);
       downloadCSV(header, csvRows, 'services.csv');
     }
   });

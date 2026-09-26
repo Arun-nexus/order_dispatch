@@ -28,7 +28,7 @@ class service_detail(mongodbclient):
         self.spare_parts = ""
         self.service_id = str(uuid.uuid4())
 
-    def add_service(self, technician_id, purchase_date: str, issue: str, image: str, video: str, collection_name: str,location: str = "indoor", spare_parts: str = "", status="active"):
+    def add_service(self, technician_id, purchase_date: str, issue: str, image: str, video: str, collection_name: str,location: str = "indoor", spare_parts: str = "", status="active", created_by: str = None):
         try:
             self.spare_parts = spare_parts
             self.status = status
@@ -49,7 +49,11 @@ class service_detail(mongodbclient):
                 "service_charges": None,
                 "manager_confirmed_return": False,
                 "warranty_until": None,
-                "media_updated_at": datetime.now(timezone.utc).isoformat() if (image or video) else None
+                "media_updated_at": datetime.now(timezone.utc).isoformat() if (image or video) else None,
+                # who raised this service ticket, and the date it was listed —
+                # shown in the Service page's table/detail view and export
+                "created_by": created_by,
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
 
             added_service = super().add(collection_name=collection_name, dictionary=new_service)

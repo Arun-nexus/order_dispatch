@@ -2408,7 +2408,8 @@ def create_service(request: ServiceRequest, user: dict = Depends(require_role("s
             video=request.video,
             technician_id=request.technician_id,
             location=request.location,
-            spare_parts=request.spare_parts
+            spare_parts=request.spare_parts,
+            created_by=user["username"]
         )
         logging.info(f"service creation was successful with service_id {service.service_id}!")
 
@@ -3177,6 +3178,7 @@ def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user
                 video="",
                 location="indoor",
                 spare_parts="",
+                created_by=user["username"]
             )
             db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
                       update_values={"damage_status": "Sent for Repair (Inhouse Warranty)"})
@@ -4053,7 +4055,8 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                 video=details.get("video", ""),
                 technician_id=req["raised_by"],
                 location=details.get("location", "indoor"),
-                spare_parts=details.get("spare_parts", "")
+                spare_parts=details.get("spare_parts", ""),
+                created_by=req["raised_by"]
             )
             if details.get("video"):
                 _raise_media_review_request(service.service_id, user["username"])
