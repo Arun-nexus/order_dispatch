@@ -2866,7 +2866,12 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
         serials_required = request.product_type not in serial_optional_types or len(request.serial_numbers) > 0
         if serials_required and len(request.serial_numbers) != request.quantity:
             raise HTTPException(status_code=400, detail="number of serial numbers must match quantity")
-        if len(set(request.serial_numbers)) != len(request.serial_numbers):
+        # duplicate-serial guard only ever applies to product_type "product" —
+        # every other category (accessories, spare parts, service parts,
+        # damaged) is allowed to reuse a serial number, including one already
+        # on file elsewhere (e.g. a unit moving into "damaged" under the
+        # serial it already had as a normal product).
+        if request.product_type == "product" and len(set(request.serial_numbers)) != len(request.serial_numbers):
             raise HTTPException(status_code=400, detail="serial numbers must be unique")
 
         if request.product_type in ("spare_parts", "service_parts"):
@@ -2875,16 +2880,12 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
             if request.product_type == "service_parts" and request.part_category not in ("purchase", "warranty"):
                 raise HTTPException(status_code=400, detail="select purchase or warranty for a service part")
             holograms = [h.strip() for h in request.hologram_numbers if h and h.strip()]
-            if len(set(holograms)) != len(holograms):
-                raise HTTPException(status_code=400, detail="hologram numbers must be unique")
             if len(holograms) > request.quantity:
                 raise HTTPException(status_code=400, detail="hologram numbers cannot outnumber the quantity")
-            if holograms:
-                taken = inventory_manager().get_data(collection_name=INVENTORY_COLLECTION,
-                                                     query={"hologram_numbers": {"$in": holograms}})
-                if taken:
-                    used = sorted({h for t in taken for h in (t.get("hologram_numbers") or []) if h in holograms})
-                    raise HTTPException(status_code=400, detail=f"hologram number(s) already on file: {', '.join(used)}")
+            # hologram numbers only ever belong to spare_parts/service_parts —
+            # never to product_type "product" — and the duplicate guard is
+            # reserved for that category alone, so parts are always allowed to
+            # reuse a hologram number already on file or repeated in this batch.
             part = inventory_manager(
                 product_name=request.product_name.strip(),
                 quantity=request.quantity,
@@ -2971,13 +2972,11 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
         # so quantity is free to move independently of the serial list for those
         # types — only sync serials with quantity for product/damaged
         if effective_type in SERIAL_OPTIONAL_TYPES or str(current_type or "").strip().lower() in SERIAL_OPTIONAL_TYPES:
-            if request.new_serial_numbers:
-                if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
-                    raise HTTPException(status_code=400, detail="new serial numbers must be unique")
-                duplicates = [s for s in request.new_serial_numbers if s in current_serials]
-                if duplicates:
-                    raise HTTPException(status_code=400,
-                                         detail=f"serial number(s) already exist on this product: {', '.join(duplicates)}")
+            # serial numbers are optional here and this branch is never
+            # product_type "product", so the duplicate-serial guard (reserved
+            # for "product" only) doesn't apply — accessories/spare/service
+            # parts may reuse a serial number already on file or repeated
+            # within this batch.
             serials = list(current_serials)
             if pulled_off_serials:
                 serials = [s for s in serials if s not in pulled_off_serials]
@@ -3000,12 +2999,17 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
                 serials = [s for s in serials if s not in pulled_off_serials]
 
             if request.new_serial_numbers:
-                if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
-                    raise HTTPException(status_code=400, detail="new serial numbers must be unique")
-                duplicates = [s for s in request.new_serial_numbers if s in serials]
-                if duplicates:
-                    raise HTTPException(status_code=400,
-                                         detail=f"serial number(s) already exist on this product: {', '.join(duplicates)}")
+                # duplicate-serial guard only ever applies to product_type
+                # "product" — a "damaged" item is allowed to reuse a serial
+                # number already on file (e.g. a unit moving into "damaged"
+                # under the serial it already had as a normal product).
+                if effective_type == "product":
+                    if len(set(request.new_serial_numbers)) != len(request.new_serial_numbers):
+                        raise HTTPException(status_code=400, detail="new serial numbers must be unique")
+                    duplicates = [s for s in request.new_serial_numbers if s in serials]
+                    if duplicates:
+                        raise HTTPException(status_code=400,
+                                             detail=f"serial number(s) already exist on this product: {', '.join(duplicates)}")
                 serials = serials + request.new_serial_numbers
 
             if len(serials) != new_quantity:
@@ -3045,12 +3049,10 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
 
             if request.new_hologram_numbers:
                 incoming = [h.strip() for h in request.new_hologram_numbers if h and h.strip()]
-                if len(set(incoming)) != len(incoming):
-                    raise HTTPException(status_code=400, detail="uploaded hologram numbers contain duplicates")
-                dup = [h for h in incoming if h in current_hologram]
-                if dup:
-                    raise HTTPException(status_code=400,
-                                         detail=f"hologram number(s) already on file: {', '.join(dup)}")
+                # hologram numbers only ever belong to spare_parts/service_parts
+                # (never product_type "product"), and the duplicate guard is
+                # reserved for that category alone — so reuse/repeats are
+                # always allowed here.
                 effective_quantity = int(updated_values.get("quantity", existing[0].get("quantity", 0)) or 0)
                 remaining_slots = max(0, effective_quantity - len(current_hologram))
                 to_add = incoming[:remaining_slots]
