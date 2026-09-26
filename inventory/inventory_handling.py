@@ -92,9 +92,11 @@ class inventory_manager(mongodbclient):
         faulty (product_type="damaged") when it's re-added as damaged even
         though it was previously a product/spare_parts/service_parts/
         accessories entry, and how it comes back OUT of "damaged" once it's
-        re-added under its real category. A serial found on the exact same
-        product_id + model_no + product_type is a genuine duplicate, not a
-        category change, and still raises.
+        re-added under its real category. The duplicate-serial guard below
+        (a serial found on the exact same product_id + model_no +
+        product_type) is reserved for product_type "product" only — every
+        other type that flows through here (accessories, damaged) is
+        allowed to reuse a serial number already on file under the same lot.
         """
         try:
             target_key = {
@@ -113,7 +115,13 @@ class inventory_manager(mongodbclient):
                         and owner.get("product_type") == target_key["product_type"]
                     )
                     if same_lot:
-                        duplicates.append(serial)
+                        # duplicate-serial guard only ever applies to
+                        # product_type "product" — accessories/damaged (the
+                        # other types that flow through add_or_merge) are
+                        # allowed to reuse a serial number already on file
+                        # under the very same lot too.
+                        if self.product_type == "product":
+                            duplicates.append(serial)
                         continue
 
                     owner_serials = owner.get("serial_numbers") or []
