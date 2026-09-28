@@ -10,6 +10,14 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <!-- SheetJS: used to read serial numbers out of an uploaded Excel/CSV file -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- sidebar scrollbar -->
+  <style id="sidebar-scroll-fix">
+    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
+    .sidebar::-webkit-scrollbar { width: 6px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
+    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+  </style>
 </head>
 
 <body>
@@ -120,6 +128,22 @@
             <p>Total Worth</p>
           </div>
           <i class="fa-solid fa-indian-rupee-sign"></i>
+        </div>
+        <div class="card card-clickable" data-card="service_parts_status" style="cursor:pointer;">
+          <div>
+            <span>Service Parts</span>
+            <h2 id="cardServicePartsTotal">0</h2>
+            <p id="cardServicePartsStatus">Active: 0 · Pending: 0</p>
+          </div>
+          <i class="fa-solid fa-screwdriver-wrench"></i>
+        </div>
+        <div class="card card-clickable" data-card="spare_parts_status" style="cursor:pointer;">
+          <div>
+            <span>Spare Parts</span>
+            <h2 id="cardSparePartsTotal">0</h2>
+            <p id="cardSparePartsStatus">Active: 0 · Pending: 0</p>
+          </div>
+          <i class="fa-solid fa-gears"></i>
         </div>
       </section>
 

@@ -230,6 +230,24 @@ function openCardDetailModal(cardType) {
       { label: 'Supplier', cell: p => p.supplier },
       { label: 'Products Supplied', cell: p => p.count }
     ]);
+  } else if (cardType === 'service_parts_status' || cardType === 'spare_parts_status') {
+    const partType = cardType === 'service_parts_status' ? 'service_parts' : 'spare_parts';
+    title = cardType === 'service_parts_status' ? 'Service Parts — Active / Pending' : 'Spare Parts — Active / Pending';
+    const parts = products.filter(p => p.product_type === partType);
+    const statusBadge = p => {
+      const st = statusFromHologram(p);
+      const color = st === 'Active' ? '#16a34a' : (st === 'Partial' ? '#b45309' : '#64748b');
+      return `<span style="color:${color};font-weight:600;">${st === 'Active' ? 'Active' : 'Pending'}${st === 'Partial' ? ' (partial)' : ''}</span>`;
+    };
+    const activeCount = parts.filter(p => statusFromHologram(p) === 'Active').length;
+    bodyHtml = `<p style="font-size:13px;color:#64748b;margin-bottom:10px;">Active: <strong>${activeCount}</strong> · Pending: <strong>${parts.length - activeCount}</strong></p>` +
+      rowsHtml(parts, [
+        { label: 'Part Name', cell: p => p.product_name ?? '' },
+        { label: 'Product ID', cell: p => p.product_id ?? '' },
+        { label: 'Qty', cell: p => p.quantity ?? 0 },
+        { label: 'Holograms', cell: p => (typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length) },
+        { label: 'Status', cell: statusBadge }
+      ]);
   } else if (cardType === 'inventory_value') {
     title = 'Inventory Value by Product';
     const withValue = products.map(p => ({ ...p, __value: (Number(p.price) || 0) * (Number(p.quantity) || 0) }))
@@ -541,6 +559,20 @@ function updateInventoryCards(products) {
   if (cardValues[2]) cardValues[2].textContent = lowStock;
   if (cardValues[3]) cardValues[3].textContent = suppliers;
   if (cardValues[4]) cardValues[4].textContent = `₹${(inventoryValue / 100000).toFixed(1)}L`;
+
+  // Service Parts / Spare Parts cards — Active = hologram numbers on file for every unit,
+  // Pending = not fully hologram-tagged yet (none or only some units), same rule as the table's status
+  const setPartCard = (type, totalId, statusId) => {
+    const list = products.filter(p => p.product_type === type);
+    let active = 0, pending = 0;
+    list.forEach(p => { if (statusFromHologram(p) === 'Active') active++; else pending++; });
+    const totalEl = document.getElementById(totalId);
+    const statusEl = document.getElementById(statusId);
+    if (totalEl) totalEl.textContent = list.length;
+    if (statusEl) statusEl.textContent = `Active: ${active} · Pending: ${pending}`;
+  };
+  setPartCard('service_parts', 'cardServicePartsTotal', 'cardServicePartsStatus');
+  setPartCard('spare_parts', 'cardSparePartsTotal', 'cardSparePartsStatus');
 }
 
 function stockClass(qty) {

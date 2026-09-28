@@ -7,3 +7,7 @@ __pycache__/
 *.pyc
 notrace/credentials.json
 data_push.py
+
+
+accure/
+css/
