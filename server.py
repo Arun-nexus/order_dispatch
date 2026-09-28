@@ -1,6 +1,5 @@
 import os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
 import json
 from fastmcp import FastMCP
 from app import app

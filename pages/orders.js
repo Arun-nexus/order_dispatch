@@ -79,12 +79,12 @@ function updateCards(orders) {
 }
 
 function statusClass(status) {
-  const map = { placed: 'pending', delivered: 'delivered', cancelled: 'cancel', returned: 'cancel' };
+  const map = { placed: 'pending', dispatched: 'dispatched', delivered: 'delivered', cancelled: 'cancel', returned: 'cancel' };
   return map[status] || 'pending';
 }
 
 function statusLabel(status) {
-  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled', returned: 'Returned' };
+  const map = { placed: 'Pending', processing: 'Processing', dispatched: 'Dispatched', delivered: 'Delivered', cancelled: 'Cancelled', returned: 'Returned' };
   return map[status] || status || '';
 }
 
@@ -776,7 +776,7 @@ function wireFilter() {
     const paymentVal = selects[1]?.value || '';
     const dateVal = dateInput?.value || '';
 
-    const statusMap = { 'Pending': 'placed', 'Processing': 'processing', 'Delivered': 'delivered', 'Cancelled': 'cancelled', 'Returned': 'returned' };
+    const statusMap = { 'Pending': 'placed', 'Processing': 'processing', 'Dispatched': 'dispatched', 'Delivered': 'delivered', 'Cancelled': 'cancelled', 'Returned': 'returned' };
     const wantedStatus = statusMap[statusVal];
 
     const filtered = orderState.orders.filter(o => {
@@ -795,7 +795,7 @@ function wireFilter() {
 function exportOrdersCSV() {
   openExportWizard({
     title: 'Export Orders',
-    statusOptions: ['placed', 'processing', 'delivered', 'cancelled', 'returned'],
+    statusOptions: ['placed', 'processing', 'dispatched', 'delivered', 'cancelled', 'returned'],
     dateField: 'order_date',
     dateLabel: 'Order Date',
     getRows: () => orderState.orders,

@@ -18,6 +18,9 @@
     .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
     .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
   </style>
+  <style id="dispatched-badge">
+    .dispatched { background: #e0edff; color: #1665ff; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  </style>
 </head>
 
 <body>
@@ -153,6 +156,7 @@
             <option>All Status</option>
             <option>Pending</option>
             <option>Processing</option>
+            <option>Dispatched</option>
             <option>Delivered</option>
             <option>Cancelled</option>
             <option>Returned</option>
@@ -344,6 +348,7 @@
         <select required>
           <option value="placed">Pending</option>
           <option value="processing">Processing</option>
+          <option value="dispatched">Dispatched</option>
           <option value="delivered">Delivered</option>
           <option value="cancelled">Cancelled</option>
           <option value="returned">Returned</option>

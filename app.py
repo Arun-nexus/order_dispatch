@@ -2027,8 +2027,9 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
     try:
         run_in_background("migrate_dispatch_media", migrate_stale_dispatch_media, 600)
         odb = order_manager()
-        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": "processing"})
-        pending_orders = [o for o in all_orders if not o.get("dispatch")]
+        # "dispatched" orders must stay in this queue's dispatched list, so fetch both statuses
+        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": {"$in": ["processing", "dispatched"]}})
+        pending_orders = [o for o in all_orders if o.get("status") == "processing" and not o.get("dispatch")]
 
         adb = allocation_manager()
         all_spare = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_type": "spare_part"})
@@ -2344,9 +2345,16 @@ def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user:
             "ship_to_address": request.ship_to_address if request.ship_to_different else None,
             "image": request.image,
             "media_updated_at": datetime.now(timezone.utc).isoformat() if request.image else None,
-            "dispatched_by": user["username"]
+            "dispatched_by": user["username"],
+            "dispatched_at": datetime.now(timezone.utc).isoformat()
         }
-        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values={"dispatch": dispatch_info})
+        update_values = {"dispatch": dispatch_info}
+        # Once a docket number exists the order has physically left, so reflect
+        # that on the Orders page. Only move it forward from "processing" - never
+        # overwrite delivered / cancelled / returned.
+        if request.docket_no and order.get("status") == "processing":
+            update_values["status"] = "dispatched"
+        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values=update_values)
         logging.info(f"order {order_id} dispatch confirmed")
         return {"message": "dispatch confirmed", "order_id": order_id}
     except HTTPException:
