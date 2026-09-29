@@ -363,6 +363,13 @@ class AssemblyUpdateRequest(BaseModel):
     updated_values: dict
 
 
+class EditAssemblyRequest(BaseModel):
+    product_name: Optional[str] = None
+    product_id: Optional[str] = None
+    model_number: Optional[str] = None
+    parts_used: list[AssemblyPartUsed]
+
+
 @app.get("/")
 def home():
     return FileResponse(os.path.join(BASE_DIR, "index.html"))
@@ -1746,6 +1753,7 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             parts_used=parts_used,
             serials=serials,
             created_by=user["username"],
+            hologram_part=hologram_part_name,
         )
         _, assembly_id = assembly_item.add(collection_name=ASSEMBLY_COLLECTION)
         logging.info("assembly created successfully")
@@ -1818,6 +1826,157 @@ def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict
     except Exception as e:
         logging.error("assembly cannot be updated")
         raise HTTPException(status_code=500, detail="assembly value cannot be updated")
+
+
+def _inventory_needed(parts_used: list) -> dict:
+    """Sums the quantity of every inventory-sourced part by name (local parts never touch inventory)."""
+    needed: dict[str, int] = {}
+    for p in parts_used or []:
+        qty = int(p.get("quantity", 0) or 0)
+        if p.get("source", "inventory") != "inventory" or qty <= 0:
+            continue
+        needed[p["part_name"]] = needed.get(p["part_name"], 0) + qty
+    return needed
+
+
+@app.post("/assembly/edit/{assembly_id}")
+def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = Depends(require_role("admin", "assembly"))):
+    """
+    Edit a PENDING assembly while it is still being built — parts can be added,
+    removed or their quantity changed. Only admin and assembly users may do this.
+
+    Inventory follows the change automatically:
+      - a part's inventory consumption went UP   -> the extra is deducted from spare_parts stock
+      - a part's inventory consumption went DOWN -> the difference is restocked into spare_parts
+      - a part removed / switched to local       -> its whole consumption is restocked
+      - a part added from inventory              -> deducted
+    The hologram-bearing part always consumes exactly `quantity` (one per unit),
+    so it must stay at or above `quantity` and its extra listed quantity never
+    moves stock. Serial / hologram numbers and the unit quantity are not editable here.
+    """
+    try:
+        db = assembly_manager()
+        existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
+        assembly = existing[0]
+
+        if assembly.get("status") != "pending":
+            raise HTTPException(
+                status_code=400,
+                detail="only pending assemblies can be edited — a completed assembly's units are already in inventory",
+            )
+
+        quantity = int(assembly.get("quantity", 0) or 0)
+        new_parts = assembly_manager._normalize_parts_used([p.dict() for p in request.parts_used])
+        if any(int(p["quantity"]) < 0 for p in new_parts):
+            raise HTTPException(status_code=400, detail="part quantity cannot be negative")
+
+        old_needed = _inventory_needed(assembly.get("parts_used", []))
+        new_needed = _inventory_needed(new_parts)
+
+        # the part that supplied the hologram numbers when the assembly was created
+        # (older records without the field: same rule create uses — first part in
+        # entered order whose quantity reached the assembly quantity)
+        hologram_part = assembly.get("hologram_part") or next(
+            (name for name, qty in old_needed.items() if qty >= quantity), None
+        )
+        if not hologram_part:
+            raise HTTPException(status_code=400, detail="this assembly has no hologram-bearing part on record, so it cannot be edited")
+        if new_needed.get(hologram_part, 0) < quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{hologram_part}' supplies the hologram numbers, so its inventory quantity must stay at least {quantity}",
+            )
+
+        # what each inventory part actually consumes (hologram part: exactly one per unit)
+        old_consume = {n: (quantity if n == hologram_part else q) for n, q in old_needed.items()}
+        new_consume = {n: (quantity if n == hologram_part else q) for n, q in new_needed.items()}
+        deltas = {}
+        for name in set(old_consume) | set(new_consume):
+            diff = new_consume.get(name, 0) - old_consume.get(name, 0)
+            if diff != 0:
+                deltas[name] = diff      # + = deduct more, - = restock
+
+        inv_db = inventory_manager()
+
+        # check stock for every increase BEFORE touching anything
+        for name, diff in deltas.items():
+            if diff > 0:
+                have = inv_db.get_available_quantity_by_name(
+                    collection_name=INVENTORY_COLLECTION, product_name=name, product_type="spare_parts"
+                )
+                if have < diff:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"not enough '{name}' in inventory spare parts (need {diff} more, have {have})",
+                    )
+
+        applied = []      # (name, diff) already pushed to inventory, for rollback
+
+        def _rollback():
+            for r_name, r_diff in reversed(applied):
+                try:
+                    if r_diff > 0:
+                        inv_db.restock_quantity(collection_name=INVENTORY_COLLECTION, product_name=r_name,
+                                                product_type="spare_parts", quantity=r_diff, updated_by=user["username"])
+                    else:
+                        inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=r_name,
+                                                product_type="spare_parts", quantity=-r_diff)
+                except Exception as rb_err:
+                    logging.error(f"assembly edit rollback failed for '{r_name}': {rb_err}")
+
+        try:
+            for name, diff in deltas.items():
+                if diff > 0:
+                    inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=name,
+                                            product_type="spare_parts", quantity=diff)
+                    applied.append((name, diff))
+            for name, diff in deltas.items():
+                if diff < 0:
+                    inv_db.restock_quantity(collection_name=INVENTORY_COLLECTION, product_name=name,
+                                            product_type="spare_parts", quantity=-diff, updated_by=user["username"])
+                    applied.append((name, diff))
+
+            inventory_changes = [
+                {"part_name": name, "action": "deducted" if diff > 0 else "restocked", "quantity": abs(diff)}
+                for name, diff in deltas.items()
+            ]
+            now = datetime.now(timezone.utc).isoformat()
+            update_values = {
+                "parts_used": new_parts,
+                "hologram_part": hologram_part,
+                "updated_by": user["username"],
+                "updated_at": now,
+                "edit_history": list(assembly.get("edit_history") or []) + [{
+                    "edited_by": user["username"],
+                    "edited_at": now,
+                    "previous_parts_used": assembly.get("parts_used", []),
+                    "inventory_changes": inventory_changes,
+                }],
+            }
+            for field, value in (("product_name", request.product_name),
+                                 ("product_id", request.product_id),
+                                 ("model_number", request.model_number)):
+                if value is not None:
+                    value = value.strip()
+                    if field == "product_name" and not value:
+                        raise HTTPException(status_code=400, detail="product name cannot be empty")
+                    update_values[field] = value
+
+            db.update(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id}, update_values=update_values)
+        except Exception:
+            _rollback()
+            raise
+
+        logging.info(f"assembly {assembly_id} edited by {user['username']}")
+        return {"message": "assembly updated", "assembly_id": assembly_id, "inventory_changes": inventory_changes}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("assembly edit failed!")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/assembly/delete/{assembly_id}")
@@ -2027,8 +2186,9 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
     try:
         run_in_background("migrate_dispatch_media", migrate_stale_dispatch_media, 600)
         odb = order_manager()
-        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": "processing"})
-        pending_orders = [o for o in all_orders if not o.get("dispatch")]
+        # "dispatched" orders must stay in this queue's dispatched list, so fetch both statuses
+        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": {"$in": ["processing", "dispatched"]}})
+        pending_orders = [o for o in all_orders if o.get("status") == "processing" and not o.get("dispatch")]
 
         adb = allocation_manager()
         all_spare = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_type": "spare_part"})
@@ -2344,9 +2504,16 @@ def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user:
             "ship_to_address": request.ship_to_address if request.ship_to_different else None,
             "image": request.image,
             "media_updated_at": datetime.now(timezone.utc).isoformat() if request.image else None,
-            "dispatched_by": user["username"]
+            "dispatched_by": user["username"],
+            "dispatched_at": datetime.now(timezone.utc).isoformat()
         }
-        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values={"dispatch": dispatch_info})
+        update_values = {"dispatch": dispatch_info}
+        # Once a docket number exists the order has physically left, so reflect
+        # that on the Orders page. Only move it forward from "processing" - never
+        # overwrite delivered / cancelled / returned.
+        if request.docket_no and order.get("status") == "processing":
+            update_values["status"] = "dispatched"
+        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values=update_values)
         logging.info(f"order {order_id} dispatch confirmed")
         return {"message": "dispatch confirmed", "order_id": order_id}
     except HTTPException:

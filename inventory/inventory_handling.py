@@ -447,6 +447,66 @@ class inventory_manager(mongodbclient):
             logging.error("consuming quantity from inventory failed!")
             raise Exception(e)
 
+    def restock_quantity(self, collection_name, product_name, product_type, quantity, updated_by=None):
+        """
+        Opposite of consume_quantity: puts `quantity` units of a non-serialized
+        product (e.g. a spare_parts entry) back into inventory — used when an
+        assembly is edited and fewer parts are needed than were first deducted.
+
+        The units go back into the newest existing lot for that product_name +
+        product_type. If every lot was already used up (and therefore deleted
+        by _decrement_or_delete), a fresh lot is created instead.
+        """
+        try:
+            quantity = int(quantity or 0)
+            if quantity <= 0:
+                return {"mode": "skipped", "quantity_added": 0}
+
+            entries = self.get_data(
+                collection_name=collection_name,
+                query={"product_name": product_name, "product_type": product_type}
+            )
+            if entries:
+                entries.sort(key=lambda e: e.get("purchase_date") or "")
+                entry = entries[-1]
+                new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+                update_values = {"quantity": new_quantity}
+                if updated_by:
+                    update_values["updated_by"] = updated_by
+                self.update_data(collection_name=collection_name, query={"_id": ObjectId(entry["_id"])},
+                                 update_values=update_values)
+                logging.info(f"restocked {quantity} unit(s) of '{product_name}' into existing {product_type} entry")
+                return {"mode": "merged", "quantity_added": quantity}
+
+            from datetime import datetime, timezone
+            product_dic = {
+                "product_name": product_name,
+                "parent_product_name": "",
+                "product_id": f"SP-{uuid.uuid4().hex[:8].upper()}",
+                "lot_no": "",
+                "supplier": "",
+                "supplier_address": "",
+                "price": 0,
+                "tax_rate": 0,
+                "purchase_date": datetime.now(timezone.utc).date().isoformat(),
+                "quantity": quantity,
+                "model_no": "",
+                "serial_numbers": [],
+                "product_type": product_type,
+                "part_category": None,
+                "warranty_until": None,
+                "hologram_numbers": [],
+                "reason": "restocked from assembly edit",
+                "created_by": updated_by,
+                "updated_by": updated_by,
+            }
+            super().add(collection_name=collection_name, dictionary=product_dic)
+            logging.info(f"created new {product_type} entry for restocked '{product_name}'")
+            return {"mode": "created", "quantity_added": quantity}
+        except Exception as e:
+            logging.error("restocking quantity into inventory failed!")
+            raise Exception(e)
+
     def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity):
         """
         Deducts `quantity` units of a spare_parts/service_parts entry (matched by

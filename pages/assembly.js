@@ -11,6 +11,10 @@
 //      numbers are NOT entered here — the server pulls one per unit from
 //      the hologram-bearing part's stock when the assembly is saved.
 //
+// Edit Assembly (admin + assembly roles only, pending assemblies only):
+//   parts can be added / removed / changed while the assembly is in progress;
+//   the backend deducts or restocks inventory spare_parts by the difference.
+//
 // Talks to the real backend: GET/POST /assembly/... and
 // GET /assembly/available_parts (see app.py + manage_assembly.py).
 // Spare-part stock itself is fed by shipment.js: a shipment part marked
@@ -46,6 +50,8 @@ function fromServerShapeAssembly(a) {
     serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number })),
     status: a.status,
     createdAt: a.created_at,
+    hologramPart: a.hologram_part || '',
+    editHistory: a.edit_history || [],
   };
 }
 
@@ -153,6 +159,7 @@ function renderTable() {
         <td>
           <button class="icon-btn" data-action="view" data-id="${a.id}" title="View"><i class="fa-solid fa-eye"></i></button>
           <button class="icon-btn" data-action="export" data-id="${a.id}" title="Export Serials"><i class="fa-solid fa-file-excel"></i></button>
+          ${a.status === 'pending' && canEditAssembly() ? `<button class="icon-btn" data-action="edit" data-id="${a.id}" title="Edit Assembly"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
           ${a.status === 'pending' ? `<button class="icon-btn" data-action="complete" data-id="${a.id}" title="Mark Completed"><i class="fa-solid fa-check"></i></button>` : ''}
           <button class="icon-btn" data-action="delete" data-id="${a.id}" title="Delete"><i class="fa-solid fa-trash"></i></button>
         </td>
@@ -161,6 +168,7 @@ function renderTable() {
 
   tbody.querySelectorAll('[data-action="view"]').forEach(b => b.addEventListener('click', () => openViewAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="export"]').forEach(b => b.addEventListener('click', () => exportAssemblySerials(b.dataset.id)));
+  tbody.querySelectorAll('[data-action="edit"]').forEach(b => b.addEventListener('click', () => openEditAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="complete"]').forEach(b => b.addEventListener('click', () => markAssemblyCompleted(b.dataset.id)));
   tbody.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => openDeleteAssemblyModal(b.dataset.id)));
 }
@@ -181,6 +189,10 @@ function openViewAssemblyModal(id) {
     <div class="detail"><small>Product</small><p>${a.productName} (${a.productId || '—'})</p></div>
     <div class="detail"><small>Model Number</small><p>${a.modelNumber || '—'}</p></div>
     <div class="detail"><small>Quantity</small><p>${a.quantity}</p></div>
+    ${(a.editHistory || []).length ? (() => {
+      const last = a.editHistory[a.editHistory.length - 1];
+      return `<div class="detail"><small>Last Edited</small><p>${last.edited_by || '—'} on ${(last.edited_at || '').slice(0, 10)} (${a.editHistory.length} edit${a.editHistory.length > 1 ? 's' : ''})</p></div>`;
+    })() : ''}
     <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
     <h4 style="margin-bottom:8px;">Parts Used</h4>
     <ul style="margin:0 0 14px 18px;font-size:13px;color:#475569;">
@@ -426,8 +438,13 @@ function renderPartsUsedRows() {
   wrap.innerHTML = assemblyDraft.partsUsed.map((p, i) => {
     let nameField;
     if (p.source === 'inventory') {
+      // a part this assembly already uses may have dropped out of the available
+      // list (stock fully consumed) — keep it selectable so edits don't lose it
+      const missing = p.name && !availableParts.some(sp => sp.part_name === p.name)
+        ? `<option value="${p.name}" selected>${p.name} (0 left in stock)</option>` : '';
       nameField = `
         <select class="partUsedName" style="flex:2;">
+          ${missing}
           ${availableParts.map(sp => `<option value="${sp.part_name}" ${sp.part_name === p.name ? 'selected' : ''}>${sp.part_name} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
         </select>`;
     } else {
@@ -618,6 +635,174 @@ async function finalizeAssembly() {
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
       showResponseModal('Save failed', err.message, false);
+    }
+  }
+}
+
+// =========================================================
+// EDIT ASSEMBLY — admin + assembly roles only, pending assemblies only
+// While an assembly is being built, parts can be added, removed or changed.
+// The backend (POST /assembly/edit/{id}) deducts from / restocks inventory
+// spare parts by the difference. Unit quantity and serials stay as they are.
+// =========================================================
+const ASSEMBLY_EDIT_ROLES = ['admin', 'assembly'];
+function canEditAssembly() {
+  return ASSEMBLY_EDIT_ROLES.includes(getRole());
+}
+
+let editingAssemblyId = null;
+let editingHologramPart = '';
+
+function escAttr(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+async function openEditAssemblyModal(id) {
+  if (!canEditAssembly()) {
+    showResponseModal('Not allowed', 'Only admin or assembly users can edit an assembly.', false);
+    return;
+  }
+  const a = assemblies.find(x => x.id === id);
+  if (!a) return;
+  if (a.status !== 'pending') {
+    showResponseModal('Cannot edit', 'Completed assemblies cannot be edited — their units are already in inventory.', false);
+    return;
+  }
+
+  await loadAvailableParts();   // fresh stock numbers for the dropdowns
+  editingAssemblyId = id;
+
+  // which inventory part supplies the hologram numbers (same rule as the backend)
+  const sums = {};
+  (a.partsUsed || []).filter(p => p.source !== 'local').forEach(p => {
+    sums[p.name] = (sums[p.name] || 0) + Number(p.quantity || 0);
+  });
+  editingHologramPart = a.hologramPart
+    || Object.keys(sums).find(name => sums[name] >= Number(a.quantity))
+    || '';
+
+  assemblyDraft = {
+    productName: a.productName || '', productId: a.productId || '', modelNumber: a.modelNumber || '',
+    quantity: a.quantity,
+    partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, source: p.source === 'local' ? 'local' : 'inventory' })),
+    serials: [],
+  };
+  renderEditAssemblyModal();
+  openModal('assemblyModal');
+}
+
+function renderEditAssemblyModal() {
+  const box = ASSEMBLY_MODAL();
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>Edit Assembly</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <input id="eProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}">
+      <input id="eProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}">
+      <input id="eModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
+      <label style="font-size:13px;color:#64748b;">Quantity to Assemble (cannot be changed)</label>
+      <input type="number" value="${assemblyDraft.quantity}" disabled>
+    </div>
+    <h4 style="margin:18px 0 6px;">Parts Used</h4>
+    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+      <i class="fa-solid fa-circle-info"></i>
+      Add, remove or change parts. If an inventory part's quantity goes up, the extra is deducted from inventory;
+      if it goes down or the part is removed, the difference is restocked.
+      ${editingHologramPart ? `<strong>${escAttr(editingHologramPart)}</strong> supplies the hologram numbers, so it must stay at ${assemblyDraft.quantity} or more.` : ''}
+    </p>
+    <div id="partsUsedRows" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div style="display:flex;gap:10px;margin-top:10px;">
+      <button type="button" id="eAddInvPartBtn" ${availableParts.length ? '' : 'disabled'}
+        style="flex:1;padding:10px 12px;border:1px dashed #1665ff;border-radius:8px;background:#f0f6ff;cursor:pointer;font-size:13px;color:#1665ff;${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
+        <i class="fa-solid fa-boxes-stacked"></i> Add Part from Inventory
+      </button>
+      <button type="button" id="eAddLocalPartBtn"
+        style="flex:1;padding:10px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
+        <i class="fa-solid fa-plus"></i> Add Local Part
+      </button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
+      <button type="button" id="eCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+      <button type="button" id="eSaveBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#1665ff,#4c92ff);color:#fff;cursor:pointer;font-weight:600;">
+        <i class="fa-solid fa-check"></i> Save Changes
+      </button>
+    </div>
+  `;
+  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
+  box.querySelector('#eCancelBtn').addEventListener('click', () => closeModal('assemblyModal'));
+  box.querySelector('#eAddInvPartBtn').addEventListener('click', () => {
+    if (!availableParts.length) return;
+    syncPartsUsedFromDom();
+    assemblyDraft.partsUsed.push({ name: availableParts[0].part_name, quantity: 1, source: 'inventory' });
+    renderPartsUsedRows();
+  });
+  box.querySelector('#eAddLocalPartBtn').addEventListener('click', () => {
+    syncPartsUsedFromDom();
+    assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local' });
+    renderPartsUsedRows();
+  });
+  box.querySelector('#eSaveBtn').addEventListener('click', saveAssemblyEdit);
+
+  renderPartsUsedRows();
+}
+
+async function saveAssemblyEdit() {
+  syncPartsUsedFromDom();
+
+  const productName = document.getElementById('eProductName').value.trim();
+  if (!productName) {
+    showResponseModal('Missing value', 'Product name cannot be empty.', false);
+    return;
+  }
+
+  const parts = assemblyDraft.partsUsed.filter(p => p.name && Number(p.quantity) > 0);
+  if (parts.some(p => Number(p.quantity) < 0)) {
+    showResponseModal('Invalid quantity', 'Part quantity cannot be negative.', false);
+    return;
+  }
+
+  // mirror the backend: the hologram part must stay >= assembly quantity
+  const holoTotal = parts
+    .filter(p => p.source === 'inventory' && p.name === editingHologramPart)
+    .reduce((sum, p) => sum + Number(p.quantity), 0);
+  if (editingHologramPart && holoTotal < Number(assemblyDraft.quantity)) {
+    showResponseModal(
+      'Check part quantities',
+      `'${editingHologramPart}' supplies the hologram numbers, so its inventory quantity must stay at least ${assemblyDraft.quantity}.`,
+      false
+    );
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/assembly/edit/${editingAssemblyId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_name: productName,
+        product_id: document.getElementById('eProductId').value.trim(),
+        model_number: document.getElementById('eModelNumber').value.trim(),
+        parts_used: parts.map(p => ({ part_name: p.name, quantity: Number(p.quantity), source: p.source })),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'assembly edit failed');
+
+    closeModal('assemblyModal');
+    assemblyDraft = null;
+    editingAssemblyId = null;
+    await loadAssemblies();
+    await loadAvailableParts();   // inventory stock may have moved — refresh
+
+    const changes = data.inventory_changes || [];
+    const summary = changes.length
+      ? 'Inventory updated: ' + changes.map(c => `${c.part_name} ${c.action} ${c.quantity}`).join(', ') + '.'
+      : 'No inventory change was needed.';
+    showResponseModal('Assembly updated', summary, true);
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      showResponseModal('Update failed', err.message, false);
     }
   }
 }
