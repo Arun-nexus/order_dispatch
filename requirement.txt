@@ -20,7 +20,7 @@ certifi==2026.6.17
 cffi==2.1.1
 charset-normalizer==3.5.1
 click==8.4.2
-clr_loader==0.3.1
+clr_loader==0.3.1; sys_platform == "win32"
 colorama==0.4.6
 comm==0.2.3
 cryptography==50.0.1
@@ -112,10 +112,10 @@ pyperclip==1.11.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.32
-pythonnet==3.1.0
-pywebview==6.2.1
-pywin32==312
-pywin32-ctypes==0.2.3
+pythonnet==3.1.0; sys_platform == "win32"
+pywebview==6.2.1; sys_platform == "win32"
+pywin32==312; sys_platform == "win32"
+pywin32-ctypes==0.2.3; sys_platform == "win32"
 PyYAML==6.0.3
 pyzmq==27.1.0
 referencing==0.37.0
