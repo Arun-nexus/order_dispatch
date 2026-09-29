@@ -1997,7 +1997,7 @@ function wireModals() {
       const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers, model_no: invState.activeModelNo })
+        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers, model_no: invState.activeModelNo, source_product_type: invState.activeProductType })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');

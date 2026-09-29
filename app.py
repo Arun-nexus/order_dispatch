@@ -307,6 +307,7 @@ class InventoryUpdateRequest(BaseModel):
     faulty_serial_numbers: list[str] = []     # pulled off this lot and pushed into the "damaged" category instead of just discarded
     new_hologram_numbers: list[str] = []      # serial-wise hologram numbers to add (spare_parts / service_parts only)
     remove_hologram_numbers: list[str] = []
+    source_product_type: Optional[str] = None  # type of the lot being edited (product / damaged / ...)
     model_no: Optional[str] = None   # disambiguates which lot-document to touch when a product_id has multiple model_no variants
 
 
@@ -2807,10 +2808,13 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
         # endpoint 404 and silently fall back to the serial-less cached row
         # on the frontend. Matching on product_id (+ product_type) alone when
         # no model_no was given avoids that false negative.
-        query = {"product_id": product_id}
-        if model_no:
-            query["model_no"] = model_no
-        if product_type:
+        # exact lot only: empty model_no = the model-less lot (null/""), NOT "any variant";
+        # "product" also matches old lots that have no product_type stored.
+        query = {"product_id": product_id,
+                 "model_no": model_no if model_no else {"$in": [None, ""]}}
+        if product_type == "product":
+            query["product_type"] = {"$in": ["product", None]}
+        elif product_type:
             query["product_type"] = product_type
         db = inventory_manager()
         docs = db.get_data(collection_name=INVENTORY_COLLECTION, query=query)
@@ -3106,7 +3110,11 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
         db = inventory_manager()
         match_query = {"product_id": product_id}
         if request.model_no is not None:
-            match_query["model_no"] = request.model_no
+            match_query["model_no"] = request.model_no if request.model_no else {"$in": [None, ""]}
+        if request.source_product_type == "product":
+            match_query["product_type"] = {"$in": ["product", None]}
+        elif request.source_product_type:
+            match_query["product_type"] = request.source_product_type
         existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
         if not existing:
             raise HTTPException(status_code=404, detail="product not found")
