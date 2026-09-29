@@ -4638,4 +4638,4 @@ app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="cs
 app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
 app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
 
-app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")s
+app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")
