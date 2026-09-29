@@ -27,6 +27,7 @@ let assemblies = [];
 let availableParts = [];      // [{part_name, quantity}] — inventory spare_parts stock
 let assemblyDraft = null;
 let assemblyStep = 1;
+let inventoryProducts = [];   // distinct finished products already in inventory (for "Existing product" mode)
 let deletingAssemblyId = null;
 
 const ASSEMBLY_MODAL = () => document.querySelector('#assemblyModal .modal-content');
@@ -295,13 +296,36 @@ function stepDots(active) {
     </div>`;
 }
 
+async function loadInventoryProducts() {
+  try {
+    const res = await apiFetch('/inventory/');
+    if (!res.ok) return;
+    const data = await res.json();
+    const seen = new Set();
+    inventoryProducts = (data.dataset || [])
+      .filter(p => (p.product_type || 'product') === 'product' && p.product_name && p.product_id)
+      .filter(p => {
+        const k = `${p.product_id}||${p.model_no || ''}||${p.product_name}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .map(p => ({ name: p.product_name, id: p.product_id, model: p.model_no || '' }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    console.warn('assembly: could not load inventory products', err.message);
+  }
+}
+
 async function openAddAssemblyModal() {
   assemblyDraft = {
+    mode: 'existing',   // 'existing' = pick from inventory, 'new' = type details
     productName: '', productId: '', modelNumber: '', quantity: 1,
     partsUsed: [], serials: [],
   };
   assemblyStep = 1;
-  await loadAvailableParts();   // refresh stock right before the wizard opens
+  await Promise.all([loadAvailableParts(), loadInventoryProducts()]);   // refresh stock right before the wizard opens
+  if (!inventoryProducts.length) assemblyDraft.mode = 'new';
   renderAssemblyStep();
   openModal('assemblyModal');
 }
@@ -322,9 +346,26 @@ function renderAStep1() {
     </div>
     ${stepDots(1)}
     <form id="aStep1Form" style="display:flex;flex-direction:column;gap:10px;">
-      <input id="a1ProductName" placeholder="Product Name" value="${assemblyDraft.productName}" required>
-      <input id="a1ProductId" placeholder="Product ID" value="${assemblyDraft.productId}">
-      <input id="a1ModelNumber" placeholder="Model Number" value="${assemblyDraft.modelNumber}">
+      <div style="display:flex;gap:8px;">
+        ${['existing', 'new'].map(m => `
+          <button type="button" data-mode="${m}" class="a1ModeBtn"
+            style="flex:1;padding:9px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid ${assemblyDraft.mode === m ? '#1665ff' : '#e2e8f0'};background:${assemblyDraft.mode === m ? '#eef3fb' : '#fff'};color:${assemblyDraft.mode === m ? '#1665ff' : '#64748b'};">
+            ${m === 'existing' ? 'Existing Product' : 'New Product'}
+          </button>`).join('')}
+      </div>
+      ${assemblyDraft.mode === 'existing' ? `
+        <select id="a1Existing" required>
+          <option value="">Choose product from inventory...</option>
+          ${inventoryProducts.map((p, i) => `<option value="${i}" ${p.id === assemblyDraft.productId && p.model === assemblyDraft.modelNumber && p.name === assemblyDraft.productName ? 'selected' : ''}>${escAttr(p.name)} — ${escAttr(p.id)}${p.model ? ' — ' + escAttr(p.model) : ''}</option>`).join('')}
+        </select>
+        <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" readonly style="background:#f1f5f9;">
+        <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}" readonly style="background:#f1f5f9;">
+        <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}" readonly style="background:#f1f5f9;">
+      ` : `
+        <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" required>
+        <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}">
+        <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
+      `}
       <label style="font-size:13px;color:#64748b;">Quantity to Assemble</label>
       <input type="number" id="a1Quantity" min="1" value="${assemblyDraft.quantity}" required>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
@@ -335,8 +376,30 @@ function renderAStep1() {
   `;
   box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
   box.querySelector('#aCancelBtn').addEventListener('click', () => closeModal('assemblyModal'));
+  box.querySelectorAll('.a1ModeBtn').forEach(btn => btn.addEventListener('click', () => {
+    if (btn.dataset.mode === assemblyDraft.mode) return;
+    if (btn.dataset.mode === 'existing' && !inventoryProducts.length) {
+      showResponseModal('No products', 'No finished products found in inventory yet — use New Product.', false);
+      return;
+    }
+    assemblyDraft.mode = btn.dataset.mode;
+    assemblyDraft.productName = assemblyDraft.productId = assemblyDraft.modelNumber = '';
+    assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
+    renderAStep1();
+  }));
+  const existingSel = box.querySelector('#a1Existing');
+  if (existingSel) existingSel.addEventListener('change', () => {
+    const p = inventoryProducts[Number(existingSel.value)];
+    document.getElementById('a1ProductName').value = p ? p.name : '';
+    document.getElementById('a1ProductId').value = p ? p.id : '';
+    document.getElementById('a1ModelNumber').value = p ? p.model : '';
+  });
   box.querySelector('#aStep1Form').addEventListener('submit', (e) => {
     e.preventDefault();
+    if (assemblyDraft.mode === 'existing' && !document.getElementById('a1Existing').value) {
+      showResponseModal('Choose a product', 'Select an existing product from inventory.', false);
+      return;
+    }
     assemblyDraft.productName = document.getElementById('a1ProductName').value.trim();
     assemblyDraft.productId = document.getElementById('a1ProductId').value.trim();
     assemblyDraft.modelNumber = document.getElementById('a1ModelNumber').value.trim();

@@ -113,6 +113,17 @@ async function apiFetch(url, options = {}) {
   return res;
 }
 
+// Sidebar scrolls on its own when the menu is taller than the screen
+// (injected here so every page that loads common_auth.js gets it).
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+    .sidebar { overflow-y: auto; overflow-x: hidden; max-height: 100vh; scrollbar-width: thin; }
+    .sidebar::-webkit-scrollbar { width: 6px; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.35); border-radius: 6px; }`;
+  document.head.appendChild(st);
+})();
+
 function logoutNow() {
   clearSession();
   window.location.href = loginPath();

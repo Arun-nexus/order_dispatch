@@ -230,6 +230,19 @@ function openCardDetailModal(cardType) {
       { label: 'Supplier', cell: p => p.supplier },
       { label: 'Products Supplied', cell: p => p.count }
     ]);
+  } else if (cardType === 'spare_parts_card' || cardType === 'service_parts_card') {
+    const type = cardType === 'spare_parts_card' ? 'spare_parts' : 'service_parts';
+    title = type === 'spare_parts' ? 'Spare Parts' : 'Service Parts';
+    const list = products.filter(p => p.product_type === type)
+      .sort((a, b) => (partHologramCount(b) > 0) - (partHologramCount(a) > 0));
+    bodyHtml = rowsHtml(list, [
+      { label: 'Part Name', cell: p => p.product_name ?? '' },
+      { label: 'Parent Product', cell: p => p.parent_product_name || '—' },
+      { label: 'Quantity', cell: p => p.quantity ?? 0 },
+      { label: 'Holograms', cell: p => partHologramCount(p) },
+      { label: 'Status', cell: p => partHologramCount(p) > 0
+          ? '<span class="status delivered">Active</span>' : '<span class="status pending">Pending</span>' }
+    ]);
   } else if (cardType === 'inventory_value') {
     title = 'Inventory Value by Product';
     const withValue = products.map(p => ({ ...p, __value: (Number(p.price) || 0) * (Number(p.quantity) || 0) }))
@@ -541,7 +554,23 @@ function updateInventoryCards(products) {
   if (cardValues[2]) cardValues[2].textContent = lowStock;
   if (cardValues[3]) cardValues[3].textContent = suppliers;
   if (cardValues[4]) cardValues[4].textContent = `₹${(inventoryValue / 100000).toFixed(1)}L`;
+  [['spare_parts', 5, 'spareSub'], ['service_parts', 6, 'serviceSub']].forEach(([type, idx, subId]) => {
+    const list = products.filter(p => p.product_type === type);
+    // units, not lots: active = units that have a hologram number (capped at the lot's quantity)
+    const total = list.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
+    const active = list.reduce((sum, p) => sum + Math.min(partHologramCount(p), Number(p.quantity) || 0), 0);
+    if (cardValues[idx]) cardValues[idx].textContent = total;
+    const sub = document.getElementById(subId);
+    if (sub) sub.textContent = `Active ${active} · Pending ${total - active} units`;
+  });
 }
+
+// spare_parts / service_parts only: has at least one hologram number on file vs none
+function isPartProduct(p) { return p.product_type === 'spare_parts' || p.product_type === 'service_parts'; }
+function partHologramCount(p) {
+  return typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length;
+}
+
 
 function stockClass(qty) {
   if (qty > 50) return 'high';
@@ -2021,4 +2050,4 @@ function wireModals() {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
-}
+}s
