@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -72,6 +72,14 @@ def compute_warranty_until(received_date: str, warranty_text: str):
     return result.strftime("%Y-%m-%d")
 
 load_dotenv()
+
+# Desktop-app-only roles: these roles can log in only from the packaged desktop app
+# (which sends "key=<APP_CLIENT_KEY>" inside its User-Agent). Configure in .env:
+#   APP_CLIENT_KEY=<random secret, same string as in the desktop app>
+#   APP_ONLY_ROLES=technician,distributor
+# If either is empty, no restriction is applied.
+APP_CLIENT_KEY = os.getenv("APP_CLIENT_KEY", "").strip()
+APP_ONLY_ROLES = {r.strip() for r in os.getenv("APP_ONLY_ROLES", "").split(",") if r.strip()}
 app = FastAPI()
 params = load_params()
 
@@ -382,7 +390,7 @@ def dashboard():
 
 
 @app.post("/login/")
-def login_page(request: LoginRequest):
+def login_page(request: LoginRequest, http_request: Request):
     try:
         db = login()
         dataset = db.get_data(ACCOUNTS_COLLECTION, query={"username": request.username})
@@ -397,6 +405,11 @@ def login_page(request: LoginRequest):
 
         if user["password"] != request.password or user["role"] != request.role:
             raise HTTPException(status_code=401, detail="details did not match")
+
+        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES:
+            ua = http_request.headers.get("user-agent", "")
+            if f"key={APP_CLIENT_KEY}" not in ua:
+                raise HTTPException(status_code=403, detail="this role can log in only from the desktop app")
 
         token = create_access_token(username=user["username"], role=user["role"])
 
@@ -4053,6 +4066,68 @@ def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver:
     return order.order_id
 
 
+# ---- order attachments (P.O., etc.) — files live on disk, metadata on the request/order ----
+ORDER_ATTACH_DIR = os.path.join(BASE_DIR, "order_attachments")
+ORDER_ATTACH_EXT = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls", ".csv", ".doc", ".docx"}
+ORDER_ATTACH_MAX_FILES = 5
+ORDER_ATTACH_MAX_BYTES = 10 * 1024 * 1024
+
+
+@app.post("/request/order/{request_id}/attachments")
+async def upload_order_attachments(request_id: str, files: list[UploadFile] = File(...),
+                                   user: dict = Depends(require_role("distributor"))):
+    db = request_manager()
+    found = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
+    if not found or found[0].get("request_type") != "order" or found[0].get("raised_by") != user["username"]:
+        raise HTTPException(status_code=404, detail="order request not found")
+    req = found[0]
+    if req.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="attachments can only be added while the request is pending")
+
+    details = dict(req.get("details") or {})
+    attachments = list(details.get("attachments") or [])
+    if len(attachments) + len(files) > ORDER_ATTACH_MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"maximum {ORDER_ATTACH_MAX_FILES} files per order")
+
+    folder = os.path.join(ORDER_ATTACH_DIR, request_id)
+    os.makedirs(folder, exist_ok=True)
+    for f in files:
+        original = os.path.basename(f.filename or "file")
+        ext = os.path.splitext(original)[1].lower()
+        if ext not in ORDER_ATTACH_EXT:
+            raise HTTPException(status_code=400, detail=f"{original}: file type not allowed")
+        content = await f.read()
+        if len(content) > ORDER_ATTACH_MAX_BYTES:
+            raise HTTPException(status_code=400, detail=f"{original}: larger than 10 MB")
+        stored = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(folder, stored), "wb") as out:
+            out.write(content)
+        attachments.append({"name": original, "stored_name": stored, "size": len(content),
+                            "uploaded_at": datetime.now(timezone.utc).isoformat()})
+
+    details["attachments"] = attachments
+    db.update_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id},
+                   update_values={"details": details})
+    return {"message": "files attached", "attachments": attachments}
+
+
+@app.get("/order_attachment/{request_id}/{stored_name}")
+def download_order_attachment(request_id: str, stored_name: str, user: dict = Depends(get_current_user)):
+    found = request_manager().get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
+    if not found:
+        raise HTTPException(status_code=404, detail="not found")
+    req = found[0]
+    if user.get("role") == "distributor" and req.get("raised_by") != user.get("username"):
+        raise HTTPException(status_code=403, detail="not allowed")
+    if user.get("role") not in ("distributor", "admin", "accounts"):
+        raise HTTPException(status_code=403, detail="not allowed")
+    meta = next((a for a in (req.get("details") or {}).get("attachments", []) if a.get("stored_name") == stored_name), None)
+    path = os.path.join(ORDER_ATTACH_DIR, request_id, os.path.basename(stored_name))
+    if not meta or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path, filename=meta["name"])
+
+
 @app.post("/request/order")
 def raise_order_request(request: OrderRequestModel, user: dict = Depends(require_role("distributor"))):
     try:
@@ -4214,6 +4289,10 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                 discount=details.get("discount", 0),
                 creator={"type": "request", "raised_by": req["raised_by"], "approved_by": user["username"]}
             )
+            # carry the P.O./attachments over to the order (files stay under the request id)
+            if details.get("attachments"):
+                order_manager().update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},
+                                       update_values={"attachments": [dict(a, request_id=request_id) for a in details["attachments"]]})
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and order created", "order_id": order_id}
@@ -4559,4 +4638,4 @@ app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="cs
 app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
 app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
 
-app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")
+app.mount("/", StaticFiles(directory=BASE_DIR, html=True), name="root")s

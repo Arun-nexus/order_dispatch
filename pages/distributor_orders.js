@@ -259,11 +259,27 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Invoice No. / Date</small><p>${esc(o.dispatch.invoice_no || '-')} / ${esc(o.dispatch.invoice_date || '-')}</p></div>
     <div class="detail"><small>Mode of Delivery</small><p>${esc(o.dispatch.mode_of_delivery || '-')}</p></div>` : ''}
     ${o.converted_from_demo ? '<div class="detail"><small>Source</small><p>Converted from demo unit</p></div>' : ''}
+    ${(o.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${o.attachments.map((a, i) =>
+      `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(a.name)}</a>`).join('')}</p></div>` : ''}
     <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async e => {
+    e.preventDefault();
+    const a = o.attachments[Number(link.dataset.i)];
+    try {
+      const res = await apiFetch(`/order_attachment/${a.request_id}/${a.stored_name}`);
+      if (!res.ok) throw new Error('could not download file');
+      const url = URL.createObjectURL(await res.blob());
+      const tmp = document.createElement('a');
+      tmp.href = url; tmp.download = a.name; tmp.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  }));
   modal.style.display = 'flex';
 }
 
@@ -594,6 +610,8 @@ function renderPaymentStep() {
     </select>
     <div id="paymentExtra"></div>
     <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
+    <label style="font-size:13px;color:#64748b;">Attach P.O. / documents (optional — PDF, image, Excel, Word · max 5 files, 10 MB each)</label>
+    <input id="orderFiles" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv,.doc,.docx" style="width:100%;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;margin:6px 0 10px;">
     <div style="display:flex;justify-content:space-between;margin-top:10px;">
       <button type="button" id="backBtn4" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
       <button type="button" id="sendRequestBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
@@ -721,9 +739,24 @@ async function submitOrderRequest(modeSelect, extraBox) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'request failed');
+
+    // upload attachments (if any) against the new request; the request itself is already sent
+    let uploadWarning = '';
+    const chosen = Array.from(document.getElementById('orderFiles')?.files || []);
+    if (chosen.length) {
+      try {
+        const fd = new FormData();
+        chosen.forEach(f => fd.append('files', f));
+        const up = await apiFetch(`/request/order/${data.request_id}/attachments`, { method: 'POST', body: fd });
+        if (!up.ok) throw new Error((await up.json()).detail || 'upload failed');
+      } catch (e) {
+        uploadWarning = ` Files could not be attached: ${e.message}`;
+      }
+    }
+
     document.getElementById('orderModal').style.display = 'none';
     resetOrderWiz();
-    alert('Order request sent — admin/accounts will review and approve it.');
+    alert('Order request sent — admin/accounts will review and approve it.' + uploadWarning);
     await loadOrders();
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);

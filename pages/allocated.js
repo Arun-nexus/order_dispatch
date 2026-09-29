@@ -254,7 +254,8 @@ function openRequestDetailsModal(r) {
     body = `
       ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
       <div class="detail"><small>Customer</small><p>${d.customer?.company_name ?? '-'}</p></div>
-      <div class="detail"><small>Address</small><p>${d.customer?.company_address ?? '-'}</p></div>`;
+      <div class="detail"><small>Address</small><p>${d.customer?.company_address ?? '-'}</p></div>
+      ${(d.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${d.attachments.map((f, i) => `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(f.name)}</a>`).join('')}</p></div>` : ''}`;
   } else if (r.request_type === 'spare_part') {
     heading = 'Spare Part Request';
     body = `
@@ -282,6 +283,20 @@ function openRequestDetailsModal(r) {
     ${body}`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async e => {
+    e.preventDefault();
+    const f = d.attachments[Number(link.dataset.i)];
+    try {
+      const res = await apiFetch(`/order_attachment/${r.request_id}/${f.stored_name}`);
+      if (!res.ok) throw new Error('could not download file');
+      const url = URL.createObjectURL(await res.blob());
+      const tmp = document.createElement('a');
+      tmp.href = url; tmp.download = f.name; tmp.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  }));
   modal.style.display = 'flex';
 
   const proofBox = document.getElementById('proofBox');

@@ -134,6 +134,12 @@ document.addEventListener('DOMContentLoaded', () => {
     checkPageAccess();
     filterSidebarByRole();
     initNotificationBell();
+    if (getRole() === 'distributor') {
+      setTimeout(() => ['sidebarUserRole', 'headerUserRole'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = 'Sales';
+      }), 0);
+    }
   }
 });
 
