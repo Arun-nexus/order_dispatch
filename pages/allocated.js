@@ -407,6 +407,9 @@ async function loadInventoryForAllocation() {
   }
 }
 
+const fmtDT = d => d ? new Date(d).toLocaleString('en-GB') : '-';
+const returnedOn = a => a.return_completed_at || a.returned_on;
+
 function returnMeta(a) {
   if (a.return_status === 'returned') return { label: 'Returned', cls: 'high', overdue: false, complete: true };
   const due = new Date(a.return_due_date);
@@ -480,6 +483,9 @@ function renderAllocationsTable(allocations) {
       <td>${addressLabel}</td>
       <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
       <td>${a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td>${esc(a.created_by || a.allocated_by || '-')}</td>
+      <td>${esc(a.returned_by || '-')}</td>
+      <td>${fmtDT(returnedOn(a))}</td>
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
@@ -579,6 +585,9 @@ function openViewAllocationModal(a) {
     ${itemsHtml}
     <div class="detail"><small>Allotment Date</small><p>${a.allotment_date ? new Date(a.allotment_date).toLocaleString() : '-'}</p></div>
     <div class="detail"><small>Return Due</small><p>${a.return_due_date ? new Date(a.return_due_date).toLocaleString() : '-'}</p></div>
+    <div class="detail"><small>Created By</small><p>${esc(a.created_by || a.allocated_by || '-')}</p></div>
+    ${a.return_status === 'returned' ? `<div class="detail"><small>Return Approved By</small><p>${esc(a.returned_by || '-')}</p></div>
+    <div class="detail"><small>Returned On</small><p>${fmtDT(returnedOn(a))}</p></div>` : ''}
     <div class="detail"><small>Status</small><p>${meta.label}</p></div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
@@ -728,7 +737,7 @@ function exportAllocationsCSV() {
     personField: 'sales_person.name',
     getRows: () => allocState.allocations,
     onConfirm: (rows) => {
-      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Status'];
+      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Created By', 'Returned By', 'Returned On', 'Status'];
       const csvRows = rows.map(a => {
         const isSpare = a.allocation_type === 'spare_part';
         return [
@@ -739,6 +748,9 @@ function exportAllocationsCSV() {
           a.serial_numbers,
           a.allotment_date,
           a.return_due_date,
+          a.created_by || a.allocated_by || '',
+          a.returned_by || '',
+          returnedOn(a) || '',
           returnMeta(a).label
         ];
       });

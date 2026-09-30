@@ -4362,6 +4362,7 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
         if req["request_type"] == "spare_part":
             details = req["details"]
             alloc = allocation_manager(
+                created_by=user["username"],
                 sales_person={},
                 items=[],
                 spare_part={
@@ -4487,6 +4488,7 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
                 unit_allocation = allocation_manager(
                     sales_person=sales_person_snapshot,
                     allocated_by=request.allocated_to,
+                    created_by=user["username"],
                     items=[{
                         "product_id": item.product_id,
                         "product_name": item.product_name,
@@ -4519,6 +4521,7 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
             redirect_to = "service.html"
 
             spare_allocation = allocation_manager(
+                created_by=user["username"],
                 spare_part=spare_part_dict,
                 company_name=request.company_name,
                 address=request.address,
