@@ -3119,6 +3119,8 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
 
 @app.post("/inventory/update/{product_id}")
 def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
+    if product_id == "__blank_id__":
+        product_id = ""
     try:
         db = inventory_manager()
         match_query = {"product_id": product_id}
@@ -3313,6 +3315,8 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
 
 @app.post("/inventory/delete/{product_id}")
 def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
+    if product_id == "__blank_id__":
+        product_id = ""
     try:
         db = inventory_manager(product_id=product_id)
         if model_no is not None:
@@ -3333,6 +3337,8 @@ def delete_product(product_id: str, model_no: Optional[str] = None, user: dict =
 
 @app.post("/inventory/repair/{product_id}")
 def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
+    if product_id == "__blank_id__":
+        product_id = ""
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,

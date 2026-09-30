@@ -1328,7 +1328,8 @@ async function submitHologramChange({ add = [], remove = [] }) {
         updated_values: {},
         new_hologram_numbers: add,
         remove_hologram_numbers: remove,
-        model_no: invState.activeModelNo
+        model_no: invState.activeModelNo,
+        source_product_type: invState.activeProductType
       })
     });
     const data = await res.json();
@@ -2050,4 +2051,4 @@ function wireModals() {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
-}s
+}
