@@ -381,7 +381,7 @@ class EditAssemblyRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return FileResponse(os.path.join(BASE_DIR, "index.html"))
+    return FileResponse(os.path.join(BASE_DIR, ".."))
 
 
 @app.get("/main_dashboard.html")
