@@ -728,7 +728,7 @@ function exportAllocationsCSV() {
     personField: 'sales_person.name',
     getRows: () => allocState.allocations,
     onConfirm: (rows) => {
-      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Allotment Date', 'Return Due', 'Status'];
+      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Status'];
       const csvRows = rows.map(a => {
         const isSpare = a.allocation_type === 'spare_part';
         return [
@@ -736,6 +736,7 @@ function exportAllocationsCSV() {
           isSpare ? 'Spare Part' : 'Product',
           isSpare ? `${a.spare_part?.part_name} x${a.spare_part?.quantity}` : (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(' | '),
           isSpare ? a.spare_part?.service_id : a.sales_person?.name,
+          a.serial_numbers,
           a.allotment_date,
           a.return_due_date,
           returnMeta(a).label
