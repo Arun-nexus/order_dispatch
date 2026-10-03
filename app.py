@@ -19,7 +19,7 @@ from request.request_manager import request_manager
 from shipment.manage_shipment import shipment_manager
 from assembly.manage_assembly import assembly_manager
 from auth import create_access_token, get_current_user, require_role
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import os
 import re
@@ -381,7 +381,7 @@ class EditAssemblyRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return FileResponse(os.path.join(BASE_DIR, ".."))
+    return RedirectResponse(url = "https://www.acerbiomedicals.com/")
 
 
 @app.get("/main_dashboard.html")
