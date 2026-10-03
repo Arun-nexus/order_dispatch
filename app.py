@@ -440,11 +440,11 @@ def account(user: dict = Depends(get_current_user)):
 
 
 @app.get("/account/my_team")
-def my_team(user: dict = Depends(require_role("distributor"))):
+def my_team(user: dict = Depends(require_role("distributor", "inventory_manager"))):
     try:
         db = mongodbclient()
-        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION,
-                               query={"role": "distributor", "manager": user["username"]})
+        _q = {"role": "distributor"} if user.get("role") == "inventory_manager" else {"role": "distributor", "manager": user["username"]}
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query=_q)
         team = [
             {k: v for k, v in acc.items() if k not in ("password", "confirm_password", "_id")}
             for acc in dataset
@@ -456,11 +456,11 @@ def my_team(user: dict = Depends(require_role("distributor"))):
 
 
 @app.get("/allocation/team")
-def team_allocations(user: dict = Depends(require_role("distributor"))):
+def team_allocations(user: dict = Depends(require_role("distributor", "inventory_manager"))):
     try:
         acc_db = mongodbclient()
-        team = acc_db.get_data(collection_name=ACCOUNTS_COLLECTION,
-                                query={"role": "distributor", "manager": user["username"]})
+        _q = {"role": "distributor"} if user.get("role") == "inventory_manager" else {"role": "distributor", "manager": user["username"]}
+        team = acc_db.get_data(collection_name=ACCOUNTS_COLLECTION, query=_q)
         team_usernames = [t["username"] for t in team]
         if not team_usernames:
             return {"message": "no team members", "dataset": []}
@@ -3686,11 +3686,14 @@ def allocation_damage_image(allocation_id: str, user: dict = Depends(get_current
 
 
 @app.get("/allocation/mine")
-def my_allocations(user: dict = Depends(require_role("distributor"))):
+def my_allocations(user: dict = Depends(require_role("distributor", "inventory_manager"))):
     try:
         db = allocation_manager()
+        _q = {"allocation_type": {"$in": ["demo_unit", "product"]}}
+        if user.get("role") != "inventory_manager":
+            _q["allocated_by"] = user["username"]
         dataset = db.get_data(collection_name=ALLOCATION_COLLECTION,
-                               query={"allocation_type": {"$in": ["demo_unit", "product"]}, "allocated_by": user["username"]},
+                               query=_q,
                                projection={"damage_report.image": 0})
         return {"message": "my demo unit allocations", "dataset": dataset}
     except Exception as e:
@@ -4219,7 +4222,8 @@ def request_proof(request_id: str, user: dict = Depends(require_role("admin", "a
 def my_requests(user: dict = Depends(get_current_user)):
     try:
         db = request_manager()
-        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={"raised_by": user["username"]},
+        _q = {} if user.get("role") == "inventory_manager" else {"raised_by": user["username"]}
+        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query=_q,
                               projection={"details.proof.data": 0})
         return {"message": "my requests", "dataset": dataset}
     except Exception as e:
