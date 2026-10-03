@@ -11,7 +11,7 @@ const ROLE_ACCESS = {
   assembly:        ['assembly.html'],
   technician:      ['technician.html','technician_dashboard.html'],
   distributor:     ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html'],
-  inventory_manager: ['inventory.html'],
+  inventory_manager: ['inventory.html', 'distributor.html', 'distributor_orders.html', 'assembly.html', 'shipment.html'],
 };
 
 const ROLE_HOME = {

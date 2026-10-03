@@ -1460,7 +1460,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
 
 
 @app.get("/shipment/")
-def shipment(user: dict = Depends(require_role("admin", "accounts"))):
+def shipment(user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
         db = shipment_manager()
         dataset = db.get_data(collection_name=SHIPMENT_COLLECTION, query={})
@@ -1472,7 +1472,7 @@ def shipment(user: dict = Depends(require_role("admin", "accounts"))):
 
 
 @app.get("/shipment/{shipment_id}")
-def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", "accounts"))):
+def track_shipment(shipment_id: str, user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
         db = shipment_manager()
         result = db.shipment_tracking(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id)
@@ -1485,7 +1485,7 @@ def track_shipment(shipment_id: str, user: dict = Depends(require_role("admin", 
 
 
 @app.post("/shipment/create")
-def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
         shipment_dict = {
             "company_name": request.company_name,
@@ -1525,7 +1525,7 @@ def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require
 
 
 @app.post("/shipment/mark_received/{shipment_id}")
-def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1558,7 +1558,7 @@ def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, u
 
 
 @app.post("/shipment/update/{shipment_id}")
-def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
+def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
         db = shipment_manager()
         existing = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
@@ -1597,7 +1597,7 @@ def delete_shipment(shipment_id: str, user: dict = Depends(require_role("admin")
 # =========================================================
 
 @app.get("/assembly/")
-def assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         dataset = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={})
@@ -1609,7 +1609,7 @@ def assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))
 
 
 @app.get("/assembly/available_parts")
-def available_parts_for_assembly(user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def available_parts_for_assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     """
     Spare parts currently sitting in inventory — the pool an assembly's parts
     are pulled from. This stock is fed by shipments: a shipment part marked
@@ -1648,7 +1648,7 @@ def available_parts_for_assembly(user: dict = Depends(require_role("assembly", "
 
 
 @app.get("/assembly/{assembly_id}")
-def track_assembly(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def track_assembly(assembly_id: str, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         result = db.assembly_tracking(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
@@ -1661,7 +1661,7 @@ def track_assembly(assembly_id: str, user: dict = Depends(require_role("assembly
 
 
 @app.post("/assembly/create")
-def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
         parts_used = [part.dict() for part in request.parts_used]
 
@@ -1781,7 +1781,7 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
 
 
 @app.post("/assembly/mark_completed/{assembly_id}")
-def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1823,7 +1823,7 @@ def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role(
 
 
 @app.post("/assembly/update/{assembly_id}")
-def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("assembly", "admin", "accounts"))):
+def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -1854,7 +1854,7 @@ def _inventory_needed(parts_used: list) -> dict:
 
 
 @app.post("/assembly/edit/{assembly_id}")
-def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = Depends(require_role("admin", "assembly"))):
+def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = Depends(require_role("inventory_manager", "admin", "assembly"))):
     """
     Edit a PENDING assembly while it is still being built — parts can be added,
     removed or their quantity changed. Only admin and assembly users may do this.
