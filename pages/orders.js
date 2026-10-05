@@ -1415,8 +1415,8 @@ function renderProductsStep() {
       product_id: p.product_id,
       product_name: p.product_name,
       model_no: p.model_no || '',
-      price: Number(p.price) || 0,
-      tax_rate: Number(p.tax_rate) || 0,
+      price: wiz.cart[key] ? wiz.cart[key].price : (Number(p.price) || 0),
+      tax_rate: wiz.cart[key] ? wiz.cart[key].tax_rate : (Number(p.tax_rate) || 0),
       quantity: qty
     };
   }
@@ -1521,9 +1521,22 @@ function renderPaymentStep() {
 
   wizardBody().innerHTML = `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
-      ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br>')}
-      <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;">
-      Subtotal: ₹${subtotal.toFixed(2)}
+      ${cartItems.map((i, idx) => `
+        <div style="padding:6px 0;border-bottom:1px solid #e2e8f0;">
+          <div style="font-weight:600;">${i.product_name} × ${i.quantity}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <label style="flex:1;font-size:11px;color:#64748b;">Price / pc (₹)
+              <input type="number" min="0" step="any" class="wizPrice" data-idx="${idx}" value="${i.price}" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            </label>
+            <label style="flex:1;font-size:11px;color:#64748b;">Tax % / pc
+              <input type="number" min="0" step="any" class="wizTax" data-idx="${idx}" value="${i.tax_rate}" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            </label>
+            <div style="flex:1;font-size:11px;color:#64748b;">Line (excl. tax)
+              <div class="wizLine" data-idx="${idx}" style="padding:6px 0;font-size:13px;color:#0f172a;">₹${(i.price * i.quantity).toFixed(2)}</div>
+            </div>
+          </div>
+        </div>`).join('')}
+      <div id="wizSubtotal" style="margin-top:8px;">Subtotal: ₹${subtotal.toFixed(2)}</div>
     </div>
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:12px;">
       <label style="font-size:13px;font-weight:600;color:#334155;">Warranty</label>
@@ -1566,9 +1579,23 @@ function renderPaymentStep() {
   const extendBox = document.getElementById('extendWarrantyBox');
 
   function refreshGrandTotal() {
+    const subtotal = cartItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const subEl = document.getElementById('wizSubtotal');
+    if (subEl) subEl.textContent = `Subtotal: ₹${subtotal.toFixed(2)}`;
     const total = subtotal - (wiz.discount || 0) + (wiz.warrantyCharge || 0);
     document.getElementById('grandTotalBox').textContent = `Grand Total (excl. tax): ₹${total.toFixed(2)}`;
   }
+
+  document.querySelectorAll('.wizPrice').forEach(inp => inp.addEventListener('input', () => {
+    const it = cartItems[Number(inp.dataset.idx)];
+    it.price = Math.max(0, Number(inp.value) || 0);
+    const line = document.querySelector(`.wizLine[data-idx="${inp.dataset.idx}"]`);
+    if (line) line.textContent = `₹${(it.price * it.quantity).toFixed(2)}`;
+    refreshGrandTotal();
+  }));
+  document.querySelectorAll('.wizTax').forEach(inp => inp.addEventListener('input', () => {
+    cartItems[Number(inp.dataset.idx)].tax_rate = Math.max(0, Number(inp.value) || 0);
+  }));
 
   discountInput.addEventListener('input', e => { wiz.discount = Number(e.target.value) || 0; refreshGrandTotal(); });
 
