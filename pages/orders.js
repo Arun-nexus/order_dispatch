@@ -800,10 +800,15 @@ function exportOrdersCSV() {
     dateLabel: 'Order Date',
     getRows: () => orderState.orders,
     onConfirm: (rows) => {
-      const header = ['Order ID', 'Products', 'Company', 'Payment Mode', 'Status', 'Total'];
+      const header = ['Order ID', 'Products', 'Serial Numbers', 'Company', 'Payment Mode', 'Status', 'Total'];
       const csvRows = rows.map(o => [
         o.order_id,
         (o.items || []).map(it => `${it.product_name} x${it.quantity}`).join(' | '),
+        (o.items || []).map(it => {
+          const sn = (it.serial_numbers || []).join('; ');
+          if (!sn) return '';
+          return (o.items || []).length > 1 ? `${it.product_name}: ${sn}` : sn;
+        }).filter(Boolean).join(' | '),
         o.customer?.company_name ?? o.company_name ?? '',
         o.payment_mode,
         o.status,
@@ -816,7 +821,8 @@ function exportOrdersCSV() {
 
 // ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const csv = '\ufeff' + [header, ...rows].map(r => r.map(q).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
