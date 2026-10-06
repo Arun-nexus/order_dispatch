@@ -510,7 +510,7 @@ function renderAllocationsTable(allocations) {
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
         ${window.__allocCanEdit && !isSpare && !a.dispatch && !meta.complete
           ? '<button class="icon-btn edit-alloc-btn" title="Edit (serial / details)"><i class="fa-solid fa-pen"></i></button>' : ''}
-        ${window.__allocCanEdit && a.allocation_type === 'demo_unit' && a.dispatch && !meta.complete
+        ${window.__allocCanEdit && !isSpare && !meta.complete
           ? '<button class="icon-btn convert-alloc-btn" title="Convert to Order"><i class="fa-solid fa-file-invoice-dollar"></i></button>' : ''}
         ${!isSpare && !a.dispatch && !a.sent_to_dispatch && window.__allocCanCreate
           ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}

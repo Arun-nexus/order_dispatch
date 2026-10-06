@@ -4837,12 +4837,10 @@ def convert_demo_to_order_direct(allocation_id: str, request: AdminConvertReques
         if not matches:
             raise HTTPException(status_code=404, detail="demo unit not found")
         alloc = matches[0]
-        if alloc.get("allocation_type") != "demo_unit":
-            raise HTTPException(status_code=400, detail="only demo units can be converted to an order")
-        if not alloc.get("dispatch"):
-            raise HTTPException(status_code=400, detail="only dispatched demo units can be converted to an order")
+        if alloc.get("allocation_type") == "spare_part" or not alloc.get("items"):
+            raise HTTPException(status_code=400, detail="spare part allocations cannot be converted to an order")
         if alloc.get("return_status") == "returned":
-            raise HTTPException(status_code=400, detail="this demo unit was already returned")
+            raise HTTPException(status_code=400, detail="this allocation was already returned")
         if (alloc.get("convert_request") or {}).get("status") == "pending":
             raise HTTPException(status_code=400, detail="an order request is already pending — approve it from Pending Requests")
         if (alloc.get("return_request") or {}).get("status") == "pending":
