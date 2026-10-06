@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from bson import ObjectId
 from logger import logging
 from configuration import load_params
@@ -357,6 +357,10 @@ class AssemblyPartUsed(BaseModel):
 
 class AssemblySerialItem(BaseModel):
     serial_number: str
+
+
+class ApproveAssemblyRequest(BaseModel):
+    serial_numbers: List[str]
 
 
 class CreateAssemblyRequest(BaseModel):
@@ -1782,44 +1786,95 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
 
 @app.post("/assembly/mark_completed/{assembly_id}")
 def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
+    """Assembly team submits the batch for approval. Nothing goes to inventory yet."""
+    try:
+        db = assembly_manager()
+        existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
+        if existing[0].get("status") != "pending":
+            raise HTTPException(status_code=400, detail="only a pending assembly can be submitted for approval")
+
+        db.update(
+            collection_name=ASSEMBLY_COLLECTION,
+            query={"assembly_id": assembly_id},
+            update_values={
+                "status": "pending_approval",
+                "approved_serials": [],
+                "submitted_by": user.get("username"),
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return {"message": "assembly submitted for approval", "assembly_id": assembly_id, "status": "pending_approval"}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("submitting assembly for approval failed")
+        raise HTTPException(status_code=500, detail="assembly could not be submitted for approval")
+
+
+@app.post("/assembly/approve/{assembly_id}")
+def approve_assembly(assembly_id: str, request: ApproveAssemblyRequest, user: dict = Depends(require_role("admin", "accounts"))):
+    """
+    Approver ticks the serial numbers that physically arrived. Only those units
+    are added to inventory. All serials approved -> "completed"; some -> "partially_approved".
+    """
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
         if not existing:
             raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
         assembly = existing[0]
+        if assembly.get("status") not in ("pending_approval", "partially_approved"):
+            raise HTTPException(status_code=400, detail="this assembly is not awaiting approval")
 
-        db.mark_completed(collection_name=ASSEMBLY_COLLECTION, assembly_id=assembly_id)
+        all_serials = [s.get("serial_number") for s in assembly.get("serials", []) if s.get("serial_number")]
+        already = set(assembly.get("approved_serials") or [])
+        requested = list(dict.fromkeys(request.serial_numbers))
+        unknown = [x for x in requested if x not in all_serials]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"serial(s) not part of this assembly: {', '.join(unknown)}")
+        new_serials = [x for x in requested if x not in already]
+        if not new_serials:
+            raise HTTPException(status_code=400, detail="select at least one serial number that is not approved yet")
 
-        # push the freshly built units into inventory - merges into a matching
-        # product_name + product_id + model_no entry if one exists, else creates one.
-        # Kept non-fatal: the assembly is already marked completed above, so an
-        # inventory hiccup here is reported back but doesn't roll that back.
-        inventory_sync = "skipped"
-        try:
-            serial_numbers = [s.get("serial_number") for s in assembly.get("serials", []) if s.get("serial_number")]
-            inv_db = inventory_manager()
-            sync_result = inv_db.add_from_assembly(
-                collection_name=INVENTORY_COLLECTION,
-                product_name=assembly.get("product_name"),
-                product_id=assembly.get("product_id"),
-                model_no=assembly.get("model_number"),
-                quantity=assembly.get("quantity", 0),
-                serial_numbers=serial_numbers,
-                purchase_date=datetime.now(timezone.utc).date().isoformat(),
-            )
-            inventory_sync = sync_result["mode"]  # "merged" | "created"
-        except Exception as inv_err:
-            logging.error(f"assembly {assembly_id} completed but inventory sync failed: {inv_err}")
-            inventory_sync = f"failed: {inv_err}"
+        # inventory first - if this fails nothing is marked approved
+        inv_db = inventory_manager()
+        sync_result = inv_db.add_from_assembly(
+            collection_name=INVENTORY_COLLECTION,
+            product_name=assembly.get("product_name"),
+            product_id=assembly.get("product_id"),
+            model_no=assembly.get("model_number"),
+            quantity=len(new_serials),
+            serial_numbers=new_serials,
+            purchase_date=datetime.now(timezone.utc).date().isoformat(),
+        )
 
-        return {"message": "assembly marked as completed", "assembly_id": assembly_id, "inventory_sync": inventory_sync}
-
+        approved_all = list(already) + new_serials
+        status = "completed" if len(set(approved_all)) >= len(set(all_serials)) else "partially_approved"
+        history = (assembly.get("approval_history") or []) + [{
+            "approved_by": user.get("username"),
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "serials": new_serials,
+        }]
+        db.update(
+            collection_name=ASSEMBLY_COLLECTION,
+            query={"assembly_id": assembly_id},
+            update_values={"status": status, "approved_serials": approved_all, "approval_history": history},
+        )
+        return {
+            "message": "assembly approved" if status == "completed" else "assembly partially approved",
+            "assembly_id": assembly_id,
+            "status": status,
+            "approved_serials": approved_all,
+            "added_to_inventory": len(new_serials),
+            "inventory_sync": sync_result["mode"],
+        }
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("marking assembly as completed failed")
-        raise HTTPException(status_code=500, detail="assembly could not be marked as completed")
+        logging.error(f"assembly approval failed: {e}")
+        raise HTTPException(status_code=500, detail="assembly could not be approved")
 
 
 @app.post("/assembly/update/{assembly_id}")

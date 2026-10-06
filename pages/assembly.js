@@ -50,6 +50,7 @@ function fromServerShapeAssembly(a) {
     partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source })),
     serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number })),
     status: a.status,
+    approvedSerials: a.approved_serials || [],
     createdAt: a.created_at,
     hologramPart: a.hologram_part || '',
     editHistory: a.edit_history || [],
@@ -120,6 +121,19 @@ function sourceLabel(p) {
   return p.source === 'local' ? 'Local parts' : 'Inventory (spare parts)';
 }
 
+const APPROVER_ROLES = ['admin', 'accounts'];
+function canApproveAssembly() { return APPROVER_ROLES.includes(getRole()); }
+function isApprovalStatus(st) { return st === 'pending_approval' || st === 'partially_approved'; }
+
+function statusPill(a) {
+  const total = (a.serials || []).length;
+  const done = (a.approvedSerials || []).length;
+  if (a.status === 'completed') return '<span class="status delivered">Fully Approved</span>';
+  if (a.status === 'partially_approved') return `<span class="status pending" style="background:#fff4e0;color:#b45309;">Partially Approved (${done}/${total})</span>`;
+  if (a.status === 'pending_approval') return '<span class="status pending" style="background:#e8f0ff;color:#1665ff;">Awaiting Approval</span>';
+  return '<span class="status pending">Pending</span>';
+}
+
 function renderTable() {
   const tbody = document.getElementById('assemblyTbody');
   const statusFilter = document.getElementById('statusFilter').value;
@@ -140,9 +154,7 @@ function renderTable() {
   }
 
   tbody.innerHTML = rows.map(a => {
-    const pill = a.status === 'completed'
-      ? '<span class="status delivered">Completed</span>'
-      : '<span class="status pending">Pending</span>';
+    const pill = statusPill(a);
     const usesInventory = (a.partsUsed || []).some(p => p.source !== 'local');
     const usesLocal = (a.partsUsed || []).some(p => p.source === 'local');
     const sourceSummary = usesInventory && usesLocal ? 'Inventory + Local'
@@ -161,7 +173,8 @@ function renderTable() {
           <button class="icon-btn" data-action="view" data-id="${a.id}" title="View"><i class="fa-solid fa-eye"></i></button>
           <button class="icon-btn" data-action="export" data-id="${a.id}" title="Export Serials"><i class="fa-solid fa-file-excel"></i></button>
           ${a.status === 'pending' && canEditAssembly() ? `<button class="icon-btn" data-action="edit" data-id="${a.id}" title="Edit Assembly"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
-          ${a.status === 'pending' ? `<button class="icon-btn" data-action="complete" data-id="${a.id}" title="Mark Completed"><i class="fa-solid fa-check"></i></button>` : ''}
+          ${a.status === 'pending' ? `<button class="icon-btn" data-action="complete" data-id="${a.id}" title="Submit for Approval"><i class="fa-solid fa-paper-plane"></i></button>` : ''}
+          ${isApprovalStatus(a.status) && canApproveAssembly() ? `<button class="icon-btn" data-action="approve" data-id="${a.id}" title="Approve Serials"><i class="fa-solid fa-clipboard-check"></i></button>` : ''}
           <button class="icon-btn" data-action="delete" data-id="${a.id}" title="Delete"><i class="fa-solid fa-trash"></i></button>
         </td>
       </tr>`;
@@ -171,6 +184,7 @@ function renderTable() {
   tbody.querySelectorAll('[data-action="export"]').forEach(b => b.addEventListener('click', () => exportAssemblySerials(b.dataset.id)));
   tbody.querySelectorAll('[data-action="edit"]').forEach(b => b.addEventListener('click', () => openEditAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="complete"]').forEach(b => b.addEventListener('click', () => markAssemblyCompleted(b.dataset.id)));
+  tbody.querySelectorAll('[data-action="approve"]').forEach(b => b.addEventListener('click', () => openApproveAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => openDeleteAssemblyModal(b.dataset.id)));
 }
 
@@ -202,9 +216,9 @@ function openViewAssemblyModal(id) {
     <h4 style="margin-bottom:8px;">Serial / Hologram Numbers</h4>
     <div style="max-height:220px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;">
-        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th></tr></thead>
+        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th>${a.status !== 'pending' ? '<th style="text-align:left;padding:8px;">Approval</th>' : ''}</tr></thead>
         <tbody>
-          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td></tr>`).join('')}
+          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:#16a34a;">✔ Received</span>' : '<span style="color:#d97706;">Not received</span>'}</td>` : ''}</tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -217,22 +231,88 @@ async function markAssemblyCompleted(id) {
   try {
     const res = await apiFetch(`/assembly/mark_completed/${id}`, { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'could not mark this assembly as completed');
-
+    if (!res.ok) throw new Error(data.detail || 'could not submit this assembly');
     const a = assemblies.find(x => x.id === id);
-    if (a) a.status = 'completed';
+    if (a) { a.status = 'pending_approval'; a.approvedSerials = []; }
     renderCards();
     renderTable();
-
-    const inventoryNote = data.inventory_sync === 'merged'
-      ? 'Assembled units were merged into the existing inventory entry.'
-      : data.inventory_sync === 'created'
-        ? 'A new inventory entry was created for these units.'
-        : 'Assembly completed, but inventory sync needs a manual check.';
-    showResponseModal('Assembly completed', inventoryNote, data.inventory_sync !== undefined && !String(data.inventory_sync).startsWith('failed'));
+    showResponseModal('Sent for approval', 'Admin / Accounts will verify the serial numbers. Units are added to inventory only after approval.', true);
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
-      showResponseModal('Update failed', 'Could not mark this assembly as completed.', false);
+      showResponseModal('Update failed', err.message || 'Could not submit this assembly.', false);
+    }
+  }
+}
+
+function openApproveAssemblyModal(id) {
+  const a = assemblies.find(x => x.id === id);
+  if (!a) return;
+  const done = new Set(a.approvedSerials || []);
+  const box = document.querySelector('#viewAssemblyModal .modal-content');
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3>Approve — ${a.productName}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Tick the serial numbers that have arrived. Only ticked units are added to inventory.</p>
+    <div style="max-height:320px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;">
+        <thead><tr>
+          <th style="padding:8px;width:40px;"><input type="checkbox" id="apprAll"></th>
+          <th style="text-align:left;padding:8px;">Serial No.</th>
+          <th style="text-align:left;padding:8px;">Hologram No.</th>
+          <th style="text-align:left;padding:8px;">Status</th>
+        </tr></thead>
+        <tbody>
+          ${(a.serials || []).map(s => `<tr>
+            <td style="padding:6px 8px;"><input type="checkbox" class="apprChk" value="${s.serial}" ${done.has(s.serial) ? 'checked disabled' : ''}></td>
+            <td style="padding:6px 8px;">${s.serial}</td>
+            <td style="padding:6px 8px;">${s.hologram}</td>
+            <td style="padding:6px 8px;">${done.has(s.serial) ? '<span style="color:#16a34a;">✔ Approved</span>' : '<span style="color:#d97706;">Not received</span>'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <span id="apprCount" style="font-size:13px;color:#64748b;"></span>
+      <button id="apprSubmit" style="padding:10px 18px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Approve Selected</button>
+    </div>`;
+  const chks = () => [...box.querySelectorAll('.apprChk:not(:disabled)')];
+  const sel = () => chks().filter(c => c.checked).map(c => c.value);
+  const upd = () => {
+    box.querySelector('#apprCount').textContent = `${sel().length} selected · ${done.size}/${a.serials.length} already approved`;
+    box.querySelector('#apprSubmit').disabled = !sel().length;
+  };
+  box.querySelector('#apprAll').addEventListener('change', e => { chks().forEach(c => c.checked = e.target.checked); upd(); });
+  chks().forEach(c => c.addEventListener('change', upd));
+  box.querySelector('.close').addEventListener('click', () => closeModal('viewAssemblyModal'));
+  box.querySelector('#apprSubmit').addEventListener('click', () => submitApproval(id, sel()));
+  upd();
+  openModal('viewAssemblyModal');
+}
+
+async function submitApproval(id, serials) {
+  try {
+    const res = await apiFetch(`/assembly/approve/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serial_numbers: serials }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'approval failed');
+    const a = assemblies.find(x => x.id === id);
+    if (a) { a.status = data.status; a.approvedSerials = data.approved_serials || []; }
+    closeModal('viewAssemblyModal');
+    renderCards();
+    renderTable();
+    showResponseModal(
+      data.status === 'completed' ? 'Fully approved' : 'Partially approved',
+      `${data.added_to_inventory} unit(s) added to inventory.` + (data.status === 'completed' ? '' : ' Remaining serials are still awaiting approval.'),
+      true
+    );
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      showResponseModal('Approval failed', err.message || 'Could not approve.', false);
     }
   }
 }
