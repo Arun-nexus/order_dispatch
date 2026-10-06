@@ -4724,6 +4724,145 @@ def return_allocation(allocation_id: str, user: dict = Depends(require_role("adm
         raise HTTPException(status_code=500, detail="return failed while updating inventory — nothing was lost, please retry")
 
 
+class EditAllocationRequest(BaseModel):
+    serial_numbers: Optional[List[str]] = None
+    company_name: Optional[str] = None
+    address: Optional[str] = None
+    gst_number: Optional[str] = None
+    phone_number: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+@app.post("/allocation/edit/{allocation_id}")
+def edit_allocation(allocation_id: str, request: EditAllocationRequest, user: dict = Depends(require_role("admin", "accounts"))):
+    """
+    Edit an allocation. Changing a serial number swaps stock: the new serial is deducted
+    from inventory, the old (auto-picked) serial goes back into inventory.
+    """
+    try:
+        db = allocation_manager()
+        found = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not found:
+            raise HTTPException(status_code=404, detail="allocation not found")
+        alloc = found[0]
+        if alloc.get("return_status") == "returned":
+            raise HTTPException(status_code=400, detail="a returned allocation cannot be edited")
+        if alloc.get("dispatch"):
+            raise HTTPException(status_code=400, detail="a dispatched allocation cannot be edited")
+
+        updates = {}
+        for f in ("company_name", "address", "gst_number", "phone_number", "remarks"):
+            v = getattr(request, f)
+            if v is not None:
+                updates[f] = v.strip()
+
+        history_entry = {"edited_by": user["username"], "edited_at": datetime.now(timezone.utc).isoformat()}
+
+        if request.serial_numbers is not None:
+            items = list(alloc.get("items") or [])
+            if alloc.get("allocation_type") == "spare_part" or len(items) != 1:
+                raise HTTPException(status_code=400, detail="serial numbers can only be edited on a single-product allocation")
+            it = _normalize_return_item(items[0])
+            new = list(dict.fromkeys(x.strip() for x in request.serial_numbers if x and x.strip()))
+            old = it["serial_numbers"]
+            if len(new) != it["quantity"]:
+                raise HTTPException(status_code=400, detail=f"select exactly {it['quantity']} serial number(s)")
+
+            removed = [x for x in old if x not in new]
+            added = [x for x in new if x not in old]
+            if added:
+                inv_db = inventory_manager()
+                model = it["model_no"] or None
+                available = set(inv_db.list_available_serials(INVENTORY_COLLECTION, it["product_id"], model_no=model))
+                missing = [x for x in added if x not in available]
+                if missing:
+                    raise HTTPException(status_code=400, detail=f"serial number(s) not available in inventory: {', '.join(missing)}")
+
+                # 1) take the new serial(s) out of inventory
+                inv_db.allocate_specific_serials(INVENTORY_COLLECTION, it["product_id"], added, model_no=model)
+                try:
+                    # 2) put the old serial(s) back (units that never had a serial go back by quantity)
+                    if removed:
+                        _restock_one_item(inv_db, {**it, "quantity": len(removed), "serial_numbers": removed})
+                    extra = len(added) - len(removed)
+                    if extra > 0:
+                        _restock_one_item(inv_db, {**it, "quantity": extra, "serial_numbers": []})
+                except Exception:
+                    # could not give the old stock back -> undo the new reservation so nothing is lost
+                    _restock_one_item(inv_db, {**it, "quantity": len(added), "serial_numbers": added})
+                    raise
+
+            items[0] = {**items[0], "serial_numbers": new}
+            updates["items"] = items
+            history_entry.update({"old_serials": old, "new_serials": new})
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="nothing to update")
+
+        updates.update({"last_edited_by": user["username"], "last_edited_at": history_entry["edited_at"],
+                        "edit_history": list(alloc.get("edit_history") or []) + [history_entry]})
+        db.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id}, update_values=updates)
+        return {"message": "allocation updated" + (" — old serial returned to inventory" if history_entry.get("old_serials") != history_entry.get("new_serials") and "new_serials" in history_entry else ""),
+                "allocation_id": allocation_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"editing allocation failed! {e}")
+        raise HTTPException(status_code=500, detail="allocation could not be updated")
+
+
+class AdminConvertRequest(BaseModel):
+    company_name: str
+    company_address: str
+    gst_number: str = ""
+    price: float
+    tax_rate: float = 0
+    invoice_no: str
+    invoice_date: str
+
+
+@app.post("/allocation/convert_to_order_direct/{allocation_id}")
+def convert_demo_to_order_direct(allocation_id: str, request: AdminConvertRequest, user: dict = Depends(require_role("admin", "accounts"))):
+    """Admin/accounts converts a dispatched demo unit straight into an order (no approval step)."""
+    try:
+        if not request.company_name.strip() or not request.company_address.strip():
+            raise HTTPException(status_code=400, detail="company name and address are required")
+        if request.price <= 0:
+            raise HTTPException(status_code=400, detail="enter a valid price")
+        if not request.invoice_no.strip() or not request.invoice_date.strip():
+            raise HTTPException(status_code=400, detail="invoice number and invoice date are required")
+
+        adb = allocation_manager()
+        matches = adb.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="demo unit not found")
+        alloc = matches[0]
+        if alloc.get("allocation_type") != "demo_unit":
+            raise HTTPException(status_code=400, detail="only demo units can be converted to an order")
+        if not alloc.get("dispatch"):
+            raise HTTPException(status_code=400, detail="only dispatched demo units can be converted to an order")
+        if alloc.get("return_status") == "returned":
+            raise HTTPException(status_code=400, detail="this demo unit was already returned")
+        if (alloc.get("convert_request") or {}).get("status") == "pending":
+            raise HTTPException(status_code=400, detail="an order request is already pending — approve it from Pending Requests")
+        if (alloc.get("return_request") or {}).get("status") == "pending":
+            raise HTTPException(status_code=400, detail="a return request is pending for this demo unit")
+
+        details = {
+            "customer": {"company_name": request.company_name.strip(), "company_address": request.company_address.strip(),
+                         "gst_number": request.gst_number.strip()},
+            "price": request.price, "tax_rate": request.tax_rate,
+        }
+        order_id = _convert_demo_to_order(alloc, details, alloc.get("allocated_by") or user["username"], user["username"],
+                                          request.invoice_no.strip(), request.invoice_date.strip())
+        return {"message": "demo unit converted to order", "order_id": order_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"direct convert to order failed! {e}")
+        raise HTTPException(status_code=500, detail="demo unit could not be converted to an order")
+
+
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")
 app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
 app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
