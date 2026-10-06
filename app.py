@@ -4596,9 +4596,61 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
         raise HTTPException(status_code=500, detail="allocation creation failed")
 
 
+def _normalize_return_item(item):
+    """Tolerant view of an allocation item (MCP / older records may miss quantity, model_no etc.)."""
+    serials = [str(x).strip() for x in (item.get("serial_numbers") or []) if x and str(x).strip()]
+    try:
+        qty = int(item.get("quantity") or 0)
+    except (TypeError, ValueError):
+        qty = 0
+    if qty <= 0:
+        qty = len(serials) or 1
+    pid = str(item.get("product_id") or "").strip()
+    name = str(item.get("product_name") or "").strip() or pid or "Returned item"
+    model = str(item.get("model_no") or item.get("model_number") or "").strip()
+    return {"product_id": pid, "product_name": name, "model_no": model, "quantity": qty, "serial_numbers": serials}
+
+
+def _restock_one_item(inv_db, it):
+    """Same product_id + name + model -> merged into that lot, else a new lot is created. Never gives up silently."""
+    last_err = None
+    for _ in range(2):  # one retry for transient DB hiccups
+        try:
+            inv_db.restock_returned_units(
+                collection_name=INVENTORY_COLLECTION,
+                product_id=it["product_id"],
+                product_name=it["product_name"],
+                model_no=it["model_no"],
+                quantity=it["quantity"],
+                serial_numbers=it["serial_numbers"],
+            )
+            return "restocked"
+        except Exception as e:
+            last_err = e
+            logging.error(f"restock attempt failed for {it['product_name']}: {e}")
+    # last resort: force a fresh inventory entry so the returned stock is never lost
+    inventory_manager(
+        product_name=it["product_name"],
+        product_id=it["product_id"] or f"RET-{uuid.uuid4().hex[:8].upper()}",
+        model_no=it["model_no"],
+        quantity=it["quantity"],
+        purchase_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        lot_no="", supplier="", price="", tax_rate=0,
+        serial_numbers=it["serial_numbers"],
+        product_type="product",
+    ).add(collection_name=INVENTORY_COLLECTION)
+    logging.warning(f"restock fell back to a fresh entry for {it['product_name']} (reason: {last_err})")
+    return "created_fallback"
+
+
 @app.post("/allocation/return/{allocation_id}")
 def return_allocation(allocation_id: str, user: dict = Depends(require_role("admin", "accounts", "distributor", "service_manager"))):
-
+    """
+    Inventory is updated FIRST, the allocation is marked returned only after that
+    succeeds. So a return can never end up "returned but not in inventory" — if
+    anything fails the allocation stays pending and the request can simply be
+    retried (per-item progress is saved, so nothing is added twice).
+    """
     try:
         db = allocation_manager()
         matches = db.get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
@@ -4609,93 +4661,67 @@ def return_allocation(allocation_id: str, user: dict = Depends(require_role("adm
         if allocation.get("return_status") == "returned":
             raise HTTPException(status_code=400, detail="this allocation is already returned")
 
+        damage_report = allocation.get("damage_report") or {}
+        is_damaged = bool(damage_report.get("reported"))
+        is_spare = allocation.get("allocation_type") == "spare_part"
+        done = set(allocation.get("restocked_item_idx") or [])
+        inv_db = inventory_manager()
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        if is_spare:
+            # spare parts were consumed by the service; only a damaged return goes back (as damaged stock)
+            sp = allocation.get("spare_part", {}) or {}
+            part_name = sp.get("part_name", "")
+            qty = sp.get("quantity", 0) or 0
+            if is_damaged and part_name and qty > 0 and 0 not in done:
+                reason = f"returned damaged from allocation {allocation_id}"
+                if damage_report.get("issue"):
+                    reason += f" — {damage_report['issue']}"
+                inventory_manager(
+                    product_name=part_name, product_id=f"DMG-{uuid.uuid4().hex[:8].upper()}",
+                    quantity=qty, purchase_date=today, product_type="damaged", reason=reason,
+                ).add(collection_name=INVENTORY_COLLECTION)
+        else:
+            for idx, raw in enumerate(allocation.get("items", []) or []):
+                if idx in done:
+                    continue
+                it = _normalize_return_item(raw)
+                if is_damaged:
+                    reason = f"returned damaged from allocation {allocation_id}"
+                    if damage_report.get("issue"):
+                        reason += f" — {damage_report['issue']}"
+                    if it["product_id"]:
+                        reason += f" (original product_id: {it['product_id']})"
+                    inventory_manager(
+                        product_name=it["product_name"], product_id=f"DMG-{uuid.uuid4().hex[:8].upper()}",
+                        quantity=it["quantity"], purchase_date=today,
+                        serial_numbers=it["serial_numbers"], product_type="damaged", reason=reason,
+                    ).add(collection_name=INVENTORY_COLLECTION)
+                else:
+                    _restock_one_item(inv_db, it)
+                done.add(idx)
+                # save progress so a retry never double-adds items that already went in
+                db.update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id},
+                               update_values={"restocked_item_idx": sorted(done)})
+
         db.update_data(
             collection_name=ALLOCATION_COLLECTION,
             query={"allocation_id": allocation_id},
             update_values={
                 "return_status": "returned",
                 "return_completed_at": datetime.now(timezone.utc).isoformat(),
-                "returned_by": user["username"]
+                "returned_by": user["username"],
+                "restocked": True,
             }
         )
-        logging.info(f"allocation {allocation_id} marked as returned")
-
-        damage_report = allocation.get("damage_report") or {}
-        if damage_report.get("reported"):
-            try:
-                inv_db = inventory_manager()
-                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                reason = f"returned damaged from allocation {allocation_id}"
-                if damage_report.get("issue"):
-                    reason += f" — {damage_report['issue']}"
-
-                if allocation.get("allocation_type") == "spare_part":
-                    sp = allocation.get("spare_part", {})
-                    part_name = sp.get("part_name", "")
-                    qty = sp.get("quantity", 0) or 0
-                    if part_name and qty > 0:
-                        inventory_manager(
-                            product_name=part_name,
-                            product_id=f"DMG-{uuid.uuid4().hex[:8].upper()}",
-                            quantity=qty,
-                            purchase_date=today,
-                            product_type="damaged",
-                            reason=reason,
-                        ).add(collection_name=INVENTORY_COLLECTION)
-                else:
-                    for item in allocation.get("items", []):
-                        product_name = item.get("product_name", "")
-                        qty = item.get("quantity", 0) or 0
-                        if not product_name or qty <= 0:
-                            continue
-                        original_product_id = item.get("product_id") or ""
-
-                        product_id = f"DMG-{uuid.uuid4().hex[:8].upper()}"
-                        item_reason = reason + (f" (original product_id: {original_product_id})" if original_product_id else "")
-                        inventory_manager(
-                            product_name=product_name,
-                            product_id=product_id,
-                            quantity=qty,
-                            purchase_date=today,
-                            serial_numbers=item.get("serial_numbers", []) or [],
-                            product_type="damaged",
-                            reason=item_reason,
-                        ).add(collection_name=INVENTORY_COLLECTION)
-
-                logging.info(f"allocation {allocation_id}'s damaged item(s) filed into inventory as damaged product")
-            except Exception as inv_err:
-                logging.error(f"allocation {allocation_id} returned but filing damaged item(s) into inventory failed: {inv_err}")
-        elif allocation.get("allocation_type") != "spare_part":
-            # normal (undamaged) return of an allocated product: the units go
-            # back into live stock instead of the damaged bucket. Spare parts
-            # aren't restocked here — they were consumed by the service, not
-            # returned as a unit.
-            try:
-                inv_db = inventory_manager()
-                for item in allocation.get("items", []):
-                    product_name = item.get("product_name", "")
-                    qty = item.get("quantity", 0) or 0
-                    if not product_name or qty <= 0:
-                        continue
-                    inv_db.restock_returned_units(
-                        collection_name=INVENTORY_COLLECTION,
-                        product_id=item.get("product_id", ""),
-                        product_name=product_name,
-                        model_no=item.get("model_no", ""),
-                        quantity=qty,
-                        serial_numbers=item.get("serial_numbers", []) or [],
-                    )
-                logging.info(f"allocation {allocation_id}'s item(s) restocked into inventory on return")
-            except Exception as inv_err:
-                logging.error(f"allocation {allocation_id} returned but restocking inventory failed: {inv_err}")
-
+        logging.info(f"allocation {allocation_id} returned and inventory updated")
         return {"message": "allocation marked as returned", "allocation_id": allocation_id}
 
     except HTTPException:
         raise
     except Exception as e:
         logging.error(f"marking allocation as returned failed! {e}")
-        raise HTTPException(status_code=500, detail="allocation cannot be marked as returned")
+        raise HTTPException(status_code=500, detail="return failed while updating inventory — nothing was lost, please retry")
 
 
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")
