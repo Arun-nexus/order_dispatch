@@ -4670,6 +4670,7 @@ def return_allocation(allocation_id: str, user: dict = Depends(require_role("adm
 
         if is_spare:
             # spare parts were consumed by the service; only a damaged return goes back (as damaged stock)
+            
             sp = allocation.get("spare_part", {}) or {}
             part_name = sp.get("part_name", "")
             qty = sp.get("quantity", 0) or 0
