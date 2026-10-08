@@ -47,7 +47,7 @@ function fromServerShapeAssembly(a) {
     productId: a.product_id,
     modelNumber: a.model_number,
     quantity: a.quantity,
-    partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source })),
+    partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source, belongsTo: partBelongs(p) })),
     serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number })),
     status: a.status,
     approvedSerials: a.approved_serials || [],
@@ -64,7 +64,7 @@ function toServerShapeAssembly(a) {
     model_number: a.modelNumber || '',
     quantity: Number(a.quantity) || 0,
     parts_used: (a.partsUsed || []).map(p => ({
-      part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source,
+      part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source, belongs_to: p.belongsTo || '',
     })),
     serials: (a.serials || []).map(s => ({ serial_number: s })),
   };
@@ -115,6 +115,11 @@ function renderCards() {
   document.getElementById('cardToday').textContent = today;
   document.getElementById('cardPending').textContent = pending;
   document.getElementById('cardAvailableShipment').textContent = availableParts.length;
+}
+
+// product/model a spare part belongs to (backend field name tolerant)
+function partBelongs(p) {
+  return p.belongs_to || p.belongs_to_product || p.part_belongs_to || p.product_name || p.parent_product || '';
 }
 
 function sourceLabel(p) {
@@ -211,7 +216,7 @@ function openViewAssemblyModal(id) {
     <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
     <h4 style="margin-bottom:8px;">Parts Used</h4>
     <ul style="margin:0 0 14px 18px;font-size:13px;color:#475569;">
-      ${(a.partsUsed || []).map(p => `<li>${p.name} — qty ${p.quantity} <span style="color:#94a3b8;">(${sourceLabel(p)})</span></li>`).join('') || '<li style="color:#94a3b8;">No parts recorded</li>'}
+      ${(a.partsUsed || []).map(p => `<li>${p.name}${p.belongsTo ? ` <span style="color:#1665ff;">[Belongs to: ${p.belongsTo}]</span>` : ''} — qty ${p.quantity} <span style="color:#94a3b8;">(${sourceLabel(p)})</span></li>`).join('') || '<li style="color:#94a3b8;">No parts recorded</li>'}
     </ul>
     <h4 style="margin-bottom:8px;">Serial / Hologram Numbers</h4>
     <div style="max-height:220px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
@@ -530,11 +535,11 @@ function renderAStep2() {
     const first = availableParts[0];
     // default quantity to the assembly quantity — that's the 1:1 rule for
     // whichever part ends up supplying the hologram numbers; still editable
-    assemblyDraft.partsUsed.push({ name: first.part_name, quantity: assemblyDraft.quantity, source: 'inventory' });
+    assemblyDraft.partsUsed.push({ name: first.part_name, quantity: assemblyDraft.quantity, source: 'inventory', belongsTo: partBelongs(first) });
     renderPartsUsedRows();
   });
   box.querySelector('#addLocalPartBtn').addEventListener('click', () => {
-    assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local' });
+    assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local', belongsTo: '' });
     renderPartsUsedRows();
   });
 
@@ -588,11 +593,15 @@ function renderPartsUsedRows() {
       nameField = `
         <select class="partUsedName" style="flex:2;">
           ${missing}
-          ${availableParts.map(sp => `<option value="${sp.part_name}" ${sp.part_name === p.name ? 'selected' : ''}>${sp.part_name} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
+          ${availableParts.map(sp => `<option value="${sp.part_name}" ${sp.part_name === p.name ? 'selected' : ''}>${sp.part_name}${partBelongs(sp) ? ' — ' + partBelongs(sp) : ''} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
         </select>`;
     } else {
       nameField = `<input type="text" class="partUsedName" placeholder="Part Name" value="${p.name}" style="flex:2;">`;
     }
+
+    const belongsField = p.source === 'inventory'
+      ? `<span class="partBelongs" style="flex:1.2;font-size:12px;color:#475569;background:#f1f5f9;border-radius:6px;padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Belongs to">${p.belongsTo || '—'}</span>`
+      : `<input type="text" class="partUsedBelongs" placeholder="Belongs to" value="${p.belongsTo || ''}" style="flex:1.2;">`;
 
     return `
       <div style="display:flex;gap:8px;align-items:center;" data-part-row="${i}">
@@ -600,6 +609,7 @@ function renderPartsUsedRows() {
           ${p.source === 'inventory' ? 'INVENTORY' : 'LOCAL'}
         </span>
         ${nameField}
+        ${belongsField}
         <input type="number" min="0" class="partUsedQty" placeholder="Qty" value="${p.quantity}" style="flex:1;">
         <button type="button" class="removePartUsedBtn" data-index="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:36px;height:36px;cursor:pointer;">
           <i class="fa-solid fa-xmark"></i>
@@ -623,6 +633,12 @@ function syncPartsUsedFromDom() {
     const i = Number(row.dataset.partRow);
     assemblyDraft.partsUsed[i].name = row.querySelector('.partUsedName').value.trim();
     assemblyDraft.partsUsed[i].quantity = row.querySelector('.partUsedQty').value;
+    const bi = row.querySelector('.partUsedBelongs');
+    if (bi) assemblyDraft.partsUsed[i].belongsTo = bi.value.trim();
+    else {
+      const sp = availableParts.find(x => x.part_name === assemblyDraft.partsUsed[i].name);
+      if (sp) assemblyDraft.partsUsed[i].belongsTo = partBelongs(sp);
+    }
   });
 }
 
@@ -827,7 +843,7 @@ async function openEditAssemblyModal(id) {
   assemblyDraft = {
     productName: a.productName || '', productId: a.productId || '', modelNumber: a.modelNumber || '',
     quantity: a.quantity,
-    partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, source: p.source === 'local' ? 'local' : 'inventory' })),
+    partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, belongsTo: p.belongsTo || '', source: p.source === 'local' ? 'local' : 'inventory' })),
     serials: [],
   };
   renderEditAssemblyModal();
@@ -878,12 +894,12 @@ function renderEditAssemblyModal() {
   box.querySelector('#eAddInvPartBtn').addEventListener('click', () => {
     if (!availableParts.length) return;
     syncPartsUsedFromDom();
-    assemblyDraft.partsUsed.push({ name: availableParts[0].part_name, quantity: 1, source: 'inventory' });
+    assemblyDraft.partsUsed.push({ name: availableParts[0].part_name, quantity: 1, source: 'inventory', belongsTo: partBelongs(availableParts[0]) });
     renderPartsUsedRows();
   });
   box.querySelector('#eAddLocalPartBtn').addEventListener('click', () => {
     syncPartsUsedFromDom();
-    assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local' });
+    assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local', belongsTo: '' });
     renderPartsUsedRows();
   });
   box.querySelector('#eSaveBtn').addEventListener('click', saveAssemblyEdit);

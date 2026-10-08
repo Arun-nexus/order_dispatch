@@ -353,6 +353,7 @@ class AssemblyPartUsed(BaseModel):
     part_name: str
     quantity: int = 0
     source: str = "inventory"     # "inventory" (deduct from inventory's spare_parts stock) | "local" (sourced outside, no deduction)
+    belongs_to: str = ""          # product the part belongs to (auto-filled from inventory for source="inventory")
 
 
 class AssemblySerialItem(BaseModel):
@@ -1612,6 +1613,26 @@ def assembly(user: dict = Depends(require_role("inventory_manager", "assembly", 
         raise HTTPException(status_code=500, detail="assembly dataset cannot be fetched")
 
 
+def _spare_part_parents() -> dict:
+    """part_name -> comma-joined parent product name(s) from inventory spare_parts."""
+    parents: dict[str, list] = {}
+    for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "spare_parts"}):
+        name = entry.get("product_name", "")
+        pn = (entry.get("parent_product_name") or "").strip()
+        if name and pn and pn not in parents.setdefault(name, []):
+            parents[name].append(pn)
+    return {k: ", ".join(v) for k, v in parents.items()}
+
+
+def _fill_belongs_to(parts: list) -> list:
+    """Inventory parts always get belongs_to from stock; local keep what was typed."""
+    parents = _spare_part_parents()
+    for p in parts:
+        if p.get("source", "inventory") != "local":
+            p["belongs_to"] = parents.get(p.get("part_name", ""), p.get("belongs_to", "") or "")
+    return parts
+
+
 @app.get("/assembly/available_parts")
 def available_parts_for_assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     """
@@ -1637,12 +1658,16 @@ def available_parts_for_assembly(user: dict = Depends(require_role("inventory_ma
             hologram_count = len(entry.get("hologram_numbers") or [])
             if not name or qty <= 0 or hologram_count <= 0:
                 continue
-            agg = pool.setdefault(name, {"quantity": 0, "hologram_available": 0})
+            agg = pool.setdefault(name, {"quantity": 0, "hologram_available": 0, "parents": []})
+            pn = (entry.get("parent_product_name") or "").strip()
+            if pn and pn not in agg["parents"]:
+                agg["parents"].append(pn)
             agg["quantity"] += qty
             agg["hologram_available"] += hologram_count
 
         available = [
-            {"part_name": name, "quantity": v["quantity"], "hologram_available": v["hologram_available"]}
+            {"part_name": name, "quantity": v["quantity"], "hologram_available": v["hologram_available"],
+             "belongs_to": ", ".join(v["parents"])}
             for name, v in pool.items()
         ]
         return {"message": "available parts", "dataset": available}
@@ -1667,7 +1692,7 @@ def track_assembly(assembly_id: str, user: dict = Depends(require_role("inventor
 @app.post("/assembly/create")
 def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
-        parts_used = [part.dict() for part in request.parts_used]
+        parts_used = _fill_belongs_to([part.dict() for part in request.parts_used])
 
         if len(request.serials) != request.quantity:
             raise HTTPException(status_code=400, detail="number of serial numbers must match the assembly quantity")
@@ -1937,7 +1962,7 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
             )
 
         quantity = int(assembly.get("quantity", 0) or 0)
-        new_parts = assembly_manager._normalize_parts_used([p.dict() for p in request.parts_used])
+        new_parts = assembly_manager._normalize_parts_used(_fill_belongs_to([p.dict() for p in request.parts_used]))
         if any(int(p["quantity"]) < 0 for p in new_parts):
             raise HTTPException(status_code=400, detail="part quantity cannot be negative")
 
@@ -4614,7 +4639,7 @@ def _normalize_return_item(item):
 def _restock_one_item(inv_db, it):
     """Same product_id + name + model -> merged into that lot, else a new lot is created. Never gives up silently."""
     last_err = None
-    for _ in range(2):  # one retry for transient DB hiccups
+    for _ in range(2):  
         try:
             inv_db.restock_returned_units(
                 collection_name=INVENTORY_COLLECTION,

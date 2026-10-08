@@ -15,6 +15,7 @@ class assembly_manager(mongodbclient):
             {
                 "part_name": str,
                 "quantity": int,                    # total used for the whole batch
+                "belongs_to": str,                  # product the part belongs to
                 "source": "inventory" | "local",     # "inventory" -> deducted from inventory's
                                                       # spare_parts stock; "local" -> sourced
                                                       # outside, never touches inventory
@@ -57,6 +58,7 @@ class assembly_manager(mongodbclient):
                 "part_name": part_name,
                 "quantity": part.get("quantity", 0) or 0,
                 "source": source,
+                "belongs_to": (part.get("belongs_to") or "").strip(),
             })
         return normalized
 
