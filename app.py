@@ -1614,22 +1614,36 @@ def assembly(user: dict = Depends(require_role("inventory_manager", "assembly", 
 
 
 def _spare_part_parents() -> dict:
-    """part_name -> comma-joined parent product name(s) from inventory spare_parts."""
+    """part_name -> list of parent product name(s) it is stocked under in inventory spare_parts."""
     parents: dict[str, list] = {}
     for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "spare_parts"}):
         name = entry.get("product_name", "")
         pn = (entry.get("parent_product_name") or "").strip()
         if name and pn and pn not in parents.setdefault(name, []):
             parents[name].append(pn)
-    return {k: ", ".join(v) for k, v in parents.items()}
+    return parents
 
 
-def _fill_belongs_to(parts: list) -> list:
-    """Inventory parts always get belongs_to from stock; local keep what was typed."""
+def _fill_belongs_to(parts: list, strict: bool = True) -> list:
+    """
+    Inventory parts are identified by part_name + belongs_to. If belongs_to is missing
+    and the part is stocked under exactly one product, it is filled in. If it is stocked
+    under several products the caller must say which one (strict -> 400; otherwise skipped,
+    used for legacy records). Local parts keep whatever was typed.
+    """
     parents = _spare_part_parents()
     for p in parts:
-        if p.get("source", "inventory") != "local":
-            p["belongs_to"] = parents.get(p.get("part_name", ""), p.get("belongs_to", "") or "")
+        p["belongs_to"] = (p.get("belongs_to") or "").strip()
+        if p.get("source", "inventory") == "local" or p["belongs_to"]:
+            continue
+        options = parents.get(p.get("part_name", ""), [])
+        if len(options) == 1:
+            p["belongs_to"] = options[0]
+        elif len(options) > 1 and strict:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{p.get('part_name')}' is stocked under several products ({', '.join(options)}) — choose which product it belongs to",
+            )
     return parts
 
 
@@ -1658,17 +1672,15 @@ def available_parts_for_assembly(user: dict = Depends(require_role("inventory_ma
             hologram_count = len(entry.get("hologram_numbers") or [])
             if not name or qty <= 0 or hologram_count <= 0:
                 continue
-            agg = pool.setdefault(name, {"quantity": 0, "hologram_available": 0, "parents": []})
             pn = (entry.get("parent_product_name") or "").strip()
-            if pn and pn not in agg["parents"]:
-                agg["parents"].append(pn)
+            agg = pool.setdefault((name, pn), {"quantity": 0, "hologram_available": 0})
             agg["quantity"] += qty
             agg["hologram_available"] += hologram_count
 
         available = [
             {"part_name": name, "quantity": v["quantity"], "hologram_available": v["hologram_available"],
-             "belongs_to": ", ".join(v["parents"])}
-            for name, v in pool.items()
+             "belongs_to": pn}
+            for (name, pn), v in sorted(pool.items(), key=lambda kv: (kv[0][0].lower(), kv[0][1].lower()))
         ]
         return {"message": "available parts", "dataset": available}
     except Exception as e:
@@ -1703,11 +1715,12 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             raise HTTPException(status_code=400, detail="serial numbers must be unique within this batch")
 
         # sum up everything sourced from inventory, merging duplicate part names
-        needed_from_inventory: dict[str, int] = {}
+        needed_from_inventory: dict[tuple, int] = {}   # (part_name, belongs_to) -> qty
         for p in parts_used:
             if p["source"] != "inventory" or p["quantity"] <= 0:
                 continue
-            needed_from_inventory[p["part_name"]] = needed_from_inventory.get(p["part_name"], 0) + p["quantity"]
+            k = (p["part_name"], p.get("belongs_to", ""))
+            needed_from_inventory[k] = needed_from_inventory.get(k, 0) + p["quantity"]
 
         if not needed_from_inventory:
             raise HTTPException(
@@ -1729,15 +1742,16 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             )
         # pick the first qualifying part (in the order it was entered) as the
         # hologram-bearing part
-        hologram_part_name = hologram_candidates[0]
+        hologram_key = hologram_candidates[0]          # (part_name, belongs_to)
+        hologram_part_name = hologram_key[0]
 
         # how much of each inventory part actually gets consumed: the hologram
         # part only gives up exactly `request.quantity` (one per unit) — any
         # extra the user entered for it stays untouched in inventory. Every
         # other part is consumed at the full quantity entered for it.
         consume_amounts = {
-            name: (request.quantity if name == hologram_part_name else qty)
-            for name, qty in needed_from_inventory.items()
+            key: (request.quantity if key == hologram_key else qty)
+            for key, qty in needed_from_inventory.items()
         }
 
         inv_db = inventory_manager()
@@ -1745,32 +1759,35 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
         # validate stock (and, for the hologram part, hologram numbers on file) is
         # sufficient for EVERY part before deducting any of them — otherwise a
         # shortage on part #2 would leave part #1 already (irreversibly) deducted
-        for part_name, qty in consume_amounts.items():
+        for (part_name, belongs), qty in consume_amounts.items():
             have = inv_db.get_available_quantity_by_name(
-                collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts"
+                collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts",
+                parent_product_name=belongs or None,
             )
             if have < qty:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"not enough '{part_name}' in inventory spare parts (need {qty}, have {have})",
+                    detail=f"not enough '{part_name}'{' (' + belongs + ')' if belongs else ''} in inventory spare parts (need {qty}, have {have})",
                 )
-            if part_name == hologram_part_name:
+            if (part_name, belongs) == hologram_key:
                 hologram_have = inv_db.get_hologram_available_by_name(
-                    collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts"
+                    collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts",
+                    parent_product_name=belongs or None,
                 )
                 if hologram_have < request.quantity:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"not enough hologram-tagged '{part_name}' in inventory (need {request.quantity}, have {hologram_have})",
+                        detail=f"not enough hologram-tagged '{part_name}'{' (' + belongs + ')' if belongs else ''} in inventory (need {request.quantity}, have {hologram_have})",
                     )
 
         # stock confirmed for every part — now actually deduct
         hologram_numbers: list[str] = []
-        for part_name, qty in consume_amounts.items():
-            if part_name == hologram_part_name:
+        for (part_name, belongs), qty in consume_amounts.items():
+            if (part_name, belongs) == hologram_key:
                 hologram_numbers = inv_db.allocate_hologram_numbers_by_name(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
                     product_type="spare_parts", quantity=request.quantity,
+                    parent_product_name=belongs or None,
                 )
                 # any quantity beyond one-per-unit is left untouched in
                 # inventory — we only take what's needed
@@ -1778,6 +1795,7 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                 inv_db.consume_quantity(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
                     product_type="spare_parts", quantity=qty,
+                    parent_product_name=belongs or None,
                 )
 
         if len(hologram_numbers) != request.quantity:
@@ -1797,6 +1815,7 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             serials=serials,
             created_by=user["username"],
             hologram_part=hologram_part_name,
+            hologram_part_belongs_to=hologram_key[1],
         )
         _, assembly_id = assembly_item.add(collection_name=ASSEMBLY_COLLECTION)
         logging.info("assembly created successfully")
@@ -1923,13 +1942,14 @@ def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict
 
 
 def _inventory_needed(parts_used: list) -> dict:
-    """Sums the quantity of every inventory-sourced part by name (local parts never touch inventory)."""
-    needed: dict[str, int] = {}
+    """Sums the quantity of every inventory-sourced part by (part_name, belongs_to) — local parts never touch inventory."""
+    needed: dict[tuple, int] = {}
     for p in parts_used or []:
         qty = int(p.get("quantity", 0) or 0)
         if p.get("source", "inventory") != "inventory" or qty <= 0:
             continue
-        needed[p["part_name"]] = needed.get(p["part_name"], 0) + qty
+        k = (p["part_name"], p.get("belongs_to", "") or "")
+        needed[k] = needed.get(k, 0) + qty
     return needed
 
 
@@ -1963,24 +1983,30 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
 
         quantity = int(assembly.get("quantity", 0) or 0)
         new_parts = assembly_manager._normalize_parts_used(_fill_belongs_to([p.dict() for p in request.parts_used]))
+        old_parts = _fill_belongs_to([dict(p) for p in assembly.get("parts_used", [])], strict=False)   # legacy records
         if any(int(p["quantity"]) < 0 for p in new_parts):
             raise HTTPException(status_code=400, detail="part quantity cannot be negative")
 
-        old_needed = _inventory_needed(assembly.get("parts_used", []))
+        old_needed = _inventory_needed(old_parts)
         new_needed = _inventory_needed(new_parts)
 
         # the part that supplied the hologram numbers when the assembly was created
         # (older records without the field: same rule create uses — first part in
         # entered order whose quantity reached the assembly quantity)
-        hologram_part = assembly.get("hologram_part") or next(
-            (name for name, qty in old_needed.items() if qty >= quantity), None
-        )
+        h_name = assembly.get("hologram_part")
+        if h_name:
+            h_belongs = assembly.get("hologram_part_belongs_to", "") or ""
+            hologram_part = (h_name, h_belongs)
+            if hologram_part not in old_needed:      # legacy record: match by name only
+                hologram_part = next((k for k in old_needed if k[0] == h_name), hologram_part)
+        else:
+            hologram_part = next((k for k, qty in old_needed.items() if qty >= quantity), None)
         if not hologram_part:
             raise HTTPException(status_code=400, detail="this assembly has no hologram-bearing part on record, so it cannot be edited")
         if new_needed.get(hologram_part, 0) < quantity:
             raise HTTPException(
                 status_code=400,
-                detail=f"'{hologram_part}' supplies the hologram numbers, so its inventory quantity must stay at least {quantity}",
+                detail=f"'{hologram_part[0]}'{' (' + hologram_part[1] + ')' if hologram_part[1] else ''} supplies the hologram numbers, so its inventory quantity must stay at least {quantity}",
             )
 
         # what each inventory part actually consumes (hologram part: exactly one per unit)
@@ -1998,12 +2024,13 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
         for name, diff in deltas.items():
             if diff > 0:
                 have = inv_db.get_available_quantity_by_name(
-                    collection_name=INVENTORY_COLLECTION, product_name=name, product_type="spare_parts"
+                    collection_name=INVENTORY_COLLECTION, product_name=name[0], product_type="spare_parts",
+                    parent_product_name=name[1] or None,
                 )
                 if have < diff:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"not enough '{name}' in inventory spare parts (need {diff} more, have {have})",
+                        detail=f"not enough '{name[0]}'{' (' + name[1] + ')' if name[1] else ''} in inventory spare parts (need {diff} more, have {have})",
                     )
 
         applied = []      # (name, diff) already pushed to inventory, for rollback
@@ -2012,34 +2039,39 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
             for r_name, r_diff in reversed(applied):
                 try:
                     if r_diff > 0:
-                        inv_db.restock_quantity(collection_name=INVENTORY_COLLECTION, product_name=r_name,
-                                                product_type="spare_parts", quantity=r_diff, updated_by=user["username"])
+                        inv_db.restock_quantity(collection_name=INVENTORY_COLLECTION, product_name=r_name[0],
+                                                product_type="spare_parts", quantity=r_diff, updated_by=user["username"],
+                                                parent_product_name=r_name[1] or None)
                     else:
-                        inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=r_name,
-                                                product_type="spare_parts", quantity=-r_diff)
+                        inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=r_name[0],
+                                                product_type="spare_parts", quantity=-r_diff,
+                                                parent_product_name=r_name[1] or None)
                 except Exception as rb_err:
                     logging.error(f"assembly edit rollback failed for '{r_name}': {rb_err}")
 
         try:
             for name, diff in deltas.items():
                 if diff > 0:
-                    inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=name,
-                                            product_type="spare_parts", quantity=diff)
+                    inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=name[0],
+                                            product_type="spare_parts", quantity=diff,
+                                            parent_product_name=name[1] or None)
                     applied.append((name, diff))
             for name, diff in deltas.items():
                 if diff < 0:
-                    inv_db.restock_quantity(collection_name=INVENTORY_COLLECTION, product_name=name,
-                                            product_type="spare_parts", quantity=-diff, updated_by=user["username"])
+                    inv_db.restock_quantity(collection_name=INVENTORY_COLLECTION, product_name=name[0],
+                                            product_type="spare_parts", quantity=-diff, updated_by=user["username"],
+                                            parent_product_name=name[1] or None)
                     applied.append((name, diff))
 
             inventory_changes = [
-                {"part_name": name, "action": "deducted" if diff > 0 else "restocked", "quantity": abs(diff)}
+                {"part_name": name[0], "belongs_to": name[1], "action": "deducted" if diff > 0 else "restocked", "quantity": abs(diff)}
                 for name, diff in deltas.items()
             ]
             now = datetime.now(timezone.utc).isoformat()
             update_values = {
                 "parts_used": new_parts,
-                "hologram_part": hologram_part,
+                "hologram_part": hologram_part[0],
+                "hologram_part_belongs_to": hologram_part[1],
                 "updated_by": user["username"],
                 "updated_at": now,
                 "edit_history": list(assembly.get("edit_history") or []) + [{

@@ -390,7 +390,18 @@ class inventory_manager(mongodbclient):
             logging.error("checking available quantity failed!")
             raise Exception(e)
 
-    def get_available_quantity_by_name(self, collection_name, product_name, product_type):
+    @staticmethod
+    def _part_query(product_name, product_type, parent_product_name=None, extra=None):
+        """product_name + product_type, plus parent_product_name (the product the part
+        belongs to) when given. Empty/None parent = legacy behaviour (match by name only)."""
+        q = {"product_name": product_name, "product_type": product_type}
+        if parent_product_name:
+            q["parent_product_name"] = parent_product_name
+        if extra:
+            q.update(extra)
+        return q
+
+    def get_available_quantity_by_name(self, collection_name, product_name, product_type, parent_product_name=None):
         """
         Same idea as get_available_quantity, but for entries that have no
         natural product_id (e.g. spare_parts pushed in from a shipment) —
@@ -399,14 +410,14 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type}
+                query=self._part_query(product_name, product_type, parent_product_name)
             )
             return sum(int(e.get("quantity", 0) or 0) for e in entries)
         except Exception as e:
             logging.error("checking available quantity by name failed!")
             raise Exception(e)
 
-    def get_hologram_available_by_name(self, collection_name, product_name, product_type):
+    def get_hologram_available_by_name(self, collection_name, product_name, product_type, parent_product_name=None):
         """
         Sums how many hologram numbers are on file (across every matching lot)
         for a product_name + product_type — used before assembly to make sure
@@ -415,14 +426,14 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type}
+                query=self._part_query(product_name, product_type, parent_product_name)
             )
             return sum(len(e.get("hologram_numbers") or []) for e in entries)
         except Exception as e:
             logging.error("checking available hologram numbers by name failed!")
             raise Exception(e)
 
-    def consume_quantity(self, collection_name, product_name, product_type, quantity):
+    def consume_quantity(self, collection_name, product_name, product_type, quantity, parent_product_name=None):
         """
         Deducts `quantity` units of a non-serialized product (e.g. a
         spare_parts entry) identified by product_name + product_type,
@@ -431,7 +442,7 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type, "quantity": {"$gt": 0}}
+                query=self._part_query(product_name, product_type, parent_product_name, {"quantity": {"$gt": 0}})
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 
@@ -455,7 +466,7 @@ class inventory_manager(mongodbclient):
             logging.error("consuming quantity from inventory failed!")
             raise Exception(e)
 
-    def restock_quantity(self, collection_name, product_name, product_type, quantity, updated_by=None):
+    def restock_quantity(self, collection_name, product_name, product_type, quantity, updated_by=None, parent_product_name=None):
         """
         Opposite of consume_quantity: puts `quantity` units of a non-serialized
         product (e.g. a spare_parts entry) back into inventory — used when an
@@ -472,7 +483,7 @@ class inventory_manager(mongodbclient):
 
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type}
+                query=self._part_query(product_name, product_type, parent_product_name)
             )
             if entries:
                 entries.sort(key=lambda e: e.get("purchase_date") or "")
@@ -489,7 +500,7 @@ class inventory_manager(mongodbclient):
             from datetime import datetime, timezone
             product_dic = {
                 "product_name": product_name,
-                "parent_product_name": "",
+                "parent_product_name": parent_product_name or "",
                 "product_id": f"SP-{uuid.uuid4().hex[:8].upper()}",
                 "lot_no": "",
                 "supplier": "",
@@ -515,7 +526,7 @@ class inventory_manager(mongodbclient):
             logging.error("restocking quantity into inventory failed!")
             raise Exception(e)
 
-    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity):
+    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity, parent_product_name=None):
         """
         Deducts `quantity` units of a spare_parts/service_parts entry (matched by
         product_name + product_type) AND pulls that many hologram numbers along with
@@ -528,7 +539,7 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type, "quantity": {"$gt": 0}}
+                query=self._part_query(product_name, product_type, parent_product_name, {"quantity": {"$gt": 0}})
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 

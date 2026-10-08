@@ -7,7 +7,7 @@ import uuid
 class assembly_manager(mongodbclient):
 
     def __init__(self, product_name=None, product_id=None, model_number=None, quantity=None,
-                 parts_used=None, serials=None, created_by=None, hologram_part=None):
+                 parts_used=None, serials=None, created_by=None, hologram_part=None, hologram_part_belongs_to=None):
         """
         product_name / product_id / model_number: what is being assembled
         quantity: int -> how many units of this product are being built in this batch
@@ -43,6 +43,7 @@ class assembly_manager(mongodbclient):
         self.serials = serials or []
         self.created_by = created_by
         self.hologram_part = hologram_part
+        self.hologram_part_belongs_to = hologram_part_belongs_to or ""
 
     @staticmethod
     def _normalize_parts_used(parts_used):
@@ -108,6 +109,7 @@ class assembly_manager(mongodbclient):
                 "serials": serials,
                 "status": "pending",           # flips to "completed" via mark_completed()
                 "hologram_part": self.hologram_part,
+                "hologram_part_belongs_to": self.hologram_part_belongs_to,
                 "created_by": self.created_by,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }

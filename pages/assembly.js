@@ -53,6 +53,7 @@ function fromServerShapeAssembly(a) {
     approvedSerials: a.approved_serials || [],
     createdAt: a.created_at,
     hologramPart: a.hologram_part || '',
+    hologramPartBelongs: a.hologram_part_belongs_to || '',
     editHistory: a.edit_history || [],
   };
 }
@@ -121,6 +122,10 @@ function renderCards() {
 function partBelongs(p) {
   return p.belongs_to || p.belongs_to_product || p.part_belongs_to || p.product_name || p.parent_product || '';
 }
+
+// inventory parts are identified by part name + the product they belong to
+const PART_SEP = '||';
+function partKey(name, belongs) { return (name || '') + PART_SEP + (belongs || ''); }
 
 function sourceLabel(p) {
   return p.source === 'local' ? 'Local parts' : 'Inventory (spare parts)';
@@ -560,7 +565,8 @@ function renderAStep2() {
     // that's how /assembly/create sums them up server-side
     const summedByName = {};
     inventoryParts.forEach(p => {
-      summedByName[p.name] = (summedByName[p.name] || 0) + Number(p.quantity || 0);
+      const k = partKey(p.name, p.belongsTo);
+      summedByName[k] = (summedByName[k] || 0) + Number(p.quantity || 0);
     });
     // only block when NOT ENOUGH (kam) — no part reaches the assembly
     // quantity. If more than one part qualifies (zyada), that's fine: the
@@ -588,12 +594,13 @@ function renderPartsUsedRows() {
     if (p.source === 'inventory') {
       // a part this assembly already uses may have dropped out of the available
       // list (stock fully consumed) — keep it selectable so edits don't lose it
-      const missing = p.name && !availableParts.some(sp => sp.part_name === p.name)
-        ? `<option value="${p.name}" selected>${p.name} (0 left in stock)</option>` : '';
+      const isSel = sp => sp.part_name === p.name && (partBelongs(sp) === (p.belongsTo || '') || !p.belongsTo);
+      const missing = p.name && !availableParts.some(isSel)
+        ? `<option value="${partKey(p.name, p.belongsTo)}" selected>${p.name}${p.belongsTo ? ' — ' + p.belongsTo : ''} (0 left in stock)</option>` : '';
       nameField = `
         <select class="partUsedName" style="flex:2;">
           ${missing}
-          ${availableParts.map(sp => `<option value="${sp.part_name}" ${sp.part_name === p.name ? 'selected' : ''}>${sp.part_name}${partBelongs(sp) ? ' — ' + partBelongs(sp) : ''} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
+          ${availableParts.map(sp => `<option value="${partKey(sp.part_name, partBelongs(sp))}" ${(isSel(sp) && !(p.belongsTo ? false : availableParts.find(isSel) !== sp)) ? 'selected' : ''}>${sp.part_name}${partBelongs(sp) ? ' — ' + partBelongs(sp) : ''} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
         </select>`;
     } else {
       nameField = `<input type="text" class="partUsedName" placeholder="Part Name" value="${p.name}" style="flex:2;">`;
@@ -631,14 +638,19 @@ function syncPartsUsedFromDom() {
   if (!wrap) return;
   wrap.querySelectorAll('[data-part-row]').forEach(row => {
     const i = Number(row.dataset.partRow);
-    assemblyDraft.partsUsed[i].name = row.querySelector('.partUsedName').value.trim();
-    assemblyDraft.partsUsed[i].quantity = row.querySelector('.partUsedQty').value;
-    const bi = row.querySelector('.partUsedBelongs');
-    if (bi) assemblyDraft.partsUsed[i].belongsTo = bi.value.trim();
-    else {
-      const sp = availableParts.find(x => x.part_name === assemblyDraft.partsUsed[i].name);
-      if (sp) assemblyDraft.partsUsed[i].belongsTo = partBelongs(sp);
+    const nameEl = row.querySelector('.partUsedName');
+    const part = assemblyDraft.partsUsed[i];
+    if (nameEl.tagName === 'SELECT') {
+      // inventory row: option value is "partName||belongsTo"
+      const [n, b] = nameEl.value.split(PART_SEP);
+      part.name = (n || '').trim();
+      part.belongsTo = (b || '').trim();
+    } else {
+      part.name = nameEl.value.trim();
+      const bi = row.querySelector('.partUsedBelongs');
+      part.belongsTo = bi ? bi.value.trim() : (part.belongsTo || '');
     }
+    part.quantity = row.querySelector('.partUsedQty').value;
   });
 }
 
@@ -811,6 +823,7 @@ function canEditAssembly() {
 
 let editingAssemblyId = null;
 let editingHologramPart = '';
+let editingHologramBelongs = '';
 
 function escAttr(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -834,11 +847,13 @@ async function openEditAssemblyModal(id) {
   // which inventory part supplies the hologram numbers (same rule as the backend)
   const sums = {};
   (a.partsUsed || []).filter(p => p.source !== 'local').forEach(p => {
-    sums[p.name] = (sums[p.name] || 0) + Number(p.quantity || 0);
+    const k = partKey(p.name, p.belongsTo);
+    sums[k] = (sums[k] || 0) + Number(p.quantity || 0);
   });
   editingHologramPart = a.hologramPart
-    || Object.keys(sums).find(name => sums[name] >= Number(a.quantity))
+    || (Object.keys(sums).find(k => sums[k] >= Number(a.quantity)) || '').split(PART_SEP)[0]
     || '';
+  editingHologramBelongs = a.hologramPartBelongs || '';
 
   assemblyDraft = {
     productName: a.productName || '', productId: a.productId || '', modelNumber: a.modelNumber || '',
@@ -869,7 +884,7 @@ function renderEditAssemblyModal() {
       <i class="fa-solid fa-circle-info"></i>
       Add, remove or change parts. If an inventory part's quantity goes up, the extra is deducted from inventory;
       if it goes down or the part is removed, the difference is restocked.
-      ${editingHologramPart ? `<strong>${escAttr(editingHologramPart)}</strong> supplies the hologram numbers, so it must stay at ${assemblyDraft.quantity} or more.` : ''}
+      ${editingHologramPart ? `<strong>${escAttr(editingHologramPart)}${editingHologramBelongs ? ' (' + escAttr(editingHologramBelongs) + ')' : ''}</strong> supplies the hologram numbers, so it must stay at ${assemblyDraft.quantity} or more.` : ''}
     </p>
     <div id="partsUsedRows" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div style="display:flex;gap:10px;margin-top:10px;">
@@ -924,7 +939,7 @@ async function saveAssemblyEdit() {
 
   // mirror the backend: the hologram part must stay >= assembly quantity
   const holoTotal = parts
-    .filter(p => p.source === 'inventory' && p.name === editingHologramPart)
+    .filter(p => p.source === 'inventory' && p.name === editingHologramPart && (!editingHologramBelongs || (p.belongsTo || '') === editingHologramBelongs))
     .reduce((sum, p) => sum + Number(p.quantity), 0);
   if (editingHologramPart && holoTotal < Number(assemblyDraft.quantity)) {
     showResponseModal(
