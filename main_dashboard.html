@@ -8,6 +8,7 @@
 
   <link rel="stylesheet" href="css/accure.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+  <link rel="stylesheet" href="css/dashboard_details.css" />
 </head>
 
 <body>
@@ -98,7 +99,7 @@
         </div>
       </section>
       <section class="cards">
-        <div class="card">
+        <div class="card clickable" data-card="orders" tabindex="0" role="button">
           <div>
             <span>Total Orders</span>
             <h2>1,250</h2>
@@ -110,7 +111,7 @@
           <i class="fa-solid fa-bag-shopping card-icon-blue"></i>
         </div>
 
-        <div class="card">
+        <div class="card clickable" data-card="pending" tabindex="0" role="button">
           <div>
             <span>Pending Orders</span>
             <h2>186</h2>
@@ -122,7 +123,7 @@
           <i class="fa-regular fa-clock card-icon-orange"></i>
         </div>
 
-        <div class="card">
+        <div class="card clickable" data-card="inventory" tabindex="0" role="button">
           <div>
             <span>Inventory Items</span>
             <h2>4,865</h2>
@@ -134,7 +135,7 @@
           <i class="fa-solid fa-cube card-icon-green"></i>
         </div>
 
-        <div class="card">
+        <div class="card clickable" data-card="employees" tabindex="0" role="button">
           <div>
             <span>Total Employees</span>
             <h2>182</h2>
@@ -146,7 +147,7 @@
           <i class="fa-solid fa-users card-icon-purple"></i>
         </div>
 
-        <div class="card">
+        <div class="card clickable" data-card="services" tabindex="0" role="button">
           <div>
             <span>Active Services</span>
             <h2>128</h2>
@@ -166,48 +167,8 @@
               <a href="pages/orders.html"><button class="view-all-btn">View All</button></a>
             </div>
 
-            <div class="order-list" style="max-height:230px;overflow-y:auto;">
-              <div class="order-item">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1025</h4>
-                    <p>20 May 2025</p>
-                  </div>
-                </div>
-                <span class="status pending">Pending</span>
-                <strong>₹24,500</strong>
-              </div>
-
-              <div class="order-item">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1024</h4>
-                    <p>19 May 2025</p>
-                  </div>
-                </div>
-                <span class="status delivered">Delivered</span>
-                <strong>₹18,750</strong>
-              </div>
-
-              <div class="order-item">
-                <div class="order-left">
-                  <div class="order-icon">
-                    <i class="fa-solid fa-file-medical"></i>
-                  </div>
-                  <div>
-                    <h4>ORD1023</h4>
-                    <p>18 May 2025</p>
-                  </div>
-                </div>
-                <span class="status processing">Processing</span>
-                <strong>₹32,100</strong>
-              </div>
+            <div class="order-list" id="recentOrdersList" style="max-height:230px;overflow-y:auto;">
+              <p class="dd-empty">Loading orders…</p>
             </div>
           </div>
 
@@ -227,7 +188,7 @@
             </div>
 
             <div class="inventory-status">
-              <div class="inventory-item">
+              <div class="inventory-item clickable" data-stock="available" tabindex="0" role="button">
                 <div class="inventory-head">
                   <div>
                     <i class="fa-solid fa-circle-check text-success"></i>
@@ -241,7 +202,7 @@
                 <small>67%</small>
               </div>
 
-              <div class="inventory-item">
+              <div class="inventory-item clickable" data-stock="low" tabindex="0" role="button">
                 <div class="inventory-head">
                   <div>
                     <i class="fa-solid fa-triangle-exclamation text-warning"></i>
@@ -255,7 +216,7 @@
                 <small>23%</small>
               </div>
 
-              <div class="inventory-item">
+              <div class="inventory-item clickable" data-stock="out" tabindex="0" role="button">
                 <div class="inventory-head">
                   <div>
                     <i class="fa-solid fa-circle-xmark text-danger"></i> Out
@@ -276,38 +237,8 @@
               <a href="pages/service.html"><button class="view-all-btn">View All</button></a>
             </div>
 
-            <div class="service-list" id="serviceRequestsList">
-              <div class="service-item">
-                <div>
-                  <h4>Ticket #251</h4>
-                  <p>20 May 2025</p>
-                </div>
-                <span class="status pending">Open</span>
-              </div>
-
-              <div class="service-item">
-                <div>
-                  <h4>Ticket #250</h4>
-                  <p>19 May 2025</p>
-                </div>
-                <span class="status delivered">Closed</span>
-              </div>
-
-              <div class="service-item">
-                <div>
-                  <h4>Ticket #249</h4>
-                  <p>18 May 2025</p>
-                </div>
-                <span class="status processing">Pending</span>
-              </div>
-
-              <div class="service-item">
-                <div>
-                  <h4>Ticket #248</h4>
-                  <p>17 May 2025</p>
-                </div>
-                <span class="status cancelled">On Hold</span>
-              </div>
+            <div class="service-list" id="serviceRequestsList" style="max-height:340px;overflow-y:auto;">
+              <p class="dd-empty">Loading services…</p>
             </div>
           </div>
         </div>
@@ -337,6 +268,17 @@
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:460px;max-height:86vh;overflow-y:auto;"></div>
   </div>
+  <!-- Generic details modal (cards, orders, inventory, services) -->
+  <div id="ddModal" class="dd-overlay" aria-hidden="true">
+    <div class="dd-box">
+      <div class="dd-head">
+        <h3 id="ddTitle">Details</h3>
+        <button class="dd-close" id="ddClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="dd-body" id="ddBody"></div>
+    </div>
+  </div>
+
   <script src="common_auth.js"></script>
   <script>
     function openLogoutModal(e) {
