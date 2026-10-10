@@ -103,19 +103,68 @@ async function loadAvailableParts() {
   if (el) el.textContent = availableParts.length;
 }
 
-function renderCards() {
+function assemblyCardList(type) {
   const now = new Date();
-  const thisMonth = assemblies.filter(a => {
+  if (type === 'month') return assemblies.filter(a => {
     const d = new Date(a.createdAt);
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  }).length;
-  const today = assemblies.filter(a => (a.createdAt || '').slice(0, 10) === todayStr()).length;
-  const pending = assemblies.filter(a => a.status === 'pending').length;
+  });
+  if (type === 'today') return assemblies.filter(a => (a.createdAt || '').slice(0, 10) === todayStr());
+  if (type === 'pending') return assemblies.filter(a => a.status === 'pending');
+  if (type === 'awaiting') return assemblies.filter(a => isApprovalStatus(a.status));
+  return [];
+}
 
-  document.getElementById('cardThisMonth').textContent = thisMonth;
-  document.getElementById('cardToday').textContent = today;
-  document.getElementById('cardPending').textContent = pending;
+function renderCards() {
+  document.getElementById('cardThisMonth').textContent = assemblyCardList('month').length;
+  document.getElementById('cardToday').textContent = assemblyCardList('today').length;
+  document.getElementById('cardPending').textContent = assemblyCardList('pending').length;
+  document.getElementById('cardAwaiting').textContent = assemblyCardList('awaiting').length;
   document.getElementById('cardAvailableShipment').textContent = availableParts.length;
+}
+
+function openAssemblyCardDetailModal(type) {
+  const titles = {
+    month: 'Assemblies Built This Month',
+    today: 'Assemblies Built Today',
+    parts: 'Hologram-tagged Parts',
+    pending: 'Pending Assemblies',
+    awaiting: 'Assemblies Awaiting Approval',
+  };
+  const th = 'style="text-align:left;padding:8px;"';
+  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  let head;
+  let rows;
+  if (type === 'parts') {
+    head = ['Part', 'Belongs To', 'Hologram-tagged in Stock', 'Total Qty'];
+    rows = availableParts.map(p => [p.part_name, partBelongs(p) || '—', p.hologram_available ?? 0, p.quantity ?? 0]);
+  } else {
+    head = ['Product', 'Product ID', 'Model No.', 'Qty', 'Status', 'Created'];
+    rows = assemblyCardList(type).map(a => [a.productName, a.productId || '—', a.modelNumber || '—', a.quantity, statusPill(a), (a.createdAt || '').slice(0, 10)]);
+  }
+  const box = document.querySelector('#assemblyCardDetailModal .modal-content');
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${rows.length})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>${r.map(c => `<td ${td}>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyCardDetailModal'));
+  openModal('assemblyCardDetailModal');
+}
+
+function wireAssemblyCardClicks() {
+  document.querySelectorAll('[data-card-filter]').forEach(card => {
+    card.addEventListener('click', () => openAssemblyCardDetailModal(card.dataset.cardFilter));
+  });
 }
 
 // product/model a spare part belongs to (backend field name tolerant)
@@ -537,6 +586,7 @@ function renderAStep2() {
 
   box.querySelector('#addInvPartBtn').addEventListener('click', () => {
     if (!availableParts.length) return;
+    syncPartsUsedFromDom();
     const first = availableParts[0];
     // default quantity to the assembly quantity — that's the 1:1 rule for
     // whichever part ends up supplying the hologram numbers; still editable
@@ -544,6 +594,7 @@ function renderAStep2() {
     renderPartsUsedRows();
   });
   box.querySelector('#addLocalPartBtn').addEventListener('click', () => {
+    syncPartsUsedFromDom();
     assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local', belongsTo: '' });
     renderPartsUsedRows();
   });
@@ -988,6 +1039,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addAssemblyBtn').addEventListener('click', openAddAssemblyModal);
   document.getElementById('applyAssemblyFilter').addEventListener('click', renderTable);
   document.getElementById('assemblySearch').addEventListener('input', renderTable);
+  wireAssemblyCardClicks();
   loadAvailableParts();
   loadAssemblies();
 });

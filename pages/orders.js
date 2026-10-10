@@ -155,11 +155,9 @@ function renderOrdersTable(orders) {
     const productSubLabel = items.length === 1
       ? [firstItem.product_id, firstItem.model_no].filter(Boolean).join(' · ')
       : (items.length > 1 ? '' : [o.product_id, o.model_no].filter(Boolean).join(' · '));
-    const serialLabel = items.length
-      ? (items.length === 1
-          ? ((items[0].serial_numbers && items[0].serial_numbers.length) ? items[0].serial_numbers[0]: '-')
-          : `${items.length} items`)
-      : '-';
+    const qtyLabel = items.length
+      ? items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)
+      : (o.quantity ?? '-');
     const companyName = o.customer?.contractor_person ?? o.customer?.company_name ?? o.company_name ?? '';
     const creatorLabel = orderCreatorLabel(o);
 
@@ -167,7 +165,7 @@ function renderOrdersTable(orders) {
       <td><input type="checkbox"></td>
       <td><button type="button" class="creator-cell" style="background:none;border:none;padding:0;color:#1665ff;cursor:pointer;font:inherit;text-align:left;" title="View who created and edited this order">${creatorLabel}</button></td>
       <td>${productLabel}${productSubLabel ? `<br><small style="color:#94a3b8;">${productSubLabel}</small>` : ''}</td>
-      <td>${serialLabel}</td>
+      <td>${qtyLabel}</td>
       <td>${companyName}</td>
       <td>${o.payment_mode ?? ''}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>

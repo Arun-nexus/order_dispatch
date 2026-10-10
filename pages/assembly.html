@@ -84,7 +84,7 @@
 
       <!-- CARDS -->
       <section class="cards">
-        <div class="card">
+        <div class="card" data-card-filter="month" style="cursor:pointer;">
           <div>
             <span>Total Assembly</span>
             <h2 id="cardThisMonth">0</h2>
@@ -92,7 +92,7 @@
           </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="today" style="cursor:pointer;">
           <div>
             <span>Today Assembly</span>
             <h2 id="cardToday">0</h2>
@@ -100,7 +100,7 @@
           </div>
           <i class="fa-regular fa-calendar-check"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="parts" style="cursor:pointer;">
           <div>
             <span>Hologram-tagged Parts</span>
             <h2 id="cardAvailableShipment">0</h2>
@@ -108,13 +108,21 @@
           </div>
           <i class="fa-solid fa-boxes-packing"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="pending" style="cursor:pointer;">
           <div>
             <span>Pending Assembly</span>
             <h2 id="cardPending">0</h2>
             <p>Not yet marked completed</p>
           </div>
           <i class="fa-regular fa-clock"></i>
+        </div>
+        <div class="card" data-card-filter="awaiting" style="cursor:pointer;">
+          <div>
+            <span>Awaiting Approval</span>
+            <h2 id="cardAwaiting">0</h2>
+            <p>Submitted, approval not finished</p>
+          </div>
+          <i class="fa-solid fa-hourglass-half"></i>
         </div>
       </section>
 
@@ -189,7 +197,7 @@
   <!-- View Assembly Modal -->
   <div id="viewAssemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:560px;max-height:86vh;overflow-y:auto;"></div>
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(800px,96vw);max-height:92vh;overflow-y:auto;"></div>
   </div>
 
   <!-- Delete Assembly Modal -->
@@ -211,7 +219,7 @@
   <div id="assemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content"
-      style="background:#fff;border-radius:16px;padding:26px;width:640px;max-height:90vh;overflow-y:auto;"></div>
+      style="background:#fff;border-radius:16px;padding:26px;width:min(1000px,96vw);max-height:92vh;overflow-y:auto;"></div>
   </div>
 
   <script>
@@ -230,6 +238,11 @@
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
+  <div id="assemblyCardDetailModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(860px,96vw);max-height:92vh;overflow-y:auto;"></div>
+  </div>
+
   <script src="assembly.js"></script>
 </body>
 

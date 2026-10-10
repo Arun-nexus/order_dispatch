@@ -1,6 +1,11 @@
+const reportState = { orders: [], inventory: [], services: [], accounts: [], stockType: 'product' };
+const reportCharts = {};
+
 document.addEventListener('DOMContentLoaded', () => {
   loadReports();
   wireModalButtons();
+  wireReportFilter();
+  wireStockTabs();
 });
 
 async function fetchJSON(url) {
@@ -17,19 +22,73 @@ async function loadReports() {
       fetchJSON('/service/'),
       fetchJSON('/account/')
     ]);
-
-    const orderList = orders.dataset || [];
-    const inventoryList = inventory.dataset || [];
-    const serviceList = services.dataset || [];
-    const accountList = accounts.dataset || [];
-
-    renderKPIs(orderList, inventoryList, serviceList, accountList);
-    renderCharts(orderList, inventoryList, serviceList);
-    renderQuickAnalytics(orderList, serviceList);
-
+    reportState.orders = orders.dataset || [];
+    reportState.inventory = inventory.dataset || [];
+    reportState.services = services.dataset || [];
+    reportState.accounts = accounts.dataset || [];
+    applyReportFilter();
   } catch (err) {
     console.error(err);
   }
+}
+
+function inDateRange(value, from, to) {
+  if (!from && !to) return true;
+  if (!value) return false;
+  const d = new Date(value);
+  if (from && d < new Date(`${from}T00:00:00`)) return false;
+  if (to && d > new Date(`${to}T23:59:59`)) return false;
+  return true;
+}
+
+function applyReportFilter() {
+  const inputs = document.querySelectorAll('.filter-section input[type="date"]');
+  const from = inputs[0]?.value || '';
+  const to = inputs[1]?.value || '';
+  const type = document.querySelector('.filter-section select')?.value || 'All Reports';
+
+  const orders = reportState.orders.filter(o => inDateRange(o.order_date, from, to));
+  const services = reportState.services.filter(s => inDateRange(s.created_at, from, to));
+
+  renderKPIs(orders, reportState.inventory, services, reportState.accounts);
+  renderCharts(orders, services);
+  renderStockChart();
+  renderQuickAnalytics(reportState.orders, reportState.services);
+  applyReportVisibility(type);
+}
+
+function applyReportVisibility(type) {
+  const map = {
+    'All Reports': null,
+    'Sales Report': ['orders', 'revenue'],
+    'Revenue Report': ['revenue'],
+    'Inventory Report': ['inventory'],
+    'Service Report': ['services'],
+    'User Report': ['users']
+  };
+  const allowed = map[type] || null;
+  const show = (el, keys) => {
+    if (!el) return;
+    el.style.display = !allowed || keys.some(k => allowed.includes(k)) ? '' : 'none';
+  };
+
+  const cards = document.querySelectorAll('.cards .card');
+  const cardKeys = [['revenue'], ['orders'], ['services'], ['inventory'], ['users']];
+  cards.forEach((c, i) => show(c, cardKeys[i] || []));
+
+  show(document.getElementById('revenueChart')?.parentElement.parentElement, ['revenue']);
+  show(document.getElementById('serviceChart')?.parentElement.parentElement, ['services']);
+  show(document.getElementById('ordersChart')?.parentElement.parentElement, ['orders']);
+  show(document.getElementById('inventoryChart')?.parentElement.parentElement, ['inventory']);
+
+  const minis = document.querySelectorAll('.analytics .mini-card');
+  const miniKeys = [['orders'], ['revenue'], ['services']];
+  minis.forEach((m, i) => show(m, miniKeys[i] || []));
+}
+
+function wireReportFilter() {
+  const btn = document.querySelector('.filter-btn');
+  if (btn) btn.addEventListener('click', applyReportFilter);
 }
 
 function renderKPIs(orders, inventory, services, accounts) {
@@ -56,12 +115,17 @@ function groupByMonth(items, dateField, valueFn) {
   return { labels: sortedKeys, values: sortedKeys.map(k => buckets[k]) };
 }
 
-function renderCharts(orders, inventory, services) {
+function makeChart(id, config) {
+  if (reportCharts[id]) reportCharts[id].destroy();
+  reportCharts[id] = new Chart(document.getElementById(id), config);
+}
+
+function renderCharts(orders, services) {
   if (typeof Chart === 'undefined') return;
   const revenueByMonth = groupByMonth(orders, 'order_date', o => Number(o.total_mrp) || 0);
   const ordersByMonth = groupByMonth(orders, 'order_date', () => 1);
 
-  new Chart(document.getElementById('revenueChart'), {
+  makeChart('revenueChart', {
     type: 'line',
     data: {
       labels: revenueByMonth.labels.length ? revenueByMonth.labels : ['No dated orders yet'],
@@ -80,7 +144,7 @@ function renderCharts(orders, inventory, services) {
   const statusCounts = { active: 0, in_progress: 0, completed: 0, rejected: 0 };
   services.forEach(s => { if (s.status in statusCounts) statusCounts[s.status]++; });
 
-  new Chart(document.getElementById('serviceChart'), {
+  makeChart('serviceChart', {
     type: 'doughnut',
     data: {
       labels: ['Active', 'In Progress', 'Completed', 'Rejected'],
@@ -92,7 +156,7 @@ function renderCharts(orders, inventory, services) {
     options: { responsive: true, maintainAspectRatio: false }
   });
 
-  new Chart(document.getElementById('ordersChart'), {
+  makeChart('ordersChart', {
     type: 'bar',
     data: {
       labels: ordersByMonth.labels.length ? ordersByMonth.labels : ['No dated orders yet'],
@@ -104,23 +168,51 @@ function renderCharts(orders, inventory, services) {
     },
     options: { responsive: true, maintainAspectRatio: false }
   });
+}
 
-  const topStock = [...inventory]
-    .sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0))
-    .slice(0, 6);
+function stockItems(type) {
+  const grouped = {};
+  reportState.inventory
+    .filter(p => (p.product_type || 'product') === type)
+    .forEach(p => {
+      const key = `${p.product_name || ''}||${p.product_id || ''}||${p.model_no || ''}`;
+      if (!grouped[key]) grouped[key] = { name: p.product_name || p.product_id || '-', id: p.product_id || '-', model: p.model_no || '-', quantity: 0 };
+      grouped[key].quantity += Number(p.quantity) || 0;
+    });
+  return Object.values(grouped).sort((a, b) => b.quantity - a.quantity).slice(0, 6);
+}
 
-  new Chart(document.getElementById('inventoryChart'), {
+function renderStockChart() {
+  if (typeof Chart === 'undefined') return;
+  const top = stockItems(reportState.stockType);
+
+  makeChart('inventoryChart', {
     type: 'bar',
     data: {
-      labels: topStock.map(p => p.product_name || p.product_id),
+      labels: top.length ? top.map(p => [p.name, `ID: ${p.id} · Model: ${p.model}`]) : ['No items in this category'],
       datasets: [{
         label: 'Quantity in stock',
-        data: topStock.map(p => Number(p.quantity) || 0),
+        data: top.length ? top.map(p => p.quantity) : [0],
         backgroundColor: '#22c55e'
       }]
     },
     options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y' }
   });
+}
+
+function wireStockTabs() {
+  const tabs = document.querySelectorAll('.stockTab');
+  const paint = () => tabs.forEach(t => {
+    const active = t.dataset.type === reportState.stockType;
+    t.style.background = active ? '#1665ff' : '#f1f5f9';
+    t.style.color = active ? '#fff' : '#475569';
+  });
+  tabs.forEach(t => t.addEventListener('click', () => {
+    reportState.stockType = t.dataset.type;
+    paint();
+    renderStockChart();
+  }));
+  paint();
 }
 
 function renderQuickAnalytics(orders, services) {

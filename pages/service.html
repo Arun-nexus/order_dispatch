@@ -78,7 +78,7 @@
 
             <!-- CARDS -->
             <section class="cards">
-                <div class="card">
+                <div class="card" data-card-filter="all" style="cursor:pointer;">
                     <div>
                         <span>Total Services</span>
                         <h2>0</h2>
@@ -86,7 +86,7 @@
                     </div>
                     <i class="fa-solid fa-layer-group"></i>
                 </div>
-                <div class="card">
+                <div class="card" data-card-filter="active" style="cursor:pointer;">
                     <div>
                         <span>Active</span>
                         <h2>0</h2>
@@ -94,7 +94,7 @@
                     </div>
                     <i class="fa-solid fa-circle-check"></i>
                 </div>
-                <div class="card">
+                <div class="card" data-card-filter="in_progress" style="cursor:pointer;">
                     <div>
                         <span>In Progress</span>
                         <h2>0</h2>
@@ -102,7 +102,7 @@
                     </div>
                     <i class="fa-solid fa-spinner"></i>
                 </div>
-                <div class="card">
+                <div class="card" data-card-filter="completed" style="cursor:pointer;">
                     <div>
                         <span>Completed</span>
                         <h2>0</h2>
@@ -110,7 +110,7 @@
                     </div>
                     <i class="fa-solid fa-check-double"></i>
                 </div>
-                <div class="card">
+                <div class="card" data-card-filter="rejected" style="cursor:pointer;">
                     <div>
                         <span>Rejected</span>
                         <h2>0</h2>
@@ -162,8 +162,9 @@
                 <table>
                     <thead>
                         <tr>
-                            <th>Service ID</th>
+                            <th>Product Name</th>
                             <th>Product ID</th>
+                            <th>Model No.</th>
                             <th>Serial No.</th>
                             <th>Technician</th>
                             <th>Issue</th>
@@ -350,6 +351,11 @@
             ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
         });
     </script>
+    <div id="serviceCardDetailModal" class="modal"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(900px,96vw);max-height:92vh;overflow-y:auto;"></div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 

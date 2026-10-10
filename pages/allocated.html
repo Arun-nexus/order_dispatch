@@ -78,7 +78,7 @@
       </header>
 
       <section class="cards">
-        <div class="card">
+        <div class="card" data-card-filter="all" style="cursor:pointer;">
           <div>
             <span>Total Allocations</span>
             <h2>0</h2>
@@ -86,7 +86,7 @@
           </div>
           <i class="fa-solid fa-layer-group"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="pending" style="cursor:pointer;">
           <div>
             <span>Pending Return</span>
             <h2>0</h2>
@@ -94,7 +94,7 @@
           </div>
           <i class="fa-regular fa-clock"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="overdue" style="cursor:pointer;">
           <div>
             <span>Overdue</span>
             <h2>0</h2>
@@ -102,13 +102,21 @@
           </div>
           <i class="fa-solid fa-triangle-exclamation"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="returned" style="cursor:pointer;">
           <div>
             <span>Returned</span>
             <h2>0</h2>
             <p>Closed allocations</p>
           </div>
           <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div class="card" data-card-filter="requests" style="cursor:pointer;">
+          <div>
+            <span>Pending Requests</span>
+            <h2 id="cardPendingRequests">0</h2>
+            <p>Awaiting review</p>
+          </div>
+          <i class="fa-solid fa-inbox"></i>
         </div>
       </section>
 
@@ -194,16 +202,13 @@
     </div>
   </div>
 
-  <!-- common_auth.js MUST load first: enforces login + role-based page access -->
   <script src="../common_auth.js"></script>
 
-  <!-- View Allocation Modal -->
   <div id="viewAllocationModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;"></div>
   </div>
 
-  <!-- Allocate Modal (wizard built dynamically by allocated.js) -->
   <div id="allocateModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content"
@@ -226,6 +231,11 @@
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
   </script>
+  <div id="allocCardDetailModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(960px,96vw);max-height:92vh;overflow-y:auto;"></div>
+  </div>
+
   <script src="allocated.js"></script>
 </body>
 

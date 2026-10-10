@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireHeaderSearch();
   injectAllocateModal();
   wireNotifBell();
+  wireAllocCardClicks();
   setInterval(() => renderAllocationsTable(getFilteredAllocations()), 60 * 1000); // keep countdowns fresh
   setInterval(loadPendingRequests, 60 * 1000);
 });
@@ -106,6 +107,8 @@ async function loadPendingRequests() {
   const canView = role === 'admin' || role === 'accounts' || role === 'service_manager';
   if (!canView) {
     if (section) section.style.display = 'none';
+    const reqCardBox = document.getElementById('cardPendingRequests')?.closest('.card');
+    if (reqCardBox) reqCardBox.style.display = 'none';
     return;
   }
   try {
@@ -157,6 +160,8 @@ function renderPendingRequests() {
     badge.textContent = pending.length;
   }
   if (countLabel) countLabel.textContent = pending.length ? `(${pending.length})` : '';
+  const reqCard = document.getElementById('cardPendingRequests');
+  if (reqCard) reqCard.textContent = pending.length;
 
   if (!pending.length) {
     box.innerHTML = '<p style="color:#94a3b8;padding:10px;">No pending requests.</p>';
@@ -437,6 +442,86 @@ function returnMeta(a) {
   if (msLeft <= 0) return { label: 'Overdue', cls: 'low', overdue: true, complete: false };
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
   return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false, complete: false };
+}
+
+function allocCardList(type) {
+  const all = allocState.allocations;
+  if (type === 'all') return all;
+  if (type === 'pending') return all.filter(a => !returnMeta(a).complete && !returnMeta(a).overdue);
+  if (type === 'overdue') return all.filter(a => !returnMeta(a).complete && returnMeta(a).overdue);
+  if (type === 'returned') return all.filter(a => returnMeta(a).complete);
+  return [];
+}
+
+function requestSummary(r) {
+  const items = r.details?.items || r.details?.items_list || [];
+  if (items.length) return items.map(i => `${esc(i.product_name || '')} x${i.quantity ?? 1}`).join(', ');
+  if (r.details?.customer?.company_name) return esc(r.details.customer.company_name);
+  if (r.details?.service_id) return `Service #${esc(r.details.service_id.slice(0, 8))}`;
+  return '-';
+}
+
+function openAllocCardDetailModal(type) {
+  const modal = document.getElementById('allocCardDetailModal');
+  const box = modal.querySelector('.modal-content');
+  const titles = { all: 'All Allocations', pending: 'Pending Return', overdue: 'Overdue Allocations', returned: 'Returned Allocations', requests: 'Pending Requests' };
+  const th = 'style="text-align:left;padding:8px;"';
+  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  let head;
+  let rows;
+  if (type === 'requests') {
+    const typeLabels = { demo_unit: 'Demo Unit', spare_part: 'Spare Part', order: 'Order', media_review: 'Service Media', status_update: 'Status Change', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
+    head = ['Type', 'Details', 'Raised By', 'Raised On'];
+    rows = allocState.requests
+      .filter(r => r.status === 'pending')
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(r => [typeLabels[r.request_type] || esc(r.request_type || '-'), requestSummary(r), esc(r.raised_by || '-'), r.created_at ? new Date(r.created_at).toLocaleDateString('en-GB') : '-']);
+  } else {
+    head = ['Type', 'Product / Spare Part', 'Serial No.', 'Sales Person / Service', 'Allotment Date', 'Return Due', 'Status'];
+    rows = allocCardList(type).map(a => {
+      const meta = returnMeta(a);
+      const isSpare = a.allocation_type === 'spare_part';
+      return [
+        isSpare ? 'Spare Part' : (a.allocation_type === 'demo_unit' ? 'Demo' : 'Product'),
+        isSpare ? sparePartLabel(a.spare_part) : (a.items || []).map(itemLabel).join(', '),
+        isSpare ? '-' : ((a.items || []).map(itemSerials).filter(Boolean).join(', ') || '-'),
+        isSpare ? `Service #${esc((a.spare_part?.service_id || '').slice(0, 8))}` : esc(a.sales_person?.name ?? ''),
+        a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-',
+        a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-',
+        `<span class="stock ${meta.cls}">${meta.label}</span>`,
+      ];
+    });
+  }
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${rows.length})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>${r.map(c => `<td ${td}>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+  box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.style.display = 'flex';
+}
+
+function wireAllocCardClicks() {
+  document.querySelectorAll('.cards .card[data-card-filter]').forEach(card => {
+    card.addEventListener('click', () => openAllocCardDetailModal(card.dataset.cardFilter));
+  });
+  const modal = document.getElementById('allocCardDetailModal');
+  modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+}
+
+function roleLabel(role) {
+  if (role === 'distributor') return 'Sales';
+  const r = String(role || '').replace(/_/g, ' ');
+  return r.charAt(0).toUpperCase() + r.slice(1);
 }
 
 function updateAllocationCards(allocations) {
@@ -1143,7 +1228,7 @@ async function renderSystemUserStep() {
   const body = allocModalBody();
   allocWizTitle('Select User');
   body.innerHTML = `
-    <input id="spSearch" placeholder="Search user" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <input id="spSearch" placeholder="Search by name, username or role (e.g. Sales)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div id="spResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
     <div style="margin-top:14px;">
       <button type="button" id="backSp1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
@@ -1164,12 +1249,15 @@ async function renderSystemUserStep() {
   }
   const draw = () => {
     const term = searchInput.value.trim().toLowerCase();
-    const list = users.filter(u => `${u.name || ''} ${u.username || ''} ${u.role || ''}`.toLowerCase().includes(term));
+    const list = users.filter(u => `${u.name || ''} ${u.username || ''} ${u.role || ''} ${roleLabel(u.role)}`.toLowerCase().includes(term));
     if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No users found.</small>'; return; }
     resultsBox.innerHTML = list.map(u => `
       <div class="sp-row" data-username="${u.username}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
-        <strong>${u.name || u.username}</strong><br>
-        <small style="color:#64748b;">${u.username} • ${u.role ?? ''}</small>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <strong>${u.name || u.username}</strong>
+          <span style="font-size:11px;font-weight:600;color:#1665ff;background:#eef3fb;border-radius:999px;padding:2px 10px;">${roleLabel(u.role)}</span>
+        </div>
+        <small style="color:#64748b;">${u.username}</small>
       </div>`).join('');
     resultsBox.querySelectorAll('.sp-row').forEach(row => row.addEventListener('click', () => {
       const u = users.find(x => x.username === row.dataset.username);

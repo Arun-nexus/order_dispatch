@@ -241,6 +241,7 @@ function renderTable() {
         <td>${pill}</td>
         <td>
           <button class="icon-btn" data-action="view" data-id="${s.id}" title="View"><i class="fa-solid fa-eye"></i></button>
+          ${status === 'pending' ? `<button class="icon-btn" data-action="edit" data-id="${s.id}" title="Edit"><i class="fa-solid fa-pen"></i></button>` : ''}
           ${status === 'pending' ? `<button class="icon-btn" data-action="receive" data-id="${s.id}" title="Mark Received"><i class="fa-solid fa-truck-ramp-box"></i></button>` : ''}
           <button class="icon-btn" data-action="delete" data-id="${s.id}" title="Delete"><i class="fa-solid fa-trash"></i></button>
         </td>
@@ -248,6 +249,7 @@ function renderTable() {
   }).join('');
 
   tbody.querySelectorAll('[data-action="view"]').forEach(b => b.addEventListener('click', () => openViewModal(b.dataset.id)));
+  tbody.querySelectorAll('[data-action="edit"]').forEach(b => b.addEventListener('click', () => openEditShipmentModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="receive"]').forEach(b => b.addEventListener('click', () => openReceivedModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => openDeleteModal(b.dataset.id)));
 }
@@ -408,6 +410,16 @@ function openAddShipmentModal() {
   openModal('shipmentModal');
 }
 
+function openEditShipmentModal(id) {
+  const s = shipments.find(x => x.id === id);
+  if (!s) return;
+  shipmentDraft = JSON.parse(JSON.stringify(s));
+  shipmentDraft.isEdit = true;
+  shipmentStep = 1;
+  renderShipmentStep();
+  openModal('shipmentModal');
+}
+
 function renderShipmentStep() {
   if (shipmentStep === 1) return renderStep1();
   if (shipmentStep === 2) return renderStep2();
@@ -419,7 +431,7 @@ function renderStep1() {
   const box = SHIPMENT_MODAL();
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>Add Shipment</h3>
+      <h3>${shipmentDraft.isEdit ? 'Edit' : 'Add'} Shipment</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(1)}
@@ -428,8 +440,8 @@ function renderStep1() {
       <textarea id="s1CompanyAddress" placeholder="Company Address" rows="3" required>${shipmentDraft.companyAddress}</textarea>
       <label style="font-size:13px;color:#64748b;">Shipment Dispatch Date</label>
       <input type="date" id="s1DispatchDate" value="${shipmentDraft.dispatchDate}" required>
-      <label style="font-size:13px;color:#64748b;">Shipment Received Date <span style="color:#94a3b8;">(optional — can be added later)</span></label>
-      <input type="date" id="s1ReceivedDate" value="${shipmentDraft.receivedDate}">
+      ${shipmentDraft.isEdit ? `<input type="hidden" id="s1ReceivedDate" value="${shipmentDraft.receivedDate}">` : `<label style="font-size:13px;color:#64748b;">Shipment Received Date <span style="color:#94a3b8;">(optional — can be added later)</span></label>
+      <input type="date" id="s1ReceivedDate" value="${shipmentDraft.receivedDate}">`}
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
         <button type="button" class="cancel-btn" id="shipCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
         <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Add Products</button>
@@ -454,7 +466,7 @@ function renderStep2() {
   const box = SHIPMENT_MODAL();
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>Add Shipment</h3>
+      <h3>${shipmentDraft.isEdit ? 'Edit' : 'Add'} Shipment</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(2)}
@@ -538,7 +550,7 @@ function renderStep3() {
   const box = SHIPMENT_MODAL();
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>Add Shipment</h3>
+      <h3>${shipmentDraft.isEdit ? 'Edit' : 'Add'} Shipment</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(3)}
@@ -641,6 +653,27 @@ async function finalizeShipment() {
   shipmentDraft.products.forEach(p => {
     p.parts = p.parts.filter(part => part.name);
   });
+
+  if (shipmentDraft.isEdit) {
+    try {
+      const res = await apiFetch(`/shipment/update/${shipmentDraft.id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updated_values: toServerShape(shipmentDraft) })
+      });
+      if (!res.ok) throw new Error('update failed');
+    } catch (err) {
+      showResponseModal('Update failed', 'The shipment could not be updated.', false);
+      return;
+    }
+    const idx = shipments.findIndex(x => x.id === shipmentDraft.id);
+    if (idx !== -1) shipments[idx] = shipmentDraft;
+    closeModal('shipmentModal');
+    shipmentDraft = null;
+    renderCards();
+    renderTable();
+    showResponseModal('Shipment updated', 'The shipment has been updated successfully.', true);
+    return;
+  }
 
   shipmentDraft.createdAt = new Date().toISOString();
 

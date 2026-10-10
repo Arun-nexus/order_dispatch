@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireFilters();
   wireModals();
   wireHeaderSearch();
+  wireServiceCardClicks();
   populateTechnicianFilter();
   loadAvailableHologramParts();
 });
@@ -44,7 +45,8 @@ function wireHeaderSearch() {
     const filtered = svcState.services.filter(s =>
       (s.serial_no || '').toLowerCase().includes(q) ||
       (s.product_id || '').toLowerCase().includes(q) ||
-      (s.product_name || '').toLowerCase().includes(q) ||
+      serviceProductInfo(s).name.toLowerCase().includes(q) ||
+      serviceProductInfo(s).model.toLowerCase().includes(q) ||
       (s.service_id || '').toLowerCase().includes(q)
     );
     renderServiceTable(filtered);
@@ -109,6 +111,65 @@ async function loadTechnicians() {
     svcState.distributors = [];
   }
   return { technicians: svcState.technicians, distributors: svcState.distributors };
+}
+
+function findOrderItemForService(s) {
+  const items = svcState.orders.flatMap(o => o.items || []);
+  return (s.serial_no && items.find(it => (it.serial_numbers || []).includes(s.serial_no)))
+    || items.find(it => it.product_id === s.product_id)
+    || null;
+}
+
+function serviceProductInfo(s) {
+  const it = findOrderItemForService(s) || {};
+  return { name: s.product_name || it.product_name || '-', model: s.model_no || it.model_no || '-' };
+}
+
+function serviceCardList(type) {
+  if (type === 'all') return svcState.services;
+  return svcState.services.filter(s => s.status === type);
+}
+
+function openServiceCardDetailModal(type) {
+  const titles = { all: 'All Services', active: 'Active Services', in_progress: 'In Progress Services', completed: 'Completed Services', rejected: 'Rejected Services' };
+  const list = serviceCardList(type);
+  const th = 'style="text-align:left;padding:8px;"';
+  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  const head = ['Product Name', 'Product ID', 'Model No.', 'Serial No.', 'Technician', 'Status', 'Listed On'];
+  const box = document.querySelector('#serviceCardDetailModal .modal-content');
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${list.length})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${list.map(s => {
+            const info = serviceProductInfo(s);
+            return `<tr>
+              <td ${td}>${info.name}</td>
+              <td ${td}>${s.product_id ?? ''}</td>
+              <td ${td}>${info.model}</td>
+              <td ${td}>${s.serial_no ?? ''}</td>
+              <td ${td}>${s.technician_alloted ?? ''}</td>
+              <td ${td}><span class="${statusBadge(s.status)}">${(s.status ?? '').replace('_', ' ')}</span></td>
+              <td ${td}>${s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '-'}</td>
+            </tr>`;
+          }).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+  box.querySelector('.close').addEventListener('click', () => { document.getElementById('serviceCardDetailModal').style.display = 'none'; });
+  document.getElementById('serviceCardDetailModal').style.display = 'flex';
+}
+
+function wireServiceCardClicks() {
+  document.querySelectorAll('.cards .card[data-card-filter]').forEach(card => {
+    card.addEventListener('click', () => openServiceCardDetailModal(card.dataset.cardFilter));
+  });
 }
 
 function updateCards(services) {
@@ -182,8 +243,9 @@ function renderServiceTable(services) {
       : `<span class="${s.manager_confirmed_return ? 'confirmed' : 'pending'}">${s.manager_confirmed_return ? 'Confirmed' : 'Pending'}</span>`;
 
     tr.innerHTML = `
-      <td>#${s.service_id?.slice(0, 8) ?? ''}</td>
+      <td>${serviceProductInfo(s).name}</td>
       <td>${s.product_id ?? ''}</td>
+      <td>${serviceProductInfo(s).model}</td>
       <td>${s.serial_no ?? ''}</td>
       <td><div class="tech">${s.technician_alloted ?? ''}</div></td>
       <td>${s.issue ?? ''}</td>

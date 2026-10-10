@@ -228,10 +228,16 @@
               padding: 25px;
               box-shadow: var(--shadow-sm);
             ">
-          <h3 style="color: var(--text-primary); margin-bottom: 20px">
-            Top Stock Items
-          </h3>
-          <div style="height: 280px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
+            <h3 style="color: var(--text-primary)">Top Stock Items</h3>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="stockTab" data-type="product" style="border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Products</button>
+              <button type="button" class="stockTab" data-type="spare_parts" style="border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Spare Parts</button>
+              <button type="button" class="stockTab" data-type="service_parts" style="border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Service Parts</button>
+              <button type="button" class="stockTab" data-type="accessories" style="border:none;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;">Accessories</button>
+            </div>
+          </div>
+          <div style="height: 340px">
             <canvas id="inventoryChart"></canvas>
           </div>
         </div>
