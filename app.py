@@ -4919,6 +4919,109 @@ def convert_demo_to_order_direct(allocation_id: str, request: AdminConvertReques
         raise HTTPException(status_code=500, detail="demo unit could not be converted to an order")
 
 
+MESSAGES_COLLECTION = params.get("messages_collection_name", "messages")
+
+
+class SendMessageRequest(BaseModel):
+    recipients: List[str]
+    body: str
+
+
+@app.get("/message/recipients")
+def message_recipients(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
+        users = [
+            {"username": a.get("username"), "name": a.get("name") or a.get("username"), "role": a.get("role")}
+            for a in dataset if a.get("username") and a.get("username") != user["username"]
+        ]
+        return {"message": "message recipients", "dataset": users}
+    except Exception:
+        logging.error("message recipients cannot be fetched")
+        raise HTTPException(status_code=500, detail="users cannot be fetched")
+
+
+@app.post("/message/send")
+def send_message(request: SendMessageRequest, user: dict = Depends(get_current_user)):
+    body = (request.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="message cannot be empty")
+    if len(body) > 2000:
+        raise HTTPException(status_code=400, detail="message is too long (max 2000 characters)")
+    recipients = list(dict.fromkeys(r for r in request.recipients if r and r != user["username"]))
+    if not recipients:
+        raise HTTPException(status_code=400, detail="select at least one recipient")
+    try:
+        db = mongodbclient()
+        accounts = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": {"$in": recipients + [user["username"]]}})
+        valid = {a.get("username") for a in accounts}
+        targets = [r for r in recipients if r in valid]
+        if not targets:
+            raise HTTPException(status_code=404, detail="no valid recipients found")
+        sender = next((a for a in accounts if a.get("username") == user["username"]), {})
+        sender_name = sender.get("name") or user["username"]
+        batch_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        for target in targets:
+            db.add(collection_name=MESSAGES_COLLECTION, dictionary={
+                "message_id": uuid.uuid4().hex,
+                "batch_id": batch_id,
+                "from_username": user["username"],
+                "from_name": sender_name,
+                "from_role": user["role"],
+                "to_username": target,
+                "body": body,
+                "read": False,
+                "created_at": now,
+            })
+        logging.info(f"message sent by {user['username']} to {len(targets)} recipient(s)")
+        return {"message": "message sent", "sent": len(targets)}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("message could not be sent")
+        raise HTTPException(status_code=500, detail="message could not be sent")
+
+
+@app.get("/message/inbox")
+def message_inbox(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=MESSAGES_COLLECTION, query={"to_username": user["username"]}, projection={"_id": 0})
+        dataset = sorted(dataset, key=lambda m: m.get("created_at") or "", reverse=True)[:100]
+        return {"message": "inbox", "dataset": dataset}
+    except Exception:
+        logging.error("inbox cannot be fetched")
+        raise HTTPException(status_code=500, detail="inbox cannot be fetched")
+
+
+@app.post("/message/read/{message_id}")
+def message_mark_read(message_id: str, user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        db.update_data(collection_name=MESSAGES_COLLECTION, query={"message_id": message_id, "to_username": user["username"]},
+                       update_values={"read": True})
+        return {"message": "marked as read"}
+    except Exception:
+        logging.error("message could not be marked as read")
+        raise HTTPException(status_code=500, detail="message could not be updated")
+
+
+@app.post("/message/read_all")
+def message_mark_all_read(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        unread = db.get_data(collection_name=MESSAGES_COLLECTION, query={"to_username": user["username"], "read": False}, projection={"_id": 0})
+        for m in unread:
+            db.update_data(collection_name=MESSAGES_COLLECTION, query={"message_id": m["message_id"], "to_username": user["username"]},
+                           update_values={"read": True})
+        return {"message": "all marked as read", "updated": len(unread)}
+    except Exception:
+        logging.error("messages could not be marked as read")
+        raise HTTPException(status_code=500, detail="messages could not be updated")
+
+
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")
 app.mount("/images", StaticFiles(directory=os.path.join(BASE_DIR, "images")), name="images")
 app.mount("/pages", StaticFiles(directory=os.path.join(BASE_DIR, "pages"), html=True), name="pages")
