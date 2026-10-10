@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireCardClicks();
   wireCustomerFilter();
   wireHeaderSearch();
+  wireExportButtons();
 });
 
 async function loadUsers() {
@@ -83,9 +84,9 @@ function roleBadgeClass(role) {
   return 'high';
 }
 
-function filteredUsers() {
-  const role = document.getElementById('roleFilter').value;
-  const term = userState.userSearch.trim().toLowerCase();
+function filteredUsers(roleArg, termArg) {
+  const role = roleArg !== undefined ? roleArg : document.getElementById('roleFilter').value;
+  const term = (termArg !== undefined ? termArg : userState.userSearch).trim().toLowerCase();
   return userState.users.filter(u =>
     (!role || role === 'All Roles' || u.role === role) &&
     (!term || `${u.username || ''} ${u.name || ''} ${u.full_name || ''}`.toLowerCase().includes(term)));
@@ -182,8 +183,8 @@ function customerStats(c) {
   };
 }
 
-function customerRows() {
-  const f = userState.customerFilter;
+function customerRows(filter) {
+  const f = filter || userState.customerFilter;
   const term = f.text.trim().toLowerCase();
   const min = f.min === '' ? null : Number(f.min);
   const max = f.max === '' ? null : Number(f.max);
@@ -583,4 +584,100 @@ function openDeleteModal(u) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
+}
+
+// =========================================================
+// Export (CSV) — same filters as the on-screen lists, pre-filled
+// from whatever is currently applied, editable before exporting.
+// =========================================================
+function downloadCSV(header, rows, filename) {
+  const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const csv = '\ufeff' + [header, ...rows].map(r => r.map(q).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function wireExportButtons() {
+  document.querySelectorAll('.export-users-btn').forEach(b => b.addEventListener('click', () => openExportModal('users')));
+  document.querySelectorAll('.export-customers-btn').forEach(b => b.addEventListener('click', () => openExportModal('customers')));
+}
+
+function openExportModal(type) {
+  let modal = document.getElementById('exportModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'exportModal';
+    modal.className = 'modal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:1200;';
+    document.body.appendChild(modal);
+    modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+  }
+  const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;width:100%;';
+  const lbl = 'font-size:13px;color:#64748b;';
+  const isUsers = type === 'users';
+  const f = userState.customerFilter;
+  const roleNow = document.getElementById('roleFilter').value;
+  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Credit Given'], ['returned', 'Returned'], ['outstanding', 'Outstanding'], ['total_orders', 'Total Orders']];
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:26px;width:400px;max-width:94vw;max-height:88vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Export ${isUsers ? 'Users' : 'Customers'}</h3>
+        <button type="button" class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form id="exportForm" style="display:flex;flex-direction:column;gap:8px;">
+        ${isUsers ? `
+          <label style="${lbl}">Role</label>
+          <select name="role" style="${inp}">
+            ${[['', 'All Roles'], ['admin', 'Admin'], ['accounts', 'Accounts'], ['service_manager', 'Service Manager'], ['assembly', 'Assembly'], ['technician', 'Technician'], ['distributor', 'Employee-Sales Person'], ['inventory_manager', 'Inventory Manager']]
+              .map(([v, l]) => `<option value="${v}" ${(roleNow === v || (v === '' && roleNow === 'All Roles')) ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <label style="${lbl}">Search (username or name)</label>
+          <input name="text" style="${inp}" placeholder="Search username or name" value="${esc(userState.userSearch)}">
+        ` : `
+          <label style="${lbl}">Search (company, GST, contact, address)</label>
+          <input name="text" style="${inp}" placeholder="Search" value="${esc(f.text)}">
+          <label style="${lbl}">Amount field</label>
+          <select name="field" style="${inp}">
+            ${amountOpts.map(([v, l]) => `<option value="${v}" ${f.field === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <label style="${lbl}">Min amount</label>
+          <input name="min" type="number" min="0" style="${inp}" placeholder="Min" value="${esc(f.min)}">
+          <label style="${lbl}">Max amount</label>
+          <input name="max" type="number" min="0" style="${inp}" placeholder="Max" value="${esc(f.max)}">
+        `}
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;"><i class="fa-solid fa-download"></i> Export</button>
+        </div>
+      </form>
+    </div>`;
+
+  modal.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.querySelector('.cancel-btn').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.querySelector('#exportForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const stamp = new Date().toISOString().slice(0, 10);
+    if (isUsers) {
+      const list = filteredUsers(fd.get('role') || '', fd.get('text') || '');
+      if (!list.length) { alert('No users match these filters.'); return; }
+      downloadCSV(['Username', 'Name', 'Role', 'Company', 'Mobile', 'Email', 'GST Number', 'Team Manager'],
+        list.map(u => [u.username, u.full_name ?? u.name, displayRole(u.role), u.company_name, u.mobile_no ?? u.phone,
+          u.email_id ?? u.email ?? '', u.gst_number ?? '', u.role === 'distributor' ? (u.manager || '') : '']),
+        `users_${stamp}.csv`);
+    } else {
+      const rows = customerRows({ text: fd.get('text') || '', field: fd.get('field') || 'credit_limit', min: fd.get('min') ?? '', max: fd.get('max') ?? '' });
+      if (!rows.length) { alert('No customers match these filters.'); return; }
+      downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Credit Given', 'Returned', 'Outstanding', 'Total Orders'],
+        rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
+          s.limit, s.creditGiven, s.returned, s.outstanding, s.totalOrders]),
+        `customers_${stamp}.csv`);
+    }
+    modal.style.display = 'none';
+  });
+  modal.style.display = 'flex';
 }
