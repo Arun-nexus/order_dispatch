@@ -1,19 +1,36 @@
-const userState = { users: [] };
+const userState = {
+  users: [], customers: [], orders: [], tab: 'users', userSearch: '',
+  customerFilter: { text: '', field: 'credit_limit', min: '', max: '' }
+};
 
-// Display-only label for the role column — the underlying role value
-// (u.role, sent to/from the backend) stays 'distributor' etc. always.
-// This only changes what's shown in this table.
 const USER_ROLE_LABELS = { distributor: 'Employee-Sales Person', inventory_manager: 'Inventory Manager' };
 function displayRole(role) {
   if (!role) return '';
   return USER_ROLE_LABELS[role] || (role.charAt(0).toUpperCase() + role.slice(1));
 }
 
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function money(n) {
+  return `₹${(Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
+function fmtDate(v) {
+  return v ? new Date(v).toLocaleDateString('en-GB') : '-';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadUsers();
+  loadCustomers();
   wireTopActions();
   wireFilter();
   wireStaticModals();
+  wireSectionTabs();
+  wireCardClicks();
+  wireCustomerFilter();
+  wireHeaderSearch();
 });
 
 async function loadUsers() {
@@ -23,10 +40,24 @@ async function loadUsers() {
     const data = await res.json();
     userState.users = (data.dataset || []).slice().reverse();
     renderCards();
-    renderTable(userState.users);
+    renderTable(filteredUsers());
   } catch (err) {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load users.');
+  }
+}
+
+async function loadCustomers() {
+  try {
+    const [cRes, oRes] = await Promise.all([apiFetch('/customer/'), apiFetch('/order/')]);
+    if (!cRes.ok || !oRes.ok) throw new Error('failed to fetch customers');
+    userState.customers = ((await cRes.json()).dataset || []).slice().reverse();
+    userState.orders = (await oRes.json()).dataset || [];
+    renderCards();
+    renderCustomerTable();
+  } catch (err) {
+    console.error(err);
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load customers.');
   }
 }
 
@@ -38,6 +69,9 @@ function renderCards() {
   document.getElementById('cardTechnicians').textContent = users.filter(u => u.role === 'technician').length;
   document.getElementById('cardDistributors').textContent = users.filter(u => u.role === 'distributor').length;
   document.getElementById('cardInventoryManagers').textContent = users.filter(u => u.role === 'inventory_manager').length;
+  document.getElementById('cardCustomers').textContent = userState.customers.length;
+  const tabCount = document.getElementById('customerTabCount');
+  if (tabCount) tabCount.textContent = userState.customers.length ? `(${userState.customers.length})` : '';
 }
 
 function roleBadgeClass(role) {
@@ -49,20 +83,28 @@ function roleBadgeClass(role) {
   return 'high';
 }
 
+function filteredUsers() {
+  const role = document.getElementById('roleFilter').value;
+  const term = userState.userSearch.trim().toLowerCase();
+  return userState.users.filter(u =>
+    (!role || role === 'All Roles' || u.role === role) &&
+    (!term || `${u.username || ''} ${u.name || ''} ${u.full_name || ''}`.toLowerCase().includes(term)));
+}
+
 function renderTable(users) {
-  const tbody = document.querySelector('.table-container tbody');
+  const tbody = document.querySelector('#usersSection .table-container tbody');
   tbody.innerHTML = '';
 
   users.forEach(u => {
     const tr = document.createElement('tr');
     tr.dataset.username = u.username;
     tr.innerHTML = `
-      <td>${u.username ?? ''}</td>
-      <td>${u.full_name ?? ''}</td>
+      <td>${esc(u.username)}</td>
+      <td>${esc(u.full_name ?? u.name)}</td>
       <td><span class="stock ${roleBadgeClass(u.role)}">${displayRole(u.role)}</span></td>
-      <td>${u.company_name ?? ''}</td>
-      <td>${u.mobile_no ?? u.phone ?? ''}</td>
-      <td>${u.role === 'distributor' ? (u.manager || '-') : '-'}</td>
+      <td>${esc(u.company_name)}</td>
+      <td>${esc(u.mobile_no ?? u.phone)}</td>
+      <td>${u.role === 'distributor' ? esc(u.manager || '-') : '-'}</td>
       <td>
         <button class="icon-btn edit-btn"><i class="fa-solid fa-pen"></i></button>
         <button class="icon-btn delete-btn"><i class="fa-solid fa-trash"></i></button>
@@ -80,20 +122,323 @@ function rowUser(e) {
 }
 
 function wireTopActions() {
-  document.querySelector('.add-product').addEventListener('click', () => openUserModal(null));
+  document.querySelector('#usersSection .add-product').addEventListener('click', () => openUserModal(null));
 }
 
 function wireFilter() {
-  document.querySelector('.filter-btn').addEventListener('click', () => {
-    const role = document.getElementById('roleFilter').value;
-    const filtered = (!role || role === 'All Roles') ? userState.users : userState.users.filter(u => u.role === role);
-    renderTable(filtered);
-  });
+  document.querySelector('#usersSection .filter-btn').addEventListener('click', () => renderTable(filteredUsers()));
 }
 
 function wireStaticModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
+}
+
+function wireSectionTabs() {
+  const tabs = document.querySelectorAll('.sectionTab');
+  const paint = () => {
+    tabs.forEach(t => {
+      const active = t.dataset.tab === userState.tab;
+      t.style.background = active ? '#1665ff' : '#f1f5f9';
+      t.style.color = active ? '#fff' : '#475569';
+    });
+    document.getElementById('usersSection').style.display = userState.tab === 'users' ? '' : 'none';
+    document.getElementById('customersSection').style.display = userState.tab === 'customers' ? '' : 'none';
+  };
+  tabs.forEach(t => t.addEventListener('click', () => { userState.tab = t.dataset.tab; paint(); }));
+  paint();
+  window.showUserSection = tab => { userState.tab = tab; paint(); };
+}
+
+function wireHeaderSearch() {
+  const input = document.querySelector('.right-header .search input');
+  if (!input) return;
+  input.addEventListener('input', () => {
+    if (userState.tab === 'customers') {
+      userState.customerFilter.text = input.value;
+      const box = document.getElementById('custSearch');
+      if (box) box.value = input.value;
+      renderCustomerTable();
+    } else {
+      userState.userSearch = input.value;
+      renderTable(filteredUsers());
+    }
+  });
+}
+
+function customerStats(c) {
+  const orders = userState.orders
+    .filter(o => o.customer?.customer_id === c.customer_id)
+    .sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
+  const creditGiven = orders.filter(o => o.payment_mode === 'Credit').reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
+  const returns = (c.returns || []).slice().sort((a, b) => new Date(b.return_date) - new Date(a.return_date));
+  const returned = returns.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const limit = Number(c.credit_limit) || 0;
+  const outstanding = Math.max(creditGiven - returned, 0);
+  return {
+    orders, returns, creditGiven, returned, limit, outstanding,
+    available: limit - outstanding,
+    totalOrders: orders.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0)
+  };
+}
+
+function customerRows() {
+  const f = userState.customerFilter;
+  const term = f.text.trim().toLowerCase();
+  const min = f.min === '' ? null : Number(f.min);
+  const max = f.max === '' ? null : Number(f.max);
+  const fieldMap = { credit_limit: 'limit', credit_given: 'creditGiven', returned: 'returned', outstanding: 'outstanding', total_orders: 'totalOrders' };
+  return userState.customers
+    .map(c => ({ c, s: customerStats(c) }))
+    .filter(({ c, s }) => {
+      if (term) {
+        const hay = `${c.company_name || ''} ${c.company_address || ''} ${c.gst_number || ''} ${c.contractor_person || ''} ${c.contractor_number || ''} ${c.contractor_email || ''}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      const v = s[fieldMap[f.field]];
+      if (min !== null && v < min) return false;
+      if (max !== null && v > max) return false;
+      return true;
+    });
+}
+
+function renderCustomerTable() {
+  const tbody = document.getElementById('customersTbody');
+  const tfoot = document.getElementById('customersTfoot');
+  if (!tbody) return;
+  const rows = customerRows();
+  tbody.innerHTML = rows.map(({ c, s }) => `
+    <tr data-id="${esc(c.customer_id)}">
+      <td><strong>${esc(c.company_name)}</strong><br><small style="color:#94a3b8;">${esc(c.company_address)}</small></td>
+      <td>${esc(c.gst_number) || '-'}</td>
+      <td>${esc(c.contractor_person) || '-'}<br><small style="color:#94a3b8;">${esc(c.contractor_number)}</small></td>
+      <td>${money(s.limit)}</td>
+      <td>${money(s.creditGiven)}</td>
+      <td>${money(s.returned)}</td>
+      <td><strong style="color:${s.outstanding > 0 ? '#d62828' : '#16a34a'};">${money(s.outstanding)}</strong></td>
+      <td>
+        <button class="icon-btn cust-history" title="History"><i class="fa-solid fa-clock-rotate-left"></i></button>
+        <button class="icon-btn cust-return" title="Add Return"><i class="fa-solid fa-rotate-left"></i></button>
+        <button class="icon-btn cust-edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No customers found</td></tr>';
+
+  const tot = rows.reduce((t, { s }) => ({
+    limit: t.limit + s.limit, creditGiven: t.creditGiven + s.creditGiven,
+    returned: t.returned + s.returned, outstanding: t.outstanding + s.outstanding
+  }), { limit: 0, creditGiven: 0, returned: 0, outstanding: 0 });
+  tfoot.innerHTML = `
+    <tr style="font-weight:700;background:#f8fafc;">
+      <td colspan="3">Total (${rows.length} customer${rows.length === 1 ? '' : 's'})</td>
+      <td>${money(tot.limit)}</td>
+      <td>${money(tot.creditGiven)}</td>
+      <td>${money(tot.returned)}</td>
+      <td>${money(tot.outstanding)}</td>
+      <td></td>
+    </tr>`;
+
+  const byId = e => userState.customers.find(c => c.customer_id === e.target.closest('tr').dataset.id);
+  tbody.querySelectorAll('.cust-history').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e))));
+  tbody.querySelectorAll('.cust-return').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e), true)));
+  tbody.querySelectorAll('.cust-edit').forEach(b => b.addEventListener('click', e => openCustomerEditModal(byId(e))));
+}
+
+function wireCustomerFilter() {
+  const f = userState.customerFilter;
+  document.getElementById('applyCustFilter').addEventListener('click', () => {
+    f.text = document.getElementById('custSearch').value;
+    f.field = document.getElementById('custAmountField').value;
+    f.min = document.getElementById('custMin').value;
+    f.max = document.getElementById('custMax').value;
+    renderCustomerTable();
+  });
+  document.getElementById('resetCustFilter').addEventListener('click', () => {
+    f.text = ''; f.field = 'credit_limit'; f.min = ''; f.max = '';
+    document.getElementById('custSearch').value = '';
+    document.getElementById('custAmountField').value = 'credit_limit';
+    document.getElementById('custMin').value = '';
+    document.getElementById('custMax').value = '';
+    renderCustomerTable();
+  });
+}
+
+function tableHTML(head, rows) {
+  const th = 'style="text-align:left;padding:8px;"';
+  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  return `
+    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>${r.map(c => `<td ${td}>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function wireCardClicks() {
+  document.querySelectorAll('.cards .card[data-card-filter]').forEach(card =>
+    card.addEventListener('click', () => openUserCardDetail(card.dataset.cardFilter)));
+}
+
+function openUserCardDetail(type) {
+  const titles = { all: 'All Users', admin: 'Admins', accounts: 'Accounts', technician: 'Technicians', distributor: 'Employee-Sales Persons', inventory_manager: 'Inventory Managers', customers: 'All Customers' };
+  const box = document.querySelector('#userCardDetailModal .modal-content');
+  let table;
+  let count;
+  if (type === 'customers') {
+    const rows = userState.customers.map(c => ({ c, s: customerStats(c) }));
+    count = rows.length;
+    table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Credit Given', 'Returned', 'Outstanding'],
+      rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, money(s.limit), money(s.creditGiven), money(s.returned), money(s.outstanding)]));
+  } else {
+    const list = type === 'all' ? userState.users : userState.users.filter(u => u.role === type);
+    count = list.length;
+    table = tableHTML(['Username', 'Name', 'Role', 'Company', 'Mobile'],
+      list.map(u => [esc(u.username), esc(u.full_name ?? u.name), displayRole(u.role), esc(u.company_name), esc(u.mobile_no ?? u.phone)]));
+  }
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${count})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>${table}`;
+  box.querySelector('.close').addEventListener('click', () => { document.getElementById('userCardDetailModal').style.display = 'none'; });
+  document.getElementById('userCardDetailModal').style.display = 'flex';
+}
+
+function openCustomerHistory(c, focusReturn) {
+  if (!c) return;
+  const s = customerStats(c);
+  const modal = document.getElementById('customerHistoryModal');
+  const box = modal.querySelector('.modal-content');
+  const tile = (label, value, color) => `
+    <div style="flex:1;min-width:120px;background:#f8fafc;border-radius:10px;padding:10px 12px;">
+      <small style="color:#64748b;">${label}</small>
+      <div style="font-weight:700;font-size:16px;color:${color || '#0f172a'};">${value}</div>
+    </div>`;
+  const orderRows = s.orders.map(o => [
+    fmtDate(o.order_date),
+    esc((o.order_id || '').slice(0, 8)),
+    esc((o.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')),
+    esc(o.payment_mode || '-'),
+    money(o.total_mrp),
+    o.payment_mode === 'Credit' ? money(o.total_mrp) : '-'
+  ]);
+  const returnRows = s.returns.map(r => [fmtDate(r.return_date), money(r.amount), esc(r.note) || '-', esc(r.added_by) || '-']);
+  const today = new Date().toISOString().slice(0, 10);
+
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h3>${esc(c.company_name)}</h3>
+      <div>
+        <button type="button" id="histEdit" style="border:1px solid #1665ff;background:#fff;color:#1665ff;border-radius:8px;padding:5px 12px;cursor:pointer;font-size:12px;margin-right:8px;"><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+    </div>
+    <p style="font-size:13px;color:#64748b;margin-bottom:12px;">
+      ${esc(c.company_address) || '-'} • GST: ${esc(c.gst_number) || '-'}<br>
+      ${esc(c.contractor_person) || '-'} • ${esc(c.contractor_number) || '-'} • ${esc(c.contractor_email) || '-'}
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+      ${tile('Credit Limit', money(s.limit))}
+      ${tile('Credit Given', money(s.creditGiven))}
+      ${tile('Returned', money(s.returned), '#16a34a')}
+      ${tile('Outstanding', money(s.outstanding), s.outstanding > 0 ? '#d62828' : '#16a34a')}
+      ${tile('Available Credit', money(s.available), s.available < 0 ? '#d62828' : '#0f172a')}
+    </div>
+
+    <h4 style="margin-bottom:8px;">Add Return</h4>
+    <div id="histReturnForm" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;">
+      <input id="retAmount" type="number" min="0" step="0.01" placeholder="Amount (₹)" style="flex:1;min-width:120px;padding:9px;border:1px solid #e2e8f0;border-radius:8px;">
+      <input id="retDate" type="date" value="${today}" style="padding:9px;border:1px solid #e2e8f0;border-radius:8px;">
+      <input id="retNote" placeholder="Note (optional)" style="flex:2;min-width:160px;padding:9px;border:1px solid #e2e8f0;border-radius:8px;">
+      <button type="button" id="retSave" style="padding:9px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;">Add Return</button>
+    </div>
+
+    <h4 style="margin-bottom:8px;">Order History <span style="color:#94a3b8;font-weight:400;">(${s.orders.length})</span></h4>
+    ${tableHTML(['Date', 'Order ID', 'Items', 'Payment', 'Order Total', 'Credit Given'], orderRows)}
+    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Total orders: ${money(s.totalOrders)} • Total credit given: ${money(s.creditGiven)}</strong></p>
+
+    <h4 style="margin-bottom:8px;">Returns <span style="color:#94a3b8;font-weight:400;">(${s.returns.length})</span></h4>
+    ${tableHTML(['Date', 'Amount', 'Note', 'Added By'], returnRows)}
+    <p style="text-align:right;font-size:13px;margin-top:6px;"><strong>Total returned: ${money(s.returned)}</strong></p>`;
+
+  box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  box.querySelector('#histEdit').addEventListener('click', () => { modal.style.display = 'none'; openCustomerEditModal(c); });
+  box.querySelector('#retSave').addEventListener('click', async () => {
+    const amount = Number(box.querySelector('#retAmount').value);
+    if (!amount || amount <= 0) { alert('Enter a valid return amount.'); return; }
+    const date = box.querySelector('#retDate').value;
+    try {
+      const res = await apiFetch(`/customer/add_return/${c.customer_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, note: box.querySelector('#retNote').value, return_date: date ? new Date(date).toISOString() : '' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'return could not be added');
+      await loadCustomers();
+      openCustomerHistory(userState.customers.find(x => x.customer_id === c.customer_id));
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+  modal.style.display = 'flex';
+  if (focusReturn) box.querySelector('#retAmount').focus();
+}
+
+function openCustomerEditModal(c) {
+  if (!c) return;
+  const modal = document.getElementById('customerEditModal');
+  const box = modal.querySelector('.modal-content');
+  const field = (name, label, value, type) => `
+    <label style="font-size:13px;color:#64748b;">${label}</label>
+    <input name="${name}" type="${type || 'text'}" value="${esc(value)}" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Edit Customer</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <form id="custEditForm" style="display:flex;flex-direction:column;gap:6px;">
+      ${field('company_name', 'Company Name', c.company_name)}
+      ${field('company_address', 'Address', c.company_address)}
+      ${field('gst_number', 'GST Number', c.gst_number)}
+      ${field('contractor_person', 'Contact Person', c.contractor_person)}
+      ${field('contractor_number', 'Contact Number', c.contractor_number)}
+      ${field('contractor_email', 'Contact Email', c.contractor_email, 'email')}
+      ${field('credit_limit', 'Credit Limit (₹)', c.credit_limit ?? 0, 'number')}
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+      </div>
+    </form>`;
+  box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  box.querySelector('.cancel-btn').addEventListener('click', () => { modal.style.display = 'none'; });
+  box.querySelector('#custEditForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    if (!String(fd.get('company_name')).trim()) { alert('Company name is required.'); return; }
+    const updated_values = {
+      company_name: fd.get('company_name').trim(),
+      company_address: fd.get('company_address'),
+      gst_number: fd.get('gst_number'),
+      contractor_person: fd.get('contractor_person'),
+      contractor_number: fd.get('contractor_number'),
+      contractor_email: fd.get('contractor_email'),
+      credit_limit: Number(fd.get('credit_limit')) || 0
+    };
+    try {
+      const res = await apiFetch(`/customer/update/${c.customer_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updated_values })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'update failed');
+      modal.style.display = 'none';
+      await loadCustomers();
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+  modal.style.display = 'flex';
 }
 
 function distributorOptions(selectedUsername, excludeUsername) {
