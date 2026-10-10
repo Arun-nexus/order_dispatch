@@ -352,9 +352,12 @@
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
       <form style="display:flex;flex-direction:column;gap:10px;">
-        <input name="product_name" placeholder="Product Name">
-        <input name="product_id" placeholder="Product ID">
-        <input name="model_no" placeholder="Model No.">
+        <input id="editProductNameInput" name="product_name" placeholder="Product Name">
+        <input id="editParentProductName" name="parent_product_name" placeholder="Belongs To (Parent Product)" style="display:none;">
+        <div id="editIdModelWrap" style="display:flex;flex-direction:column;gap:10px;">
+          <input name="product_id" placeholder="Product ID">
+          <input name="model_no" placeholder="Model No.">
+        </div>
         <label style="font-size:13px;color:#64748b;">Type</label>
         <select id="editProductType" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
           <option value="product">Product</option>

@@ -457,10 +457,44 @@ function updateAllocationCards(allocations) {
 // both are shown correctly here.
 function itemLabel(i) {
   const qtyPart = (i.quantity || 1) > 1 ? ` x${i.quantity}` : '';
-  return `${i.product_name}${qtyPart}`;
+  // id + model identify exactly which variant/lot this unit came from (two
+  // products can share a name, e.g. same model in black vs grey) — shown as
+  // a small sub-line under the name, same pattern used on the Dispatch page.
+  const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+  const metaHtml = meta ? `<br><small style="color:#94a3b8;">${esc(meta)}</small>` : '';
+  return `${esc(i.product_name || '')}${qtyPart}${metaHtml}`;
 }
 function itemSerials(i) {
   return (i.serial_numbers || []).join(', ');
+}
+
+// Spare/service part allocations only carry the part's own name + quantity
+// (see allocation.py's spare_part shape) — not which product that part
+// belongs to. Inventory's matching spare_parts/service_parts lot DOES carry
+// that (parent_product_name), so it's looked up here from the inventory
+// list already loaded for the allocate wizard's product picker
+// (allocState.products, populated by loadInventoryForAllocation). Matched by
+// part name alone since a spare_part allocation has no product_type of its
+// own to disambiguate — first match wins.
+function sparePartParentName(partName) {
+  if (!partName) return '';
+  const needle = partName.trim().toLowerCase();
+  if (!needle) return '';
+  const match = (allocState.products || []).find(p =>
+    (p.product_type === 'spare_parts' || p.product_type === 'service_parts') &&
+    (p.product_name || '').trim().toLowerCase() === needle
+  );
+  return match?.parent_product_name || '';
+}
+
+function sparePartLabel(sp) {
+  const name = esc(sp?.part_name ?? '');
+  const qty = sp?.quantity ?? 1;
+  const parent = sparePartParentName(sp?.part_name);
+  const belongsTo = parent
+    ? `<br><small style="color:#94a3b8;">Belongs to: ${esc(parent)}</small>`
+    : '';
+  return `${name} x${qty}${belongsTo}`;
 }
 
 function renderAllocationsTable(allocations) {
@@ -480,7 +514,7 @@ function renderAllocationsTable(allocations) {
     const meta = returnMeta(a);
     const isSpare = a.allocation_type === 'spare_part';
     const productLabel = isSpare
-      ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
+      ? sparePartLabel(a.spare_part)
       : (a.items || []).map(itemLabel).join(', ');
     const serialLabel = isSpare
       ? '-'
@@ -565,6 +599,8 @@ function rowAllocation(e) {
 function openReturnModal(a) {
   if (!a) return;
   const isSpare = a.allocation_type === 'spare_part';
+  // plain text only here — this goes into a native confirm() dialog, which
+  // can't render the <br><small> markup itemLabel/sparePartLabel use elsewhere
   const label = isSpare
     ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
     : (a.items || []).map(i => `${i.product_name}${itemSerials(i) ? ' (SN: ' + itemSerials(i) + ')' : ''}`).join(', ');
@@ -592,6 +628,7 @@ function openViewAllocationModal(a) {
 
   const itemsHtml = isSpare
     ? `<div class="detail"><small>Spare Part</small><p>${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}</p></div>
+       ${detailRow('Belongs To', sparePartParentName(a.spare_part?.part_name))}
        <div class="detail"><small>Service ID</small><p>${a.spare_part?.service_id ?? ''}</p></div>`
     : `${(a.items || []).map(i => itemDetailBlock(i, false)).join('')}
        ${a.allocation_type === 'demo_unit'

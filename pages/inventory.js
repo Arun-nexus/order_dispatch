@@ -610,6 +610,22 @@ function columnsForCategory(category) {
   const nameCell = p => p.product_name ?? '';
   const idCell = p => p.product_id ?? '';
   const modelCell = p => p.model_no ?? '';
+  // Mixed (no category filter) view: a part is identified by its own name +
+  // which product it belongs to, not by product_id/model_no (those are
+  // always empty for parts) — so the single "Product" column shows whichever
+  // identity actually applies, instead of a part's row showing a bare name
+  // with no id/model and no link back to its parent product.
+  const identityCell = p => {
+    const isPart = p.product_type === 'spare_parts' || p.product_type === 'service_parts';
+    if (isPart) {
+      const belongs = p.parent_product_name
+        ? `<br><small style="color:#94a3b8;">Belongs to: ${escapeHtmlInv(p.parent_product_name)}</small>`
+        : '';
+      return `${escapeHtmlInv(p.product_name ?? '')}${belongs}`;
+    }
+    const meta = [p.product_id, p.model_no].filter(Boolean).join(' · ');
+    return `${escapeHtmlInv(p.product_name ?? '')}${meta ? `<br><small style="color:#94a3b8;">${meta}</small>` : ''}`;
+  };
   // shipment stores warranty length in months (e.g. "12 months"); the backend
   // adds that to the received_date and stores it as warranty_until. Here we
   // just subtract today's date from that to show how many days are left.
@@ -686,11 +702,9 @@ function columnsForCategory(category) {
         { label: 'Status', cell: p => p.damage_status ?? 'Damaged' },
         { label: 'Added By', cell: addedByCell }
       ];
-    default: // no category filter active — table stays exactly as it is today
+    default: // no category filter active (mixed products + parts)
       return [
-        { label: 'Product Name', cell: nameCell },
-        { label: 'Product ID', cell: idCell },
-        { label: 'Model No.', cell: modelCell },
+        { label: 'Product', cell: identityCell },
         { label: 'Type', cell: typeCell },
         { label: 'Supplier', cell: supplierCell },
         { label: 'Purchase Date', cell: dateCell },
@@ -1224,6 +1238,7 @@ function openEditModal(p) {
   form.elements['product_name'].value = p.product_name ?? '';
   form.elements['product_id'].value = p.product_id ?? '';
   form.elements['model_no'].value = p.model_no ?? '';
+  form.elements['parent_product_name'].value = p.parent_product_name ?? '';
   form.elements['lot_no'].value = p.lot_no ?? '';
   form.elements['supplier'].value = p.supplier ?? '';
   form.elements['purchase_date'].value = p.purchase_date ?? '';
@@ -1243,6 +1258,7 @@ function openEditModal(p) {
   invState.editHolograms = [...hologramNumbersOf(p)];
   invState.editHologramQuantity = Number(p.quantity) || 0;
   toggleHologramSection(p.product_type || 'product');
+  toggleTypeSpecificFields(p.product_type || 'product');
   renderHologramUI();
   wireHologramControls();
 
@@ -1258,11 +1274,32 @@ function openEditModal(p) {
     typeSelect.addEventListener('change', renderEditSerialsUI);
     typeSelect.removeEventListener('change', onEditTypeChangeForHologram);
     typeSelect.addEventListener('change', onEditTypeChangeForHologram);
+    typeSelect.removeEventListener('change', onEditTypeChangeForTypeFields);
+    typeSelect.addEventListener('change', onEditTypeChangeForTypeFields);
   }
 
   wireEditSerialFileUpload();
 
   modal.style.display = 'flex';
+}
+
+// Parts (spare_parts/service_parts) are identified by their own name + which
+// product they belong to, not by product_id/model_no (those stay empty for
+// parts) — so the edit form swaps between the two identity shapes based on
+// the selected type, same idea as toggleHologramSection below.
+function toggleTypeSpecificFields(type) {
+  const isPart = type === 'spare_parts' || type === 'service_parts';
+  const nameInput = document.getElementById('editProductNameInput');
+  const parentInput = document.getElementById('editParentProductName');
+  const idModelWrap = document.getElementById('editIdModelWrap');
+  if (nameInput) nameInput.placeholder = isPart ? 'Part Name' : 'Product Name';
+  if (parentInput) parentInput.style.display = isPart ? 'block' : 'none';
+  if (idModelWrap) idModelWrap.style.display = isPart ? 'none' : 'flex';
+}
+
+function onEditTypeChangeForTypeFields() {
+  const typeSelect = document.getElementById('editProductType');
+  toggleTypeSpecificFields(typeSelect ? typeSelect.value : 'product');
 }
 
 // hologram numbers are only tracked on spare_parts / service_parts entries —
@@ -2008,10 +2045,17 @@ function wireModals() {
       }
     }
 
+    const editType = typeSelect ? typeSelect.value : 'product';
+    const editIsPart = editType === 'spare_parts' || editType === 'service_parts';
     const updated_values = {
       product_name: form.elements['product_name'].value,
-      product_id: form.elements['product_id'].value,
-      model_no: form.elements['model_no'].value,
+      // id/model belong to physical products only; parts are identified by
+      // parent_product_name instead, so each is only sent for its own type —
+      // keeps a part's doc from picking up stray empty id/model fields and
+      // vice versa.
+      ...(editIsPart
+        ? { parent_product_name: form.elements['parent_product_name'].value, product_id: '', model_no: '' }
+        : { product_id: form.elements['product_id'].value, model_no: form.elements['model_no'].value }),
       lot_no: form.elements['lot_no'].value,
       supplier: form.elements['supplier'].value,
       purchase_date: form.elements['purchase_date'].value,
