@@ -368,7 +368,7 @@ function initNotificationBell() {
 }
 
 let _msgPoll = null;
-const _msgState = { users: [], selected: new Set(), tab: 'compose', inbox: [], search: '' };
+const _msgState = { users: [], selected: new Set(), tab: 'compose', inbox: [], search: '', replyTo: null, replyDraft: '' };
 
 function msgEsc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -571,9 +571,18 @@ function drawMessageInbox() {
             <span>${m.created_at ? new Date(m.created_at).toLocaleString('en-GB') : ''}</span>
           </div>
           <div style="font-size:14px;color:#334155;white-space:pre-wrap;">${msgEsc(m.body)}</div>
+          <div class="msgReplyArea" style="margin-top:8px;">
+            ${_msgState.replyTo === m.message_id ? `
+              <textarea class="msgReplyText" rows="3" maxlength="2000" placeholder="Reply to ${msgEsc(m.from_name || m.from_username)}..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;">${msgEsc(_msgState.replyDraft)}</textarea>
+              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+                <button type="button" class="msgReplyCancel" style="padding:6px 12px;border:none;border-radius:8px;background:#eee;cursor:pointer;font-size:12px;">Cancel</button>
+                <button type="button" class="msgReplySend" data-id="${msgEsc(m.message_id)}" style="padding:6px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;font-weight:600;"><i class="fa-solid fa-paper-plane"></i> Send Reply</button>
+              </div>` : `<button type="button" class="msgReplyBtn" data-id="${msgEsc(m.message_id)}" style="padding:5px 12px;border:1px solid #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;font-size:12px;"><i class="fa-solid fa-reply"></i> Reply</button>`}
+          </div>
         </div>`).join('')}
     </div>`;
-  body.querySelectorAll('.msgItem').forEach(el => el.addEventListener('click', async () => {
+  body.querySelectorAll('.msgItem').forEach(el => el.addEventListener('click', async e => {
+    if (e.target.closest('.msgReplyArea')) return;
     const m = _msgState.inbox.find(x => x.message_id === el.dataset.id);
     if (!m || m.read) return;
     try {
@@ -582,6 +591,50 @@ function drawMessageInbox() {
       loadMessageInbox();
       drawMessageInbox();
     } catch (err) { console.error(err); }
+  }));
+  body.querySelectorAll('.msgReplyBtn').forEach(btn => btn.addEventListener('click', async () => {
+    const m = _msgState.inbox.find(x => x.message_id === btn.dataset.id);
+    if (!m) return;
+    _msgState.replyTo = m.message_id;
+    _msgState.replyDraft = '';
+    drawMessageInbox();
+    const box = body.querySelector('.msgReplyText');
+    if (box) box.focus();
+    if (!m.read) {
+      try {
+        await apiFetch(`/message/read/${m.message_id}`, { method: 'POST' });
+        m.read = true;
+        loadMessageInbox();
+      } catch (err) { console.error(err); }
+    }
+  }));
+  body.querySelectorAll('.msgReplyText').forEach(t => t.addEventListener('input', () => { _msgState.replyDraft = t.value; }));
+  body.querySelectorAll('.msgReplyCancel').forEach(btn => btn.addEventListener('click', () => {
+    _msgState.replyTo = null;
+    _msgState.replyDraft = '';
+    drawMessageInbox();
+  }));
+  body.querySelectorAll('.msgReplySend').forEach(btn => btn.addEventListener('click', async () => {
+    const m = _msgState.inbox.find(x => x.message_id === btn.dataset.id);
+    const text = (_msgState.replyDraft || '').trim();
+    if (!m) return;
+    if (!text) { showResponseModal('Empty reply', 'Write a reply before sending.', false); return; }
+    btn.disabled = true;
+    try {
+      const res = await apiFetch('/message/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipients: [m.from_username], body: text })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'reply could not be sent');
+      _msgState.replyTo = null;
+      _msgState.replyDraft = '';
+      drawMessageInbox();
+      showResponseModal('Reply sent', `Your reply was sent to ${m.from_name || m.from_username}.`, true);
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Reply failed', err.message, false);
+    }
   }));
   const readAll = document.getElementById('msgReadAll');
   if (readAll) readAll.addEventListener('click', async e => {
