@@ -4996,6 +4996,22 @@ def message_inbox(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="inbox cannot be fetched")
 
 
+@app.get("/message/all")
+def message_all(user: dict = Depends(require_role("admin"))):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=MESSAGES_COLLECTION, query={}, projection={"_id": 0})
+        accounts = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
+        names = {a.get("username"): (a.get("name") or a.get("username")) for a in accounts}
+        for m in dataset:
+            m["to_name"] = names.get(m.get("to_username"), m.get("to_username"))
+        dataset = sorted(dataset, key=lambda m: m.get("created_at") or "", reverse=True)[:500]
+        return {"message": "all messages", "dataset": dataset}
+    except Exception:
+        logging.error("team messages cannot be fetched")
+        raise HTTPException(status_code=500, detail="team messages cannot be fetched")
+
+
 @app.post("/message/read/{message_id}")
 def message_mark_read(message_id: str, user: dict = Depends(get_current_user)):
     try:

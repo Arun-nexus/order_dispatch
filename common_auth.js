@@ -413,6 +413,7 @@ function ensureMessageUI() {
         <div style="display:flex;gap:8px;margin-bottom:14px;">
           <button type="button" class="msgTab" data-tab="compose" style="flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;">New Message</button>
           <button type="button" class="msgTab" data-tab="inbox" style="flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Inbox <span id="msgTabCount"></span></button>
+          ${getRole() === 'admin' ? '<button type="button" class="msgTab" data-tab="team" style="flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Team</button>' : ''}
         </div>
         <div id="msgBody"></div>
       </div>`;
@@ -444,6 +445,7 @@ function paintMsgTabs() {
 function renderMessageModal() {
   paintMsgTabs();
   if (_msgState.tab === 'inbox') renderMessageInbox();
+  else if (_msgState.tab === 'team' && getRole() === 'admin') renderMessageTeam();
   else renderMessageCompose();
 }
 
@@ -598,6 +600,52 @@ async function renderMessageInbox() {
   body.innerHTML = '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">Loading...</p>';
   await loadMessageInbox();
   drawMessageInbox();
+}
+
+async function renderMessageTeam() {
+  const body = document.getElementById('msgBody');
+  body.innerHTML = '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">Loading...</p>';
+  let all = [];
+  try {
+    const res = await apiFetch('/message/all');
+    if (!res.ok) throw new Error('failed');
+    const data = await res.json();
+    all = data.dataset || [];
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') body.innerHTML = '<p style="padding:16px;color:#d62828;font-size:13px;text-align:center;">Could not load team chats.</p>';
+    return;
+  }
+
+  const groups = {};
+  all.forEach(m => {
+    const key = m.batch_id || m.message_id;
+    if (!groups[key]) groups[key] = { from_name: m.from_name || m.from_username, from_username: m.from_username, from_role: m.from_role, body: m.body, created_at: m.created_at, to: [] };
+    groups[key].to.push({ name: m.to_name || m.to_username, username: m.to_username, read: m.read });
+  });
+  const chats = Object.values(groups).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  body.innerHTML = `
+    <input id="msgTeamSearch" placeholder="Search by person or message" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <p id="msgTeamCount" style="font-size:12px;color:#64748b;margin-bottom:8px;"></p>
+    <div id="msgTeamList" style="max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>`;
+
+  const list = document.getElementById('msgTeamList');
+  const draw = () => {
+    const term = document.getElementById('msgTeamSearch').value.trim().toLowerCase();
+    const shown = chats.filter(c => !term || `${c.from_name} ${c.from_username} ${c.body} ${c.to.map(t => t.name + ' ' + t.username).join(' ')}`.toLowerCase().includes(term));
+    document.getElementById('msgTeamCount').textContent = `${shown.length} message${shown.length === 1 ? '' : 's'}`;
+    list.innerHTML = shown.map(c => `
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;margin-bottom:4px;">
+          <strong style="color:#0f172a;">${msgEsc(c.from_name)} <span style="font-weight:400;">(${msgEsc(msgRoleLabel(c.from_role))})</span></strong>
+          <span>${c.created_at ? new Date(c.created_at).toLocaleString('en-GB') : ''}</span>
+        </div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:6px;">To: ${c.to.map(t => `<span style="display:inline-block;background:${t.read ? '#f1f5f9' : '#fff4e0'};border-radius:999px;padding:1px 8px;margin:0 4px 2px 0;" title="${t.read ? 'Read' : 'Unread'}">${msgEsc(t.name)}</span>`).join('')}</div>
+        <div style="font-size:14px;color:#334155;white-space:pre-wrap;">${msgEsc(c.body)}</div>
+      </div>`).join('') || '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">No messages yet.</p>';
+  };
+  document.getElementById('msgTeamSearch').addEventListener('input', draw);
+  draw();
 }
 
 function initMessaging() {
