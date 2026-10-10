@@ -194,6 +194,12 @@ class CustomerUpdateRequest(BaseModel):
     updated_values: dict
 
 
+class CustomerReturnRequest(BaseModel):
+    amount: float
+    note: str = ""
+    return_date: str = ""
+
+
 class SalesPersonRequest(BaseModel):
     name: str
     company_name: str = ""
@@ -3594,6 +3600,33 @@ def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict
     except Exception as e:
         logging.error("customer updation was unsuccessful!")
         raise HTTPException(status_code=500, detail="customer cannot be updated")
+
+
+@app.post("/customer/add_return/{customer_id}")
+def add_customer_return(customer_id: str, request: CustomerReturnRequest, user: dict = Depends(require_role("admin", "accounts"))):
+    try:
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="return amount must be greater than zero")
+        db = customer_manager()
+        found = db.get_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id})
+        if not found:
+            raise HTTPException(status_code=404, detail="no customer found with this id")
+        returns = list(found[0].get("returns") or [])
+        returns.append({
+            "amount": request.amount,
+            "note": (request.note or "").strip(),
+            "return_date": request.return_date or datetime.now(timezone.utc).isoformat(),
+            "added_by": user["username"],
+            "added_at": datetime.now(timezone.utc).isoformat()
+        })
+        db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
+                  update_values={"returns": returns})
+        return {"message": "return added", "customer_id": customer_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("adding customer return failed!")
+        raise HTTPException(status_code=500, detail="return could not be added")
 
 
 @app.post("/customer/delete/{customer_id}")

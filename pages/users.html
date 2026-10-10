@@ -73,49 +73,63 @@
       </header>
 
       <section class="cards">
-        <div class="card">
+        <div class="card" data-card-filter="all" style="cursor:pointer;">
           <div><span>Total Users</span>
             <h2 id="cardTotal">0</h2>
             <p>All accounts</p>
           </div>
           <i class="fa-solid fa-users"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="admin" style="cursor:pointer;">
           <div><span>Admins</span>
             <h2 id="cardAdmins">0</h2>
             <p>Full access</p>
           </div>
           <i class="fa-solid fa-user-shield"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="accounts" style="cursor:pointer;">
           <div><span>Accounts</span>
             <h2 id="cardEmployees">0</h2>
             <p>Orders, inventory, service</p>
           </div>
           <i class="fa-solid fa-user-tie"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="technician" style="cursor:pointer;">
           <div><span>Technicians</span>
             <h2 id="cardTechnicians">0</h2>
             <p>Field service</p>
           </div>
           <i class="fa-solid fa-user-gear"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="distributor" style="cursor:pointer;">
           <div><span>Employee-Sales Persons</span>
             <h2 id="cardDistributors">0</h2>
             <p>Sales &amp; demo units</p>
           </div>
           <i class="fa-solid fa-handshake"></i>
         </div>
-        <div class="card">
+        <div class="card" data-card-filter="inventory_manager" style="cursor:pointer;">
           <div><span>Inventory Managers</span>
             <h2 id="cardInventoryManagers">0</h2>
             <p>Inventory only</p>
           </div>
           <i class="fa-solid fa-boxes-stacked"></i>
         </div>
+        <div class="card" data-card-filter="customers" style="cursor:pointer;">
+          <div><span>Customers</span>
+            <h2 id="cardCustomers">0</h2>
+            <p>Credit &amp; order history</p>
+          </div>
+          <i class="fa-solid fa-building-user"></i>
+        </div>
       </section>
+
+      <div style="display:flex;gap:8px;margin:0 0 14px;">
+        <button type="button" class="sectionTab" data-tab="users" style="padding:10px 20px;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Users</button>
+        <button type="button" class="sectionTab" data-tab="customers" style="padding:10px 20px;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Customers <span id="customerTabCount"></span></button>
+      </div>
+
+      <div id="usersSection">
 
       <div class="top-actions">
         <button class="add-product"><i class="fa-solid fa-plus"></i> Add User</button>
@@ -163,6 +177,43 @@
         <button class="page">2</button>
         <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
       </div>
+      </div>
+
+      <div id="customersSection" style="display:none;">
+        <section class="filter-section" style="flex-wrap:wrap;">
+          <div class="filter-box">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input id="custSearch" type="text" placeholder="Search company, GST, contact, address">
+          </div>
+          <div class="filter-box">
+            <i class="fa-solid fa-indian-rupee-sign"></i>
+            <select id="custAmountField">
+              <option value="credit_limit">Credit Limit</option>
+              <option value="credit_given">Credit Given</option>
+              <option value="returned">Returned</option>
+              <option value="outstanding">Outstanding</option>
+              <option value="total_orders">Total Orders</option>
+            </select>
+          </div>
+          <div class="filter-box"><input id="custMin" type="number" min="0" placeholder="Min amount"></div>
+          <div class="filter-box"><input id="custMax" type="number" min="0" placeholder="Max amount"></div>
+          <button class="filter-btn" id="applyCustFilter"><i class="fa-solid fa-filter"></i> Apply Filter</button>
+          <button class="filter-btn" id="resetCustFilter" style="background:#64748b;">Reset</button>
+        </section>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th><th>GST</th><th>Contact</th><th>Credit Limit</th>
+                <th>Credit Given</th><th>Returned</th><th>Outstanding</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="customersTbody"></tbody>
+            <tfoot id="customersTfoot"></tfoot>
+          </table>
+        </div>
+      </div>
     </main>
 
   </div>
@@ -188,6 +239,20 @@
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content"
       style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
+  </div>
+
+  <!-- Customer modals (content built by users.js) -->
+  <div id="customerHistoryModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:720px;max-width:94vw;max-height:88vh;overflow-y:auto;"></div>
+  </div>
+  <div id="customerEditModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-width:94vw;max-height:88vh;overflow-y:auto;"></div>
+  </div>
+  <div id="userCardDetailModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:760px;max-width:94vw;max-height:88vh;overflow-y:auto;"></div>
   </div>
 
   <!-- Delete Confirm Modal -->
