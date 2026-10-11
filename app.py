@@ -351,6 +351,14 @@ class CreateShipmentRequest(BaseModel):
     dispatch_date: str
     received_date: str = ""       # optional - can be added later via mark_received
     products: list[ShipmentProduct]
+    customer_id: str = ""
+    gst_number: str = ""
+    contractor_person: str = ""
+    contractor_number: str = ""
+    contractor_email: str = ""
+    payment_mode: str = "paid"
+    currency: str = "INR"
+    exchange_rate: float = 1
 
 
 class ShipmentReceivedRequest(BaseModel):
@@ -1476,6 +1484,77 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
     return sync_results
 
 
+def _sync_shipment_ledger(shipment: dict, user: dict, contact: dict = None):
+    sid = shipment["shipment_id"]
+    db = customer_manager()
+    for c in db.get_data(collection_name=CUSTOMER_COLLECTION, query={}):
+        old = c.get("purchases") or []
+        kept = [p for p in old if p.get("shipment_id") != sid]
+        if len(kept) != len(old):
+            db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": c["customer_id"]}, update_values={"purchases": kept})
+    mode = (shipment.get("payment_mode") or "").lower()
+    amount = float(shipment.get("total_inr") or 0)
+    name = (shipment.get("company_name") or "").strip()
+    if mode not in ("paid", "credit") or amount <= 0 or not name:
+        return None
+    contact = contact or {}
+    rows = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
+    match = next((c for c in rows if shipment.get("customer_id") and c.get("customer_id") == shipment["customer_id"]), None)
+    if match is None:
+        match = next((c for c in rows if (c.get("company_name") or "").strip().lower() == name.lower()), None)
+    if match is None:
+        nc = customer_manager(
+            company_name=name,
+            company_address=shipment.get("company_address", ""),
+            gst_number=contact.get("gst_number", ""),
+            contractor_person=contact.get("contractor_person", ""),
+            contractor_number=contact.get("contractor_number", ""),
+            contractor_email=contact.get("contractor_email", ""),
+        )
+        nc.add(collection_name=CUSTOMER_COLLECTION)
+        db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": nc.customer_id},
+                       update_values={"credit_limit": 0, "credit_used": 0, "created_by": user["username"]})
+        customer_id, purchases = nc.customer_id, []
+    else:
+        customer_id, purchases = match["customer_id"], list(match.get("purchases") or [])
+    products = shipment.get("products") or []
+    purchases.append({
+        "purchase_id": str(uuid.uuid4()),
+        "shipment_id": sid,
+        "source": "shipment",
+        "date": shipment.get("dispatch_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "product_name": ", ".join(f"{p.get('product_name')} x{p.get('quantity')}" for p in products),
+        "quantity": sum(int(p.get("quantity") or 0) for p in products),
+        "lot_no": f"Shipment {sid[:8]}",
+        "amount": round(amount, 2),
+        "payment_mode": mode,
+        "currency": shipment.get("currency", "INR"),
+        "exchange_rate": shipment.get("exchange_rate", 1),
+        "original_amount": shipment.get("total_amount", amount),
+        "added_by": user["username"],
+        "added_at": datetime.now(timezone.utc).isoformat(),
+    })
+    db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id}, update_values={"purchases": purchases})
+    shipment_manager().update(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": sid}, update_values={"customer_id": customer_id})
+    return customer_id
+
+
+@app.get("/shipment/fx_rate")
+def shipment_fx_rate(currency: str, user: dict = Depends(get_current_user)):
+    import json
+    import urllib.request
+    cur = (currency or "").strip().upper()
+    if cur == "INR":
+        return {"currency": "INR", "rate": 1, "as_of": ""}
+    try:
+        with urllib.request.urlopen(f"https://open.er-api.com/v6/latest/{cur}", timeout=8) as r:
+            data = json.loads(r.read().decode())
+        return {"currency": cur, "rate": float(data["rates"]["INR"]), "as_of": data.get("time_last_update_utc", "")}
+    except Exception:
+        logging.error("fx rate fetch failed")
+        raise HTTPException(status_code=502, detail="live exchange rate unavailable, enter the rate manually")
+
+
 @app.get("/shipment/")
 def shipment(user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
@@ -1516,8 +1595,20 @@ def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require
             received_date=request.received_date or None,
             products=shipment_dict["products"],
             created_by=user["username"],
+            customer_id=request.customer_id,
+            payment_mode=request.payment_mode,
+            currency=request.currency,
+            exchange_rate=request.exchange_rate,
         )
         _, shipment_id = shipment_item.add(collection_name=SHIPMENT_COLLECTION)
+        ledger_customer_id = None
+        try:
+            saved = shipment_item.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})[0]
+            ledger_customer_id = _sync_shipment_ledger(saved, user, {
+                "gst_number": request.gst_number, "contractor_person": request.contractor_person,
+                "contractor_number": request.contractor_number, "contractor_email": request.contractor_email})
+        except Exception as led_err:
+            logging.error(f"shipment {shipment_id} created but customer ledger sync failed: {led_err}")
         logging.info("shipment created successfully")
 
         inventory_sync = "skipped"
@@ -1532,7 +1623,7 @@ def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require
                 logging.error(f"shipment {shipment_id} created received but parts->inventory sync failed: {inv_err}")
                 inventory_sync = f"failed: {inv_err}"
 
-        return {"message": "shipment created successfully", "shipment_id": shipment_id, "inventory_sync": inventory_sync}
+        return {"message": "shipment created successfully", "shipment_id": shipment_id, "inventory_sync": inventory_sync, "customer_id": ledger_customer_id}
 
     except HTTPException:
         raise
@@ -1583,12 +1674,28 @@ def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict
             raise HTTPException(status_code=404, detail="no shipment found with this shipment_id")
 
         updated = dict(request.updated_values)
+        contact = {k: updated.pop(k, "") for k in ("gst_number", "contractor_person", "contractor_number", "contractor_email")}
+        if "currency" in updated:
+            updated["currency"] = (updated["currency"] or "INR").upper()
+            if updated["currency"] == "INR":
+                updated["exchange_rate"] = 1.0
+        if updated.get("payment_mode") not in (None, "paid", "credit"):
+            updated["payment_mode"] = "paid"
+        merged = {**existing[0], **updated}
+        total_amount = sum((float(p.get("price") or 0) * float(p.get("quantity") or 0)) for p in merged.get("products", []))
+        updated["total_amount"] = total_amount
+        updated["total_inr"] = round(total_amount * float(merged.get("exchange_rate") or 1), 2)
         # keep status in sync if the caller is editing received_date directly
         if "received_date" in updated:
             updated["status"] = "received" if updated["received_date"] else "pending"
 
         db.update(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id}, update_values=updated)
         logging.info("shipment value was updated successfully.")
+        try:
+            fresh = db.get_data(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})[0]
+            _sync_shipment_ledger(fresh, user, contact)
+        except Exception as led_err:
+            logging.error(f"shipment {shipment_id} updated but customer ledger sync failed: {led_err}")
         return {"message": "shipment value was updated", "shipment_id": shipment_id, "updated_value": updated}
 
     except HTTPException:
@@ -1603,6 +1710,10 @@ def delete_shipment(shipment_id: str, user: dict = Depends(require_role("admin")
     try:
         db = shipment_manager()
         db.delete(collection_name=SHIPMENT_COLLECTION, query={"shipment_id": shipment_id})
+        try:
+            _sync_shipment_ledger({"shipment_id": shipment_id}, user)
+        except Exception as led_err:
+            logging.error(f"shipment {shipment_id} deleted but customer ledger cleanup failed: {led_err}")
         return {"message": "shipment deleted", "shipment_id": shipment_id}
     except Exception as e:
         logging.error("shipment deletion failed")
@@ -3294,7 +3405,11 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
                 created_by=user["username"],
             )
             part.add_part(collection_name=INVENTORY_COLLECTION)
-            return {"message": "part was listed successfully"}
+            resp = {"message": "part was listed successfully"}
+            ledger = _record_purchase_on_customer(request, user)
+            if ledger:
+                resp["ledger"] = ledger
+            return resp
 
         inventory_item = inventory_manager(
             product_name=request.product_name,

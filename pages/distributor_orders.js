@@ -53,7 +53,7 @@ async function loadOrders() {
     // Distributors only ever get orders into the system via an approved
     // /request/order — those come back with creator.type === "request" and
     // creator.raised_by set to whoever raised it. Filter to just this user's.
-    const mine = (data.dataset || []).filter(o => o.creator?.raised_by === uname);
+    const mine = (data.dataset || []).filter(o => o.creator?.raised_by === uname || o.reference === uname);
 
     // Demo-to-order conversions waiting for approval (or refused) show up here as rows
     // until admin approves; after approval the real order replaces them.

@@ -48,11 +48,35 @@ function partStatusLabel(status) {
 
 // server stores snake_case (shipment_id, company_name, dispatch_date, ...);
 // the UI below works with the camelCase shape used while building the wizard.
+const CURRENCIES = { INR: '₹', USD: '$', EUR: '€', GBP: '£', CNY: 'CN¥', JPY: 'JP¥', AED: 'AED ', SGD: 'S$' };
+let companyList = [];
+
+function esc(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function curMoney(n, cur) {
+  return (CURRENCIES[cur] || cur + ' ') + (Number(n) || 0).toLocaleString('en-IN');
+}
+function draftTotal(s) {
+  return (s.products || []).reduce((t, p) => t + (Number(p.price) || 0) * (Number(p.quantity) || 0), 0);
+}
+async function loadCompanyList() {
+  try {
+    const r = await apiFetch('/customer/company_list');
+    if (r.ok) companyList = (await r.json()).dataset || [];
+  } catch (e) { companyList = []; }
+}
+
 function fromServerShape(s) {
   return {
     id: s.shipment_id || s.id,
     companyName: s.company_name,
     companyAddress: s.company_address,
+    customerId: s.customer_id || '',
+    paymentMode: s.payment_mode || 'paid',
+    currency: s.currency || 'INR',
+    exchangeRate: Number(s.exchange_rate) || 1,
+    totalInr: s.total_inr,
     dispatchDate: s.dispatch_date,
     receivedDate: s.received_date || '',
     createdAt: s.created_at,
@@ -70,6 +94,14 @@ function toServerShape(s) {
   return {
     company_name: s.companyName,
     company_address: s.companyAddress,
+    customer_id: s.customerId || '',
+    gst_number: s.gstNumber || '',
+    contractor_person: s.contactPerson || '',
+    contractor_number: s.contactNumber || '',
+    contractor_email: s.contactEmail || '',
+    payment_mode: s.paymentMode || 'paid',
+    currency: s.currency || 'INR',
+    exchange_rate: Number(s.exchangeRate) || 1,
     dispatch_date: s.dispatchDate,
     received_date: s.receivedDate || '',
     products: (s.products || []).map(p => ({
@@ -241,7 +273,7 @@ function renderTable() {
         <td>${pill}</td>
         <td>
           <button class="icon-btn" data-action="view" data-id="${s.id}" title="View"><i class="fa-solid fa-eye"></i></button>
-          ${status === 'pending' ? `<button class="icon-btn" data-action="edit" data-id="${s.id}" title="Edit"><i class="fa-solid fa-pen"></i></button>` : ''}
+          <button class="icon-btn" data-action="edit" data-id="${s.id}" title="Edit"><i class="fa-solid fa-pen"></i></button>
           ${status === 'pending' ? `<button class="icon-btn" data-action="receive" data-id="${s.id}" title="Mark Received"><i class="fa-solid fa-truck-ramp-box"></i></button>` : ''}
           <button class="icon-btn" data-action="delete" data-id="${s.id}" title="Delete"><i class="fa-solid fa-trash"></i></button>
         </td>
@@ -269,6 +301,8 @@ function openViewModal(id) {
     </div>
     <div class="detail"><small>Company Name</small><p>${s.companyName}</p></div>
     <div class="detail"><small>Company Address</small><p>${s.companyAddress || '—'}</p></div>
+    <div class="detail"><small>Payment</small><p>${s.paymentMode === 'credit' ? 'Credit' : 'Paid'}</p></div>
+    <div class="detail"><small>Total</small><p>${curMoney(draftTotal(s), s.currency)}${s.currency !== 'INR' ? ` ≈ ${money(s.totalInr)} (₹${s.exchangeRate}/${s.currency})` : ''}</p></div>
     <div class="detail"><small>Dispatch Date</small><p>${s.dispatchDate || '—'}</p></div>
     <div class="detail"><small>Received Date</small><p>${s.receivedDate || 'Not received yet'}</p></div>
     <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
@@ -277,7 +311,7 @@ function openViewModal(id) {
       <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;font-weight:600;">
           <span>${p.name}</span>
-          <span>${money(p.price)} x ${p.quantity}</span>
+          <span>${curMoney(p.price, s.currency)} x ${p.quantity}</span>
         </div>
         ${p.warranty ? `<p style="font-size:12px;color:#64748b;margin-top:4px;">Warranty: ${p.warranty}</p>` : ''}
         ${(p.parts && p.parts.length) ? `
@@ -396,11 +430,21 @@ function stepDots(active) {
     </div>`;
 }
 
-function openAddShipmentModal() {
+async function openAddShipmentModal() {
+  await loadCompanyList();
   shipmentDraft = {
     id: newId(),
     companyName: '',
     companyAddress: '',
+    customerId: '',
+    gstNumber: '',
+    contactPerson: '',
+    contactNumber: '',
+    contactEmail: '',
+    paymentMode: 'paid',
+    currency: 'INR',
+    exchangeRate: 1,
+    rateNote: '',
     dispatchDate: todayStr(),
     receivedDate: '',
     products: []
@@ -410,11 +454,17 @@ function openAddShipmentModal() {
   openModal('shipmentModal');
 }
 
-function openEditShipmentModal(id) {
+async function openEditShipmentModal(id) {
   const s = shipments.find(x => x.id === id);
   if (!s) return;
+  await loadCompanyList();
   shipmentDraft = JSON.parse(JSON.stringify(s));
   shipmentDraft.isEdit = true;
+  shipmentDraft.rateNote = '';
+  if (!shipmentDraft.customerId) {
+    const m = companyList.find(c => (c.company_name || '').trim().toLowerCase() === (s.companyName || '').trim().toLowerCase());
+    shipmentDraft.customerId = m ? m.customer_id : '';
+  }
   shipmentStep = 1;
   renderShipmentStep();
   openModal('shipmentModal');
@@ -426,22 +476,95 @@ function renderShipmentStep() {
   return renderStep3();
 }
 
-// ---------- STEP 1: company details ----------
+// ---------- STEP 1: company, payment, currency ----------
+function readStep1() {
+  const g = id => document.getElementById(id);
+  const d = shipmentDraft;
+  if (g('s1Dispatch')) d.dispatchDate = g('s1Dispatch').value;
+  if (g('s1ReceivedDate')) d.receivedDate = g('s1ReceivedDate').value;
+  if (g('s1Payment')) d.paymentMode = g('s1Payment').value;
+  if (g('s1Rate')) d.exchangeRate = Number(g('s1Rate').value) || 0;
+  if (g('s1CompanyName')) {
+    d.companyName = g('s1CompanyName').value.trim();
+    d.companyAddress = g('s1CompanyAddress').value.trim();
+    d.gstNumber = g('s1Gst').value.trim();
+    d.contactPerson = g('s1ContactPerson').value.trim();
+    d.contactNumber = g('s1ContactNumber').value.trim();
+    d.contactEmail = g('s1ContactEmail').value.trim();
+  }
+}
+
+async function fetchRate() {
+  const d = shipmentDraft;
+  if (d.currency === 'INR') { d.exchangeRate = 1; d.rateNote = ''; return renderStep1(); }
+  d.rateNote = 'Fetching live rate...';
+  renderStep1();
+  try {
+    const r = await apiFetch(`/shipment/fx_rate?currency=${d.currency}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || 'failed');
+    d.exchangeRate = data.rate;
+    d.rateNote = `Live rate: 1 ${d.currency} = ₹${data.rate}`;
+  } catch (e) {
+    d.rateNote = 'Live rate unavailable — enter the rate manually';
+  }
+  renderStep1();
+}
+
 function renderStep1() {
+  const d = shipmentDraft;
   const box = SHIPMENT_MODAL();
+  const picked = companyList.find(c => c.customer_id === d.customerId);
+  const input = (id, ph, val) => `<input id="${id}" placeholder="${ph}" value="${esc(val)}">`;
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <h3>${shipmentDraft.isEdit ? 'Edit' : 'Add'} Shipment</h3>
+      <h3>${d.isEdit ? 'Edit' : 'Add'} Shipment</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(1)}
     <form id="shipStep1Form" style="display:flex;flex-direction:column;gap:10px;">
-      <input id="s1CompanyName" placeholder="Company Name" value="${shipmentDraft.companyName}" required>
-      <textarea id="s1CompanyAddress" placeholder="Company Address" rows="3" required>${shipmentDraft.companyAddress}</textarea>
+      <label style="font-size:13px;color:#64748b;">Company</label>
+      <select id="s1Company">
+        <option value="">➕ Create new company manually</option>
+        ${companyList.map(c => `<option value="${esc(c.customer_id)}" ${c.customer_id === d.customerId ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}
+      </select>
+      ${picked ? `
+        <div style="background:#f8fafc;border-radius:10px;padding:10px;font-size:13px;color:#475569;">
+          <div>${esc(picked.company_address) || '—'}</div>
+          <div>GST: ${esc(picked.gst_number) || '—'} • ${esc(picked.contractor_person) || ''} ${esc(picked.contractor_number) || ''}</div>
+        </div>` : `
+        ${input('s1CompanyName', 'Company Name', d.companyName)}
+        <textarea id="s1CompanyAddress" placeholder="Company Address" rows="2">${esc(d.companyAddress)}</textarea>
+        ${input('s1Gst', 'GST Number (optional)', d.gstNumber)}
+        ${input('s1ContactPerson', 'Contact Person (optional)', d.contactPerson)}
+        ${input('s1ContactNumber', 'Contact Number (optional)', d.contactNumber)}
+        ${input('s1ContactEmail', 'Contact Email (optional)', d.contactEmail)}`}
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:13px;color:#64748b;">Payment</label>
+          <select id="s1Payment">
+            <option value="paid" ${d.paymentMode === 'paid' ? 'selected' : ''}>Paid</option>
+            <option value="credit" ${d.paymentMode === 'credit' ? 'selected' : ''}>Credit</option>
+          </select>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:13px;color:#64748b;">Price Currency</label>
+          <select id="s1Currency">
+            ${Object.keys(CURRENCIES).map(c => `<option value="${c}" ${c === d.currency ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      ${d.currency !== 'INR' ? `
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="font-size:13px;color:#64748b;white-space:nowrap;">1 ${d.currency} = ₹</span>
+          <input id="s1Rate" type="number" step="any" min="0" value="${d.exchangeRate}" style="flex:1;">
+          <button type="button" id="s1RefreshRate" style="padding:8px 12px;border:none;border-radius:8px;background:#e2e8f0;cursor:pointer;">Refresh</button>
+        </div>
+        <small style="color:#94a3b8;">${esc(d.rateNote)}</small>` : ''}
       <label style="font-size:13px;color:#64748b;">Shipment Dispatch Date</label>
-      <input type="date" id="s1DispatchDate" value="${shipmentDraft.dispatchDate}" required>
-      ${shipmentDraft.isEdit ? `<input type="hidden" id="s1ReceivedDate" value="${shipmentDraft.receivedDate}">` : `<label style="font-size:13px;color:#64748b;">Shipment Received Date <span style="color:#94a3b8;">(optional — can be added later)</span></label>
-      <input type="date" id="s1ReceivedDate" value="${shipmentDraft.receivedDate}">`}
+      <input type="date" id="s1Dispatch" value="${esc(d.dispatchDate)}" required>
+      ${d.isEdit ? `<input type="hidden" id="s1ReceivedDate" value="${esc(d.receivedDate)}">` : `<label style="font-size:13px;color:#64748b;">Shipment Received Date <span style="color:#94a3b8;">(optional — can be added later)</span></label>
+      <input type="date" id="s1ReceivedDate" value="${esc(d.receivedDate)}">`}
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
         <button type="button" class="cancel-btn" id="shipCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
         <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Add Products</button>
@@ -450,12 +573,29 @@ function renderStep1() {
   `;
   box.querySelector('.close').addEventListener('click', () => closeModal('shipmentModal'));
   box.querySelector('#shipCancelBtn').addEventListener('click', () => closeModal('shipmentModal'));
+  box.querySelector('#s1Company').addEventListener('change', (e) => {
+    readStep1();
+    const c = companyList.find(x => x.customer_id === e.target.value);
+    d.customerId = c ? c.customer_id : '';
+    d.companyName = c ? c.company_name : '';
+    d.companyAddress = c ? (c.company_address || '') : '';
+    d.gstNumber = c ? (c.gst_number || '') : '';
+    d.contactPerson = c ? (c.contractor_person || '') : '';
+    d.contactNumber = c ? (c.contractor_number || '') : '';
+    d.contactEmail = c ? (c.contractor_email || '') : '';
+    renderStep1();
+  });
+  box.querySelector('#s1Currency').addEventListener('change', (e) => {
+    readStep1();
+    d.currency = e.target.value;
+    fetchRate();
+  });
+  box.querySelector('#s1RefreshRate')?.addEventListener('click', () => { readStep1(); fetchRate(); });
   box.querySelector('#shipStep1Form').addEventListener('submit', (e) => {
     e.preventDefault();
-    shipmentDraft.companyName = document.getElementById('s1CompanyName').value.trim();
-    shipmentDraft.companyAddress = document.getElementById('s1CompanyAddress').value.trim();
-    shipmentDraft.dispatchDate = document.getElementById('s1DispatchDate').value;
-    shipmentDraft.receivedDate = document.getElementById('s1ReceivedDate').value; // may stay empty
+    readStep1();
+    if (!d.companyName) return showResponseModal('Company required', 'Select a company or enter its name.', false);
+    if (d.currency !== 'INR' && !(d.exchangeRate > 0)) return showResponseModal('Rate required', 'Enter a valid exchange rate.', false);
     shipmentStep = 2;
     renderShipmentStep();
   });
@@ -472,6 +612,7 @@ function renderStep2() {
     ${stepDots(2)}
     <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Add every product going out in this shipment.</p>
     <div id="productRows" style="display:flex;flex-direction:column;gap:10px;"></div>
+    <p id="shipTotals" style="margin-top:12px;font-size:13px;font-weight:600;color:#334155;text-align:right;"></p>
     <button type="button" id="addProductRowBtn" style="margin-top:10px;padding:10px 14px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
       <i class="fa-solid fa-plus"></i> Add Product
     </button>
@@ -517,13 +658,15 @@ function renderProductRows() {
     <div style="display:flex;gap:8px;align-items:center;" data-row="${i}">
       <input type="text" class="prodName" placeholder="Product Name" value="${p.name}" style="flex:2;">
       <input type="number" min="0" class="prodQty" placeholder="Qty" value="${p.quantity}" style="flex:1;">
-      <input type="number" min="0" class="prodPrice" placeholder="Price" value="${p.price}" style="flex:1;">
+      <input type="number" min="0" step="any" class="prodPrice" placeholder="Price (${shipmentDraft.currency})" value="${p.price}" style="flex:1;">
       <button type="button" class="removeProdBtn" data-index="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:38px;height:38px;cursor:pointer;">
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
   `).join('');
 
+  wrap.oninput = updateShipTotals;
+  updateShipTotals();
   wrap.querySelectorAll('.removeProdBtn').forEach(btn => {
     btn.addEventListener('click', () => {
       readProductRowsIntoDraft();
@@ -532,6 +675,17 @@ function renderProductRows() {
       renderProductRows();
     });
   });
+}
+
+function updateShipTotals() {
+  readProductRowsIntoDraft();
+  const el = document.getElementById('shipTotals');
+  if (!el) return;
+  const d = shipmentDraft;
+  const t = draftTotal(d);
+  el.textContent = d.currency === 'INR'
+    ? `Total: ${money(t)}`
+    : `Total: ${curMoney(t, d.currency)} ≈ ${money(Math.round(t * d.exchangeRate * 100) / 100)} (at ₹${d.exchangeRate}/${d.currency})`;
 }
 
 function readProductRowsIntoDraft() {
@@ -665,6 +819,7 @@ async function finalizeShipment() {
       showResponseModal('Update failed', 'The shipment could not be updated.', false);
       return;
     }
+    shipmentDraft.totalInr = Math.round(draftTotal(shipmentDraft) * shipmentDraft.exchangeRate * 100) / 100;
     const idx = shipments.findIndex(x => x.id === shipmentDraft.id);
     if (idx !== -1) shipments[idx] = shipmentDraft;
     closeModal('shipmentModal');
@@ -685,6 +840,8 @@ async function finalizeShipment() {
     if (res.ok) {
       const data = await res.json();
       if (data.shipment_id) shipmentDraft.id = data.shipment_id;
+      shipmentDraft.customerId = data.customer_id || shipmentDraft.customerId;
+      shipmentDraft.totalInr = Math.round(draftTotal(shipmentDraft) * shipmentDraft.exchangeRate * 100) / 100;
     }
   } catch (err) {
     // no backend route yet — shipment still gets added to local state below

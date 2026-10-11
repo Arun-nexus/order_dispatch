@@ -1,5 +1,5 @@
 const userState = {
-  users: [], customers: [], orders: [], tab: 'users', userSearch: '',
+  users: [], customers: [], orders: [], allocations: [], tab: 'users', userSearch: '',
   customerFilter: { text: '', field: 'credit_limit', min: '', max: '' }
 };
 
@@ -24,6 +24,7 @@ function fmtDate(v) {
 document.addEventListener('DOMContentLoaded', () => {
   loadUsers();
   loadCustomers();
+  loadAllocations();
   wireTopActions();
   wireFilter();
   wireStaticModals();
@@ -46,6 +47,13 @@ async function loadUsers() {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load users.');
   }
+}
+
+async function loadAllocations() {
+  try {
+    const res = await apiFetch('/allocation/');
+    if (res.ok) userState.allocations = (await res.json()).dataset || [];
+  } catch (err) { console.error(err); }
 }
 
 async function loadCustomers() {
@@ -100,7 +108,7 @@ function renderTable(users) {
     const tr = document.createElement('tr');
     tr.dataset.username = u.username;
     tr.innerHTML = `
-      <td>${esc(u.username)}</td>
+      <td><a href="#" class="user-link" style="color:#1665ff;font-weight:600;text-decoration:none;">${esc(u.username)}</a></td>
       <td>${esc(u.full_name ?? u.name)}</td>
       <td><span class="stock ${roleBadgeClass(u.role)}">${displayRole(u.role)}</span></td>
       <td>${esc(u.company_name)}</td>
@@ -113,8 +121,66 @@ function renderTable(users) {
     tbody.appendChild(tr);
   });
 
+  tbody.querySelectorAll('.user-link').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openUserDetail(rowUser(e)); }));
   tbody.querySelectorAll('.edit-btn').forEach(b => b.addEventListener('click', e => openUserModal(rowUser(e))));
   tbody.querySelectorAll('.delete-btn').forEach(b => b.addEventListener('click', e => openDeleteModal(rowUser(e))));
+}
+
+function openUserDetail(u) {
+  if (!u) return;
+  const modal = document.getElementById('userCardDetailModal');
+  const box = modal.querySelector('.modal-content');
+  const uname = u.username;
+  const orders = userState.orders
+    .filter(o => o.reference === uname || (!o.reference && o.creator?.raised_by === uname))
+    .sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
+  const orderTotal = orders.reduce((t, o) => t + (Number(o.total_mrp) || 0), 0);
+  const demos = userState.allocations
+    .filter(a => a.allocation_type !== 'spare_part' && (a.allocated_by === uname || a.sales_person?.username === uname))
+    .sort((a, b) => new Date(b.allotment_date || 0) - new Date(a.allotment_date || 0));
+  const field = (label, value) => `<div style="flex:1;min-width:200px;"><small style="color:#64748b;">${label}</small><div style="font-weight:600;">${esc(value) || '-'}</div></div>`;
+  const tile = (label, value) => `<div style="flex:1;min-width:120px;background:#f8fafc;border-radius:10px;padding:10px 12px;"><small style="color:#64748b;">${label}</small><div style="font-weight:700;font-size:16px;">${value}</div></div>`;
+  const orderRows = orders.map(o => [
+    fmtDate(o.order_date),
+    esc((o.order_id || '').slice(0, 8)),
+    esc(o.customer?.company_name) || '-',
+    esc((o.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')),
+    esc(o.payment_mode || '-'),
+    money(o.total_mrp),
+    esc(o.status || '-')
+  ]);
+  const demoRows = demos.map(a => [
+    fmtDate(a.allotment_date),
+    esc((a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')) || '-',
+    esc((a.items || []).flatMap(i => i.serial_numbers || []).join(', ')) || '-',
+    esc(a.customer?.company_name || a.sales_person?.name) || '-',
+    fmtDate(a.return_due_date),
+    a.return_status === 'returned' ? 'Credit' : (a.dispatch ? 'With customer' : 'Allocated')
+  ]);
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3>${esc(u.full_name ?? u.name) || esc(uname)} <span style="color:#94a3b8;font-weight:400;">@${esc(uname)}</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+      ${field('Role', displayRole(u.role))}
+      ${field('Company', u.company_name)}
+      ${field('GST Number', u.gst_number)}
+      ${field('Mobile', u.mobile_no ?? u.phone)}
+      ${field('Email', u.email_id ?? u.email)}
+      ${u.role === 'distributor' ? field('Team Manager', u.manager) : ''}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+      ${tile('Reference Orders', orders.length)}
+      ${tile('Order Value', money(orderTotal))}
+      ${tile('Demo Units', demos.length)}
+    </div>
+    <h4 style="margin-bottom:8px;">Orders <span style="color:#94a3b8;font-weight:400;">(${orders.length})</span> <small style="color:#94a3b8;font-weight:400;">— orders referred by this user</small></h4>
+    ${tableHTML(['Date', 'Order ID', 'Customer', 'Items', 'Payment', 'Total', 'Status'], orderRows)}
+    <h4 style="margin:18px 0 8px;">Demo Units <span style="color:#94a3b8;font-weight:400;">(${demos.length})</span></h4>
+    ${tableHTML(['Allotted', 'Items', 'Serial No.', 'Customer', 'Return Due', 'Status'], demoRows)}`;
+  box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.style.display = 'flex';
 }
 
 function rowUser(e) {
@@ -296,7 +362,7 @@ function openUserCardDetail(type) {
   if (type === 'customers') {
     const rows = userState.customers.map(c => ({ c, s: customerStats(c) }));
     count = rows.length;
-    table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Credit Given', 'Returned', 'Outstanding'],
+    table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Debit', 'Credit', 'Outstanding'],
       rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, money(s.limit), money(s.creditGiven), money(s.returned), money(s.outstanding)]));
   } else {
     const list = type === 'all' ? userState.users : userState.users.filter(u => u.role === type);
@@ -356,8 +422,8 @@ function openCustomerHistory(c, focusReturn) {
     </p>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
       ${tile('Credit Limit', money(s.limit))}
-      ${tile('Credit Given', money(s.creditGiven))}
-      ${tile('Returned', money(s.returned), '#16a34a')}
+      ${tile('Debit', money(s.creditGiven))}
+      ${tile('Credit', money(s.returned), '#16a34a')}
       ${tile('Outstanding', money(s.outstanding), s.outstanding > 0 ? '#d62828' : '#16a34a')}
       ${tile('Available Credit', money(s.available), s.available < 0 ? '#d62828' : '#0f172a')}
     </div>
@@ -371,15 +437,15 @@ function openCustomerHistory(c, focusReturn) {
     </div>
 
     <h4 style="margin-bottom:8px;">Order History <span style="color:#94a3b8;font-weight:400;">(${s.orders.length})</span></h4>
-    ${tableHTML(['Date', 'Order ID', 'Items', 'Payment', 'Order Total', 'Credit Given'], orderRows)}
-    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Total orders: ${money(s.totalOrders)} • Total credit given: ${money(s.creditGiven)}</strong></p>
+    ${tableHTML(['Date', 'Order ID', 'Items', 'Payment', 'Order Total', 'Debit'], orderRows)}
+    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Total orders: ${money(s.totalOrders)} • Total debit: ${money(s.creditGiven)}</strong></p>
 
     <h4 style="margin-bottom:8px;">Returns <span style="color:#94a3b8;font-weight:400;">(${s.returns.length})</span></h4>
     ${tableHTML(['Date', 'Amount', 'Note', 'Added By'], returnRows)}
-    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Manual returns: ${money(s.manualReturned)} • Credit purchases: ${money(s.purchaseCredit)} • Total returned: ${money(s.returned)}</strong></p>
+    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Manual credits: ${money(s.manualReturned)} • Credit purchases: ${money(s.purchaseCredit)} • Total credit: ${money(s.returned)}</strong></p>
 
     <h4 style="margin-bottom:8px;">Purchase History <span style="color:#94a3b8;font-weight:400;">(${s.purchases.length})</span> <small style="color:#94a3b8;font-weight:400;">— bought from this party via Inventory</small></h4>
-    ${tableHTML(['Date', 'Item', 'Lot No.', 'Payment', 'Amount', 'Added to Returned'], purchaseRows)}
+    ${tableHTML(['Date', 'Item', 'Lot No.', 'Payment', 'Amount', 'Added to Credit'], purchaseRows)}
     <p style="text-align:right;font-size:13px;margin-top:6px;"><strong>Paid purchases: ${money(s.purchasePaid)} • Credit purchases: ${money(s.purchaseCredit)}</strong></p>`;
 
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
@@ -638,7 +704,7 @@ function openExportModal(type) {
   const isUsers = type === 'users';
   const f = userState.customerFilter;
   const roleNow = document.getElementById('roleFilter').value;
-  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Credit Given'], ['returned', 'Returned'], ['outstanding', 'Outstanding'], ['total_orders', 'Total Orders']];
+  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Debit'], ['returned', 'Credit'], ['outstanding', 'Outstanding'], ['total_orders', 'Total Orders']];
 
   modal.innerHTML = `
     <div style="background:#fff;border-radius:16px;padding:26px;width:400px;max-width:94vw;max-height:88vh;overflow-y:auto;">
@@ -690,7 +756,7 @@ function openExportModal(type) {
     } else {
       const rows = customerRows({ text: fd.get('text') || '', field: fd.get('field') || 'credit_limit', min: fd.get('min') ?? '', max: fd.get('max') ?? '' });
       if (!rows.length) { alert('No customers match these filters.'); return; }
-      downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Credit Given', 'Returned', 'Outstanding', 'Total Orders'],
+      downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Outstanding', 'Total Orders'],
         rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
           s.limit, s.creditGiven, s.returned, s.outstanding, s.totalOrders]),
         `customers_${stamp}.csv`);

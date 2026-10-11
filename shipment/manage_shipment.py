@@ -7,7 +7,8 @@ import uuid
 class shipment_manager(mongodbclient):
 
     def __init__(self, company_name=None, company_address=None, dispatch_date=None,
-                 received_date=None, products=None, created_by=None):
+                 received_date=None, products=None, created_by=None,
+                 customer_id=None, payment_mode="paid", currency="INR", exchange_rate=1):
         """
         company_name / company_address: destination company details
         dispatch_date: str (YYYY-MM-DD) -> required, when the shipment left
@@ -33,6 +34,10 @@ class shipment_manager(mongodbclient):
         self.received_date = received_date or None
         self.products = products or []
         self.created_by = created_by
+        self.customer_id = customer_id or ""
+        self.payment_mode = payment_mode if payment_mode in ("paid", "credit") else "paid"
+        self.currency = (currency or "INR").upper()
+        self.exchange_rate = float(exchange_rate or 1) if self.currency != "INR" else 1.0
 
     @staticmethod
     def _normalize_products(products):
@@ -84,6 +89,7 @@ class shipment_manager(mongodbclient):
             if not any(p["product_name"] for p in products):
                 raise Exception("every product must have a name")
 
+            total_amount = sum(p["line_total"] for p in products)
             shipment_dict = {
                 "shipment_id": self.shipment_id,
                 "company_name": self.company_name,
@@ -93,6 +99,12 @@ class shipment_manager(mongodbclient):
                 "status": "received" if self.received_date else "pending",
                 "products": products,
                 "created_by": self.created_by,
+                "customer_id": self.customer_id,
+                "payment_mode": self.payment_mode,
+                "currency": self.currency,
+                "exchange_rate": self.exchange_rate,
+                "total_amount": total_amount,
+                "total_inr": round(total_amount * self.exchange_rate, 2),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             result = super().add(collection_name=collection_name, dictionary=shipment_dict)

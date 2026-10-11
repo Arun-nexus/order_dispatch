@@ -1802,14 +1802,48 @@ function renderPartDetailsStep() {
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
       <textarea name="hologram_numbers" rows="2" placeholder="Hologram numbers (optional, one per unit — comma or new line separated)"></textarea>
       <input name="lot_no" placeholder="Lot No. (optional)">
-      ${supplierBlockHTML(true)}
+      ${supplierBlockHTML(false)}
+      <input name="price" type="number" min="0" step="any" placeholder="Price (per unit)" required>
+      <input name="tax_rate" type="number" min="0" step="any" placeholder="Tax Rate (%)" required>
+      ${lbl('Payment — how was this purchase paid?')}
+      <select name="payment_mode" id="partPaymentMode" required style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <option value="">Select payment type</option>
+        <option value="paid">Paid</option>
+        <option value="credit">Credit (pay later)</option>
+      </select>
+      <div id="partPaymentHint" style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;"></div>
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
         <button type="button" id="backPart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>`;
   document.getElementById('backPart').addEventListener('click', renderAddTypeStep);
-  initSupplierPicker(document.getElementById('partForm'), true);
+  const partFormEl = document.getElementById('partForm');
+  initSupplierPicker(partFormEl, false);
+  const partHint = partFormEl.querySelector('#partPaymentHint');
+  const refreshPartHint = () => {
+    const mode = partFormEl.querySelector('#partPaymentMode').value;
+    if (!mode) { partHint.style.display = 'none'; return; }
+    const qty = Math.max(0, Number(partFormEl.querySelector('[name="quantity"]').value) || 0);
+    const price = Number(partFormEl.querySelector('[name="price"]').value) || 0;
+    const tax = Number(partFormEl.querySelector('[name="tax_rate"]').value) || 0;
+    const money = '₹' + (price * qty * (1 + tax / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const sup = readSupplier(partFormEl).supplier;
+    partHint.style.display = 'block';
+    if (!sup) {
+      partHint.style.cssText += 'background:#fef3c7;color:#92400e;';
+      partHint.textContent = 'Select a company above so this purchase can be recorded against it.';
+    } else if (mode === 'credit') {
+      partHint.style.cssText += 'background:#fee2e2;color:#991b1b;';
+      partHint.textContent = `Credit: ${money} will be added to "${sup}" under Credit (Users → Customers) and shown in its history.`;
+    } else {
+      partHint.style.cssText += 'background:#dcfce7;color:#166534;';
+      partHint.textContent = `Paid: ${money} is noted in "${sup}" history only — nothing added to Credit.`;
+    }
+  };
+  partFormEl.querySelector('#partPaymentMode').addEventListener('change', refreshPartHint);
+  partFormEl.addEventListener('supplierchange', refreshPartHint);
+  ['quantity', 'price', 'tax_rate'].forEach(n => partFormEl.querySelector(`[name="${n}"]`).addEventListener('input', refreshPartHint));
 
   document.getElementById('partForm').addEventListener('submit', async e => {
     e.preventDefault();
@@ -1836,9 +1870,11 @@ function renderPartDetailsStep() {
       lot_no: fd.get('lot_no') || '',
       ...readSupplier(e.target),
       purchase_date: fd.get('purchase_date'),
-      price: '0',
-      tax_rate: 0
+      price: String(fd.get('price') || '0'),
+      tax_rate: Number(fd.get('tax_rate')) || 0,
+      payment_mode: fd.get('payment_mode') || ''
     };
+    if (!payload.supplier) { alert('Please select or enter the company this part was purchased from.'); return; }
     try {
       const res = await apiFetch('/inventory/create', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -1929,10 +1965,10 @@ function renderLotDetailsStep() {
       paymentHint.textContent = 'Select a company above so this purchase can be recorded against it.';
     } else if (mode === 'credit') {
       paymentHint.style.cssText += 'background:#fee2e2;color:#991b1b;';
-      paymentHint.textContent = `Credit: ${money} will be added to "${sup}" under Returned (Users → Customers) and shown in its history.`;
+      paymentHint.textContent = `Credit: ${money} will be added to "${sup}" under Credit (Users → Customers) and shown in its history.`;
     } else {
       paymentHint.style.cssText += 'background:#dcfce7;color:#166534;';
-      paymentHint.textContent = `Paid: ${money} is noted in "${sup}" history only — nothing added to Returned.`;
+      paymentHint.textContent = `Paid: ${money} is noted in "${sup}" history only — nothing added to Credit.`;
     }
   };
   paymentSel.addEventListener('change', refreshPaymentHint);

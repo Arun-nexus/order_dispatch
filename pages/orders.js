@@ -951,6 +951,7 @@ function openViewOrderModal(o) {
       </tr>`).join('')}</tbody>
     </table>` : ''}
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
+    <div class="detail"><small>Reference</small><p>${o.reference || o.creator?.raised_by || '-'}</p></div>
     <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
     <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
     <div class="detail"><small>Return Reason</small><p>${o.status === 'returned' ? (o.return_reason || '-') : '-'}</p></div>
@@ -1060,6 +1061,7 @@ const wiz = {
   cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
   paymentMode: '',
   paymentDetails: {},
+  reference: '',
   discount: 0,
   warrantyYears: 1,
   warrantyCharge: 0,
@@ -1081,6 +1083,7 @@ function resetWizard() {
   wiz.cart = {};
   wiz.paymentMode = '';
   wiz.paymentDetails = {};
+  wiz.reference = '';
   wiz.discount = 0;
   wiz.warrantyYears = 1;
   wiz.warrantyCharge = 0;
@@ -1564,6 +1567,10 @@ function renderPaymentStep() {
       ${PAYMENT_MODES.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
     </select>
     <div id="paymentExtra"></div>
+    <label style="font-size:13px;color:#64748b;">Reference <span style="color:#94a3b8;">(optional)</span></label>
+    <select id="orderReference" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:4px 0 10px;">
+      <option value="">No reference</option>
+    </select>
     <div style = "padding-left:8px" ><small><p>Discount<p><small></div>
     <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
     <div id="grandTotalBox" style="font-size:13px;color:#334155;margin-bottom:10px;"></div>
@@ -1573,6 +1580,12 @@ function renderPaymentStep() {
     </div>`;
 
   document.getElementById('backBtn4').addEventListener('click', renderProductsStep);
+  loadReferenceUsers().then(list => {
+    const sel = document.getElementById('orderReference');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">No reference</option>' + list.map(u =>
+      `<option value="${u.username}" ${u.username === wiz.reference ? 'selected' : ''}>${u.name || u.username} (${u.username}${u.role ? ' · ' + u.role.replace('_', ' ') : ''})</option>`).join('');
+  });
 
   const modeSelect = document.getElementById('paymentMode');
   const extraBox = document.getElementById('paymentExtra');
@@ -1622,6 +1635,16 @@ function renderPaymentStep() {
   document.getElementById('placeOrderBtn').addEventListener('click', () => proceedToSerialReview(modeSelect, extraBox));
 }
 
+let referenceUsersCache = null;
+async function loadReferenceUsers() {
+  if (referenceUsersCache) return referenceUsersCache;
+  try {
+    const res = await apiFetch('/account/users');
+    if (res.ok) referenceUsersCache = (await res.json()).dataset || [];
+  } catch (e) { /* leave empty */ }
+  return referenceUsersCache || [];
+}
+
 // Validates payment step inputs (same checks submitOrder used to do up front),
 // stashes them on wiz, then moves to the serial-number review step instead of
 // submitting immediately.
@@ -1644,6 +1667,7 @@ function proceedToSerialReview(modeSelect, extraBox) {
 
   wiz.paymentMode = mode;
   wiz.paymentDetails = payment_details;
+  wiz.reference = document.getElementById('orderReference')?.value || '';
   renderSerialReviewStep();
 }
 
@@ -1773,6 +1797,7 @@ async function finalizeSubmitOrder() {
     }),
     payment_mode: wiz.paymentMode,
     payment_details: wiz.paymentDetails,
+    reference: wiz.reference || '',
     discount: wiz.discount || 0,
     warranty_years: wiz.warrantyYears || 1,
     warranty_charge: wiz.warrantyYears > 1 ? (wiz.warrantyCharge || 0) : 0
