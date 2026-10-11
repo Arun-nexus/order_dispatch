@@ -17,6 +17,12 @@ function money(n) {
   return `₹${(Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
+function overallInfo(x) {
+  const diff = (Number(x.returned) || 0) - (Number(x.creditGiven) || 0);
+  const color = (Number(x.creditGiven) || 0) > (Number(x.limit) || 0) ? '#d62828' : (diff < 0 ? '#f97316' : '#16a34a');
+  return { diff, color, text: money(Math.abs(diff)) + (diff < 0 ? ' Dr' : diff > 0 ? ' Cr' : '') };
+}
+
 function fmtDate(v) {
   return v ? new Date(v).toLocaleDateString('en-GB') : '-';
 }
@@ -288,7 +294,7 @@ function renderCustomerTable() {
       <td>${money(s.limit)}</td>
       <td>${money(s.creditGiven)}</td>
       <td>${money(s.returned)}</td>
-      <td><strong style="color:${s.outstanding > 0 ? '#d62828' : '#16a34a'};">${money(s.outstanding)}</strong></td>
+      <td><strong style="color:${overallInfo(s).color};">${overallInfo(s).text}</strong></td>
       <td>
         <button class="icon-btn cust-history" title="History"><i class="fa-solid fa-clock-rotate-left"></i></button>
         <button class="icon-btn cust-return" title="Add Return"><i class="fa-solid fa-rotate-left"></i></button>
@@ -306,7 +312,7 @@ function renderCustomerTable() {
       <td>${money(tot.limit)}</td>
       <td>${money(tot.creditGiven)}</td>
       <td>${money(tot.returned)}</td>
-      <td>${money(tot.outstanding)}</td>
+      <td><strong style="color:${overallInfo(tot).color};">${overallInfo(tot).text}</strong></td>
       <td></td>
     </tr>`;
 
@@ -362,8 +368,8 @@ function openUserCardDetail(type) {
   if (type === 'customers') {
     const rows = userState.customers.map(c => ({ c, s: customerStats(c) }));
     count = rows.length;
-    table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Debit', 'Credit', 'Outstanding'],
-      rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, money(s.limit), money(s.creditGiven), money(s.returned), money(s.outstanding)]));
+    table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Debit', 'Credit', 'Overall'],
+      rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, money(s.limit), money(s.creditGiven), money(s.returned), overallInfo(s).text]));
   } else {
     const list = type === 'all' ? userState.users : userState.users.filter(u => u.role === type);
     count = list.length;
@@ -424,7 +430,7 @@ function openCustomerHistory(c, focusReturn) {
       ${tile('Credit Limit', money(s.limit))}
       ${tile('Debit', money(s.creditGiven))}
       ${tile('Credit', money(s.returned), '#16a34a')}
-      ${tile('Outstanding', money(s.outstanding), s.outstanding > 0 ? '#d62828' : '#16a34a')}
+      ${tile('Overall', overallInfo(s).text, overallInfo(s).color)}
       ${tile('Available Credit', money(s.available), s.available < 0 ? '#d62828' : '#0f172a')}
     </div>
 
@@ -704,7 +710,7 @@ function openExportModal(type) {
   const isUsers = type === 'users';
   const f = userState.customerFilter;
   const roleNow = document.getElementById('roleFilter').value;
-  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Debit'], ['returned', 'Credit'], ['outstanding', 'Outstanding'], ['total_orders', 'Total Orders']];
+  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Debit'], ['returned', 'Credit'], ['outstanding', 'Overall'], ['total_orders', 'Total Orders']];
 
   modal.innerHTML = `
     <div style="background:#fff;border-radius:16px;padding:26px;width:400px;max-width:94vw;max-height:88vh;overflow-y:auto;">
@@ -756,9 +762,9 @@ function openExportModal(type) {
     } else {
       const rows = customerRows({ text: fd.get('text') || '', field: fd.get('field') || 'credit_limit', min: fd.get('min') ?? '', max: fd.get('max') ?? '' });
       if (!rows.length) { alert('No customers match these filters.'); return; }
-      downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Outstanding', 'Total Orders'],
+      downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Overall', 'Total Orders'],
         rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
-          s.limit, s.creditGiven, s.returned, s.outstanding, s.totalOrders]),
+          s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
         `customers_${stamp}.csv`);
     }
     modal.style.display = 'none';

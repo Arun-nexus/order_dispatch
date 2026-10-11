@@ -1584,7 +1584,7 @@ function renderPaymentStep() {
     const sel = document.getElementById('orderReference');
     if (!sel) return;
     sel.innerHTML = '<option value="">No reference</option>' + list.map(u =>
-      `<option value="${u.username}" ${u.username === wiz.reference ? 'selected' : ''}>${u.name || u.username} (${u.username}${u.role ? ' · ' + u.role.replace('_', ' ') : ''})</option>`).join('');
+      `<option value="${u.username}" ${u.username === wiz.reference ? 'selected' : ''}>${u.name || u.username} (${u.username}${u.role === 'distributor' ? ' · Sales' : (u.role ? ' · ' + u.role.replace('_', ' ') : '')})</option>`).join('');
   });
 
   const modeSelect = document.getElementById('paymentMode');
