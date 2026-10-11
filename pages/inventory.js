@@ -575,6 +575,13 @@ function updateInventoryCards(products) {
   setPartCard('spare_parts', 'cardSparePartsTotal', 'cardSparePartsStatus');
 }
 
+// spare_parts / service_parts only: has at least one hologram number on file vs none
+function isPartProduct(p) { return p.product_type === 'spare_parts' || p.product_type === 'service_parts'; }
+function partHologramCount(p) {
+  return typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length;
+}
+
+
 function stockClass(qty) {
   if (qty > 50) return 'high';
   if (qty > 10) return 'medium';
@@ -613,6 +620,22 @@ function columnsForCategory(category) {
   const nameCell = p => p.product_name ?? '';
   const idCell = p => p.product_id ?? '';
   const modelCell = p => p.model_no ?? '';
+  // Mixed (no category filter) view: a part is identified by its own name +
+  // which product it belongs to, not by product_id/model_no (those are
+  // always empty for parts) — so the single "Product" column shows whichever
+  // identity actually applies, instead of a part's row showing a bare name
+  // with no id/model and no link back to its parent product.
+  const identityCell = p => {
+    const isPart = p.product_type === 'spare_parts' || p.product_type === 'service_parts';
+    if (isPart) {
+      const belongs = p.parent_product_name
+        ? `<br><small style="color:#94a3b8;">Belongs to: ${escapeHtmlInv(p.parent_product_name)}</small>`
+        : '';
+      return `${escapeHtmlInv(p.product_name ?? '')}${belongs}`;
+    }
+    const meta = [p.product_id, p.model_no].filter(Boolean).join(' · ');
+    return `${escapeHtmlInv(p.product_name ?? '')}${meta ? `<br><small style="color:#94a3b8;">${meta}</small>` : ''}`;
+  };
   // shipment stores warranty length in months (e.g. "12 months"); the backend
   // adds that to the received_date and stores it as warranty_until. Here we
   // just subtract today's date from that to show how many days are left.
@@ -689,11 +712,9 @@ function columnsForCategory(category) {
         { label: 'Status', cell: p => p.damage_status ?? 'Damaged' },
         { label: 'Added By', cell: addedByCell }
       ];
-    default: // no category filter active — table stays exactly as it is today
+    default: // no category filter active (mixed products + parts)
       return [
-        { label: 'Product Name', cell: nameCell },
-        { label: 'Product ID', cell: idCell },
-        { label: 'Model No.', cell: modelCell },
+        { label: 'Product', cell: identityCell },
         { label: 'Type', cell: typeCell },
         { label: 'Supplier', cell: supplierCell },
         { label: 'Purchase Date', cell: dateCell },
@@ -1227,6 +1248,7 @@ function openEditModal(p) {
   form.elements['product_name'].value = p.product_name ?? '';
   form.elements['product_id'].value = p.product_id ?? '';
   form.elements['model_no'].value = p.model_no ?? '';
+  form.elements['parent_product_name'].value = p.parent_product_name ?? '';
   form.elements['lot_no'].value = p.lot_no ?? '';
   form.elements['supplier'].value = p.supplier ?? '';
   form.elements['purchase_date'].value = p.purchase_date ?? '';
@@ -1246,6 +1268,7 @@ function openEditModal(p) {
   invState.editHolograms = [...hologramNumbersOf(p)];
   invState.editHologramQuantity = Number(p.quantity) || 0;
   toggleHologramSection(p.product_type || 'product');
+  toggleTypeSpecificFields(p.product_type || 'product');
   renderHologramUI();
   wireHologramControls();
 
@@ -1261,11 +1284,32 @@ function openEditModal(p) {
     typeSelect.addEventListener('change', renderEditSerialsUI);
     typeSelect.removeEventListener('change', onEditTypeChangeForHologram);
     typeSelect.addEventListener('change', onEditTypeChangeForHologram);
+    typeSelect.removeEventListener('change', onEditTypeChangeForTypeFields);
+    typeSelect.addEventListener('change', onEditTypeChangeForTypeFields);
   }
 
   wireEditSerialFileUpload();
 
   modal.style.display = 'flex';
+}
+
+// Parts (spare_parts/service_parts) are identified by their own name + which
+// product they belong to, not by product_id/model_no (those stay empty for
+// parts) — so the edit form swaps between the two identity shapes based on
+// the selected type, same idea as toggleHologramSection below.
+function toggleTypeSpecificFields(type) {
+  const isPart = type === 'spare_parts' || type === 'service_parts';
+  const nameInput = document.getElementById('editProductNameInput');
+  const parentInput = document.getElementById('editParentProductName');
+  const idModelWrap = document.getElementById('editIdModelWrap');
+  if (nameInput) nameInput.placeholder = isPart ? 'Part Name' : 'Product Name';
+  if (parentInput) parentInput.style.display = isPart ? 'block' : 'none';
+  if (idModelWrap) idModelWrap.style.display = isPart ? 'none' : 'flex';
+}
+
+function onEditTypeChangeForTypeFields() {
+  const typeSelect = document.getElementById('editProductType');
+  toggleTypeSpecificFields(typeSelect ? typeSelect.value : 'product');
 }
 
 // hologram numbers are only tracked on spare_parts / service_parts entries —
@@ -1331,7 +1375,8 @@ async function submitHologramChange({ add = [], remove = [] }) {
         updated_values: {},
         new_hologram_numbers: add,
         remove_hologram_numbers: remove,
-        model_no: invState.activeModelNo
+        model_no: invState.activeModelNo,
+        source_product_type: invState.activeProductType
       })
     });
     const data = await res.json();
@@ -1606,6 +1651,106 @@ function addModalBody() {
 
 function addWizTitle(t) { document.getElementById('addWizTitle').textContent = t; }
 
+// ---------- Supplier / company picker (shared by the lot + part forms) ----------
+// Companies come from the same customers collection the Orders page creates, so a
+// supplier is picked from existing parties — or typed in manually (saved as a new
+// company with the same schema: address, GST, contact person / number / email).
+const supplierState = { companies: [] };
+
+async function loadSupplierCompanies() {
+  try {
+    const res = await apiFetch('/customer/company_list');
+    if (!res.ok) return;
+    const data = await res.json();
+    supplierState.companies = data.dataset || [];
+  } catch (err) { /* picker still works in manual mode */ }
+}
+
+function supplierBlockHTML(optional) {
+  const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
+  return `
+    <div id="supplierBlock" style="display:flex;flex-direction:column;gap:8px;">
+      <label style="font-size:12px;color:#64748b;margin-bottom:-4px;">Supplier / Company${optional ? ' (optional)' : ''}</label>
+      <select name="supplier_pick" id="supplierPick" ${optional ? '' : 'required'} style="${inp}">
+        <option value="">Select company…</option>
+        <option value="__manual__">＋ Type company details manually</option>
+      </select>
+      <div id="supplierExisting" style="display:none;font-size:12px;color:#475569;background:#f1f5f9;border-radius:8px;padding:8px 10px;line-height:1.6;"></div>
+      <div id="supplierManual" style="display:none;flex-direction:column;gap:8px;border:1px dashed #94a3b8;border-radius:8px;padding:10px;">
+        <input name="supplier_name" placeholder="Company Name" style="${inp}">
+        <input name="supplier_address" placeholder="Company Address" style="${inp}">
+        <input name="supplier_gst" placeholder="GST Number" style="${inp}">
+        <input name="supplier_contact_person" placeholder="Contact Person" style="${inp}">
+        <input name="supplier_contact_number" placeholder="Contact Number" style="${inp}">
+        <input name="supplier_contact_email" type="email" placeholder="Contact Email" style="${inp}">
+      </div>
+    </div>`;
+}
+
+function initSupplierPicker(form, optional) {
+  const pick = form.querySelector('#supplierPick');
+  const existingBox = form.querySelector('#supplierExisting');
+  const manualBox = form.querySelector('#supplierManual');
+  const nameInput = manualBox.querySelector('[name="supplier_name"]');
+
+  const fillOptions = () => {
+    const keep = pick.value;
+    const manualOpt = pick.querySelector('option[value="__manual__"]');
+    pick.querySelectorAll('option[data-company]').forEach(o => o.remove());
+    supplierState.companies.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.customer_id;
+      o.dataset.company = '1';
+      o.textContent = c.company_name;
+      pick.insertBefore(o, manualOpt);
+    });
+    pick.value = keep;
+  };
+
+  const sync = () => {
+    const v = pick.value;
+    const c = supplierState.companies.find(x => x.customer_id === v);
+    manualBox.style.display = v === '__manual__' ? 'flex' : 'none';
+    nameInput.required = v === '__manual__';
+    if (c) {
+      existingBox.style.display = 'block';
+      existingBox.innerHTML = [c.company_address, c.gst_number ? 'GST: ' + c.gst_number : '',
+        [c.contractor_person, c.contractor_number, c.contractor_email].filter(Boolean).join(' • ')]
+        .filter(Boolean).map(escapeHtmlInv).join('<br>') || 'No extra details on file for this company.';
+    } else {
+      existingBox.style.display = 'none';
+    }
+    form.dispatchEvent(new Event('supplierchange'));
+  };
+  pick.addEventListener('change', sync);
+  fillOptions();
+  sync();
+  // companies load in the background; add them to the dropdown once they arrive
+  loadSupplierCompanies().then(() => { fillOptions(); sync(); });
+}
+
+// Reads the picker back into the payload fields the backend expects.
+function readSupplier(form) {
+  const fd = new FormData(form);
+  const v = fd.get('supplier_pick') || '';
+  const c = supplierState.companies.find(x => x.customer_id === v);
+  if (c) {
+    return {
+      supplier: c.company_name, supplier_address: c.company_address || '', supplier_gst: c.gst_number || '',
+      supplier_contact_person: c.contractor_person || '', supplier_contact_number: c.contractor_number || '',
+      supplier_contact_email: c.contractor_email || ''
+    };
+  }
+  if (v === '__manual__') {
+    return {
+      supplier: (fd.get('supplier_name') || '').trim(), supplier_address: (fd.get('supplier_address') || '').trim(),
+      supplier_gst: (fd.get('supplier_gst') || '').trim(), supplier_contact_person: (fd.get('supplier_contact_person') || '').trim(),
+      supplier_contact_number: (fd.get('supplier_contact_number') || '').trim(), supplier_contact_email: (fd.get('supplier_contact_email') || '').trim()
+    };
+  }
+  return { supplier: '', supplier_address: '', supplier_gst: '', supplier_contact_person: '', supplier_contact_number: '', supplier_contact_email: '' };
+}
+
 // Step 1: pick the category first — the next form asks for exactly the details
 // that category's table and view-details modal show.
 const ADD_TYPES = [
@@ -1657,14 +1802,14 @@ function renderPartDetailsStep() {
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
       <textarea name="hologram_numbers" rows="2" placeholder="Hologram numbers (optional, one per unit — comma or new line separated)"></textarea>
       <input name="lot_no" placeholder="Lot No. (optional)">
-      <input name="supplier_name" placeholder="Supplier Name (optional)">
-      <input name="supplier_address" placeholder="Supplier Address (optional)">
+      ${supplierBlockHTML(true)}
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
         <button type="button" id="backPart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>`;
   document.getElementById('backPart').addEventListener('click', renderAddTypeStep);
+  initSupplierPicker(document.getElementById('partForm'), true);
 
   document.getElementById('partForm').addEventListener('submit', async e => {
     e.preventDefault();
@@ -1689,8 +1834,7 @@ function renderPartDetailsStep() {
       quantity,
       serial_numbers: [],
       lot_no: fd.get('lot_no') || '',
-      supplier: fd.get('supplier_name') || '',
-      supplier_address: fd.get('supplier_address') || '',
+      ...readSupplier(e.target),
       purchase_date: fd.get('purchase_date'),
       price: '0',
       tax_rate: 0
@@ -1741,12 +1885,18 @@ function renderLotDetailsStep() {
         <div id="manualSerialsBox" style="display:none;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
         <div id="autoPreviewBox" style="font-size:12px;color:#64748b;"></div>
       </div>
-      <input name="supplier_name" placeholder="Supplier Name${isFaulty ? ' (optional)' : ''}" ${req}>
-      <input name="supplier_address" placeholder="Supplier Address${isFaulty ? ' (optional)' : ''}" ${req}>
+      ${supplierBlockHTML(isFaulty)}
       ${lbl(isFaulty ? 'Received Date' : 'Receiving Date')}
       <input name="purchase_date" type="date" required>
-      <input name="price" placeholder="Price${isFaulty ? ' (optional)' : ''}" ${req}>
+      <input name="price" placeholder="Price (per unit)${isFaulty ? ' (optional)' : ''}" ${req}>
       <input name="tax_rate" type="number" placeholder="Tax Rate (%)${isFaulty ? ' (optional)' : ''}" ${req}>
+      ${lbl('Payment — how was this purchase paid?')}
+      <select name="payment_mode" id="lotPaymentMode" ${isFaulty ? '' : 'required'} style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <option value="">${isFaulty ? 'Select payment (optional)' : 'Select payment type'}</option>
+        <option value="paid">Paid</option>
+        <option value="credit">Credit (pay later)</option>
+      </select>
+      <div id="paymentHint" style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;"></div>
       ${isFaulty ? `${lbl('Warranty Until (optional)')}
       <input name="warranty_until" type="date">
       <textarea name="reason" rows="2" placeholder="Reason of damage" required></textarea>` : ''}
@@ -1759,6 +1909,35 @@ function renderLotDetailsStep() {
   document.getElementById('backAdd3').addEventListener('click', renderAddTypeStep);
 
   const form = document.getElementById('lotForm');
+  initSupplierPicker(form, isFaulty);
+
+  // live hint: total amount, and what Credit does on the customer ledger
+  const paymentSel = form.querySelector('#lotPaymentMode');
+  const paymentHint = form.querySelector('#paymentHint');
+  const refreshPaymentHint = () => {
+    const mode = paymentSel.value;
+    if (!mode) { paymentHint.style.display = 'none'; return; }
+    const qty = Math.max(0, Number(form.querySelector('[name="quantity"]').value) || 0);
+    const price = Number(String(form.querySelector('[name="price"]').value).replace(/,/g, '')) || 0;
+    const tax = Number(form.querySelector('[name="tax_rate"]').value) || 0;
+    const total = price * qty * (1 + tax / 100);
+    const money = '₹' + total.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const sup = readSupplier(form).supplier;
+    paymentHint.style.display = 'block';
+    if (!sup) {
+      paymentHint.style.cssText += 'background:#fef3c7;color:#92400e;';
+      paymentHint.textContent = 'Select a company above so this purchase can be recorded against it.';
+    } else if (mode === 'credit') {
+      paymentHint.style.cssText += 'background:#fee2e2;color:#991b1b;';
+      paymentHint.textContent = `Credit: ${money} will be added to "${sup}" under Returned (Users → Customers) and shown in its history.`;
+    } else {
+      paymentHint.style.cssText += 'background:#dcfce7;color:#166534;';
+      paymentHint.textContent = `Paid: ${money} is noted in "${sup}" history only — nothing added to Returned.`;
+    }
+  };
+  paymentSel.addEventListener('change', refreshPaymentHint);
+  form.addEventListener('supplierchange', refreshPaymentHint);
+  ['quantity', 'price', 'tax_rate'].forEach(n => form.querySelector(`[name="${n}"]`).addEventListener('input', refreshPaymentHint));
   const typeSelect = document.getElementById('lotProductType');
   const qtyInput = form.querySelector('[name="quantity"]');
   const firstSerialInput = document.getElementById('firstSerialInput');
@@ -1938,12 +2117,13 @@ function renderLotDetailsStep() {
       lot_no: fd.get('lot_no'),
       quantity,
       serial_numbers: serials,
-      supplier: fd.get('supplier_name'),
-      supplier_address: fd.get('supplier_address'),
+      ...readSupplier(form),
       purchase_date: fd.get('purchase_date'),
       price: fd.get('price') || '0',
-      tax_rate: Number(fd.get('tax_rate')) || 0
+      tax_rate: Number(fd.get('tax_rate')) || 0,
+      payment_mode: fd.get('payment_mode') || ''
     };
+    if (payload.payment_mode && !payload.supplier) { alert('Select the company this purchase was made from.'); return; }
 
     try {
       const res = await apiFetch('/inventory/create', {
@@ -1956,6 +2136,7 @@ function renderLotDetailsStep() {
       document.getElementById('addModal').style.display = 'none';
       resetAddWizard();
       await loadInventory();
+      if (data.ledger && data.ledger.error) alert(data.ledger.error);
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
@@ -2010,10 +2191,17 @@ function wireModals() {
       }
     }
 
+    const editType = typeSelect ? typeSelect.value : 'product';
+    const editIsPart = editType === 'spare_parts' || editType === 'service_parts';
     const updated_values = {
       product_name: form.elements['product_name'].value,
-      product_id: form.elements['product_id'].value,
-      model_no: form.elements['model_no'].value,
+      // id/model belong to physical products only; parts are identified by
+      // parent_product_name instead, so each is only sent for its own type —
+      // keeps a part's doc from picking up stray empty id/model fields and
+      // vice versa.
+      ...(editIsPart
+        ? { parent_product_name: form.elements['parent_product_name'].value, product_id: '', model_no: '' }
+        : { product_id: form.elements['product_id'].value, model_no: form.elements['model_no'].value }),
       lot_no: form.elements['lot_no'].value,
       supplier: form.elements['supplier'].value,
       purchase_date: form.elements['purchase_date'].value,
@@ -2029,7 +2217,7 @@ function wireModals() {
       const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers, model_no: invState.activeModelNo })
+        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers, model_no: invState.activeModelNo, source_product_type: invState.activeProductType })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Inventory | Acer Biomedical</title>
 
-  <link rel="stylesheet" href="../css/global.css">
+  <link rel="stylesheet" href="../css/accure.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <!-- SheetJS: used to read serial numbers out of an uploaded Excel/CSV file -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -32,8 +32,12 @@
       <ul>
         <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
-        <li class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
+        <li  class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
         </li>
+                <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo
+              Units</span></a></li>
+        <li><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My Orders</span></a></li>
+        <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
                 <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
         <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
 
@@ -356,9 +360,12 @@
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
       <form style="display:flex;flex-direction:column;gap:10px;">
-        <input name="product_name" placeholder="Product Name">
-        <input name="product_id" placeholder="Product ID">
-        <input name="model_no" placeholder="Model No.">
+        <input id="editProductNameInput" name="product_name" placeholder="Product Name">
+        <input id="editParentProductName" name="parent_product_name" placeholder="Belongs To (Parent Product)" style="display:none;">
+        <div id="editIdModelWrap" style="display:flex;flex-direction:column;gap:10px;">
+          <input name="product_id" placeholder="Product ID">
+          <input name="model_no" placeholder="Model No.">
+        </div>
         <label style="font-size:13px;color:#64748b;">Type</label>
         <select id="editProductType" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
           <option value="product">Product</option>

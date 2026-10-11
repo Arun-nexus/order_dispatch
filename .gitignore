@@ -7,7 +7,14 @@ __pycache__/
 *.pyc
 notrace/credentials.json
 data_push.py
+<<<<<<< HEAD
 
 
 accure/
 css/
+=======
+dist/
+build/
+main.js
+node_modules/
+>>>>>>> 67a96bb559aab6e61904f2ada02c5633533e4bb1

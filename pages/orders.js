@@ -155,11 +155,9 @@ function renderOrdersTable(orders) {
     const productSubLabel = items.length === 1
       ? [firstItem.product_id, firstItem.model_no].filter(Boolean).join(' · ')
       : (items.length > 1 ? '' : [o.product_id, o.model_no].filter(Boolean).join(' · '));
-    const serialLabel = items.length
-      ? (items.length === 1
-          ? ((items[0].serial_numbers && items[0].serial_numbers.length) ? items[0].serial_numbers[0]: '-')
-          : `${items.length} items`)
-      : '-';
+    const qtyLabel = items.length
+      ? items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)
+      : (o.quantity ?? '-');
     const companyName = o.customer?.contractor_person ?? o.customer?.company_name ?? o.company_name ?? '';
     const creatorLabel = orderCreatorLabel(o);
 
@@ -167,7 +165,7 @@ function renderOrdersTable(orders) {
       <td><input type="checkbox"></td>
       <td><button type="button" class="creator-cell" style="background:none;border:none;padding:0;color:#1665ff;cursor:pointer;font:inherit;text-align:left;" title="View who created and edited this order">${creatorLabel}</button></td>
       <td>${productLabel}${productSubLabel ? `<br><small style="color:#94a3b8;">${productSubLabel}</small>` : ''}</td>
-      <td>${serialLabel}</td>
+      <td>${qtyLabel}</td>
       <td>${companyName}</td>
       <td>${o.payment_mode ?? ''}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
@@ -800,10 +798,15 @@ function exportOrdersCSV() {
     dateLabel: 'Order Date',
     getRows: () => orderState.orders,
     onConfirm: (rows) => {
-      const header = ['Order ID', 'Products', 'Company', 'Payment Mode', 'Status', 'Total'];
+      const header = ['Order ID', 'Products', 'Serial Numbers', 'Company', 'Payment Mode', 'Status', 'Total'];
       const csvRows = rows.map(o => [
         o.order_id,
         (o.items || []).map(it => `${it.product_name} x${it.quantity}`).join(' | '),
+        (o.items || []).map(it => {
+          const sn = (it.serial_numbers || []).join('; ');
+          if (!sn) return '';
+          return (o.items || []).length > 1 ? `${it.product_name}: ${sn}` : sn;
+        }).filter(Boolean).join(' | '),
         o.customer?.company_name ?? o.company_name ?? '',
         o.payment_mode,
         o.status,
@@ -816,7 +819,8 @@ function exportOrdersCSV() {
 
 // ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const csv = '\ufeff' + [header, ...rows].map(r => r.map(q).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1308,7 +1312,7 @@ function renderProductsStep() {
   const stockFor = (p) => totalQtyByKey.get(rowKey(p)) ?? (Number(p.quantity) || 0);
 
   wizardBody().innerHTML = `
-    <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
+    <div id="prodCatTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="margin-top:14px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
@@ -1332,7 +1336,8 @@ function renderProductsStep() {
   const categories = [
     { type: 'product', label: 'Products' },
     { type: 'accessories', label: 'Accessories' },
-    { type: 'spare_parts', label: 'Spare Parts' }
+    { type: 'spare_parts', label: 'Spare Parts' },
+    { type: 'service_parts', label: 'Service Parts' }
   ];
   let activeCategory = 'product';
 
@@ -1386,7 +1391,7 @@ function renderProductsStep() {
     const qtyInCart = wiz.cart[key]?.quantity ?? '';
     return `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' · ' + p.model_no : ''}</small></td>
+        <td>${p.product_name ?? ''}<br><small style=\"color:#94a3b8;\">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + (p.parent_product_name || '—') : p.product_id + (p.model_no ? ' · ' + p.model_no : '')}</small></td>
         <td>${stockFor(p)}</td>
         <td>₹${p.price ?? 0}</td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
@@ -1415,8 +1420,8 @@ function renderProductsStep() {
       product_id: p.product_id,
       product_name: p.product_name,
       model_no: p.model_no || '',
-      price: Number(p.price) || 0,
-      tax_rate: Number(p.tax_rate) || 0,
+      price: wiz.cart[key] ? wiz.cart[key].price : (Number(p.price) || 0),
+      tax_rate: wiz.cart[key] ? wiz.cart[key].tax_rate : (Number(p.tax_rate) || 0),
       quantity: qty
     };
   }
@@ -1487,7 +1492,7 @@ function renderProductsStep() {
     const term = document.getElementById('prodFilter').value.trim().toLowerCase();
     const base = currentCategoryProducts();
     const filtered = term
-      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term))
+      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term) || (p.parent_product_name || '').toLowerCase().includes(term))
       : base;
     renderRows(filtered);
   }
@@ -1521,9 +1526,22 @@ function renderPaymentStep() {
 
   wizardBody().innerHTML = `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
-      ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br>')}
-      <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;">
-      Subtotal: ₹${subtotal.toFixed(2)}
+      ${cartItems.map((i, idx) => `
+        <div style="padding:6px 0;border-bottom:1px solid #e2e8f0;">
+          <div style="font-weight:600;">${i.product_name} × ${i.quantity}</div>
+          <div style="display:flex;gap:8px;margin-top:4px;">
+            <label style="flex:1;font-size:11px;color:#64748b;">Price / pc (₹)
+              <input type="number" min="0" step="any" class="wizPrice" data-idx="${idx}" value="${i.price}" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            </label>
+            <label style="flex:1;font-size:11px;color:#64748b;">Tax % / pc
+              <input type="number" min="0" step="any" class="wizTax" data-idx="${idx}" value="${i.tax_rate}" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            </label>
+            <div style="flex:1;font-size:11px;color:#64748b;">Line (excl. tax)
+              <div class="wizLine" data-idx="${idx}" style="padding:6px 0;font-size:13px;color:#0f172a;">₹${(i.price * i.quantity).toFixed(2)}</div>
+            </div>
+          </div>
+        </div>`).join('')}
+      <div id="wizSubtotal" style="margin-top:8px;">Subtotal: ₹${subtotal.toFixed(2)}</div>
     </div>
     <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:12px;">
       <label style="font-size:13px;font-weight:600;color:#334155;">Warranty</label>
@@ -1566,9 +1584,23 @@ function renderPaymentStep() {
   const extendBox = document.getElementById('extendWarrantyBox');
 
   function refreshGrandTotal() {
+    const subtotal = cartItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const subEl = document.getElementById('wizSubtotal');
+    if (subEl) subEl.textContent = `Subtotal: ₹${subtotal.toFixed(2)}`;
     const total = subtotal - (wiz.discount || 0) + (wiz.warrantyCharge || 0);
     document.getElementById('grandTotalBox').textContent = `Grand Total (excl. tax): ₹${total.toFixed(2)}`;
   }
+
+  document.querySelectorAll('.wizPrice').forEach(inp => inp.addEventListener('input', () => {
+    const it = cartItems[Number(inp.dataset.idx)];
+    it.price = Math.max(0, Number(inp.value) || 0);
+    const line = document.querySelector(`.wizLine[data-idx="${inp.dataset.idx}"]`);
+    if (line) line.textContent = `₹${(it.price * it.quantity).toFixed(2)}`;
+    refreshGrandTotal();
+  }));
+  document.querySelectorAll('.wizTax').forEach(inp => inp.addEventListener('input', () => {
+    cartItems[Number(inp.dataset.idx)].tax_rate = Math.max(0, Number(inp.value) || 0);
+  }));
 
   discountInput.addEventListener('input', e => { wiz.discount = Number(e.target.value) || 0; refreshGrandTotal(); });
 

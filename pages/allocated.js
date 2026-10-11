@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireHeaderSearch();
   injectAllocateModal();
   wireNotifBell();
+  wireAllocCardClicks();
   setInterval(() => renderAllocationsTable(getFilteredAllocations()), 60 * 1000); // keep countdowns fresh
   setInterval(loadPendingRequests, 60 * 1000);
 });
@@ -106,6 +107,8 @@ async function loadPendingRequests() {
   const canView = role === 'admin' || role === 'accounts' || role === 'service_manager';
   if (!canView) {
     if (section) section.style.display = 'none';
+    const reqCardBox = document.getElementById('cardPendingRequests')?.closest('.card');
+    if (reqCardBox) reqCardBox.style.display = 'none';
     return;
   }
   try {
@@ -117,6 +120,29 @@ async function loadPendingRequests() {
   } catch (err) {
     console.error(err);
   }
+}
+
+function detailRow(label, value) {
+  if (value === undefined || value === null || value === '') return '';
+  return `<div class="detail"><small>${label}</small><p>${esc(String(value))}</p></div>`;
+}
+function itemDetailBlock(i, withPrice) {
+  const rows = [
+    detailRow('Product Name', i.product_name), detailRow('Product ID', i.product_id), detailRow('Model No.', i.model_no),
+    detailRow('Quantity', i.quantity), detailRow('Serial No.', (i.serial_numbers || []).join(', ')),
+  ];
+  if (withPrice) rows.push(detailRow('Price (per unit)', i.price != null && i.price !== '' ? '₹' + i.price : ''), detailRow('Tax Rate', i.tax_rate != null && i.tax_rate !== '' ? i.tax_rate + '%' : ''));
+  return `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:8px;">${rows.join('')}</div>`;
+}
+function customerDetailBlock(c) {
+  c = c || {};
+  return detailRow('Company', c.company_name) + detailRow('Address', c.company_address || c.address)
+    + detailRow('GST No.', c.gst_number) + detailRow('Contact Person', c.contractor_person)
+    + detailRow('Contact Number', c.contractor_number || c.phone_number) + detailRow('Email', c.contractor_email);
+}
+function reqItemLabel(i) {
+  const extra = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+  return esc(i.product_name || '') + (extra ? ` (${esc(extra)})` : '');
 }
 
 function renderPendingRequests() {
@@ -134,6 +160,8 @@ function renderPendingRequests() {
     badge.textContent = pending.length;
   }
   if (countLabel) countLabel.textContent = pending.length ? `(${pending.length})` : '';
+  const reqCard = document.getElementById('cardPendingRequests');
+  if (reqCard) reqCard.textContent = pending.length;
 
   if (!pending.length) {
     box.innerHTML = '<p style="color:#94a3b8;padding:10px;">No pending requests.</p>';
@@ -147,18 +175,18 @@ function renderPendingRequests() {
     let title, subtitle;
     if (r.request_type === 'demo_unit') {
       title = `Demo Unit — ${esc(r.raised_by)}`;
-      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
+      subtitle = (r.details?.items || []).map(i => `${reqItemLabel(i)} x${i.quantity}`).join(', ')
         + (r.details?.remarks ? ` • Remarks: ${esc(r.details.remarks)}` : '');
     } else if (r.request_type === 'return_demo') {
       title = `Demo Return — ${esc(r.raised_by)}`;
-      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')
+      subtitle = (r.details?.items || []).map(i => `${reqItemLabel(i)} x${i.quantity}`).join(', ')
         + ` • Through: ${esc(r.details?.returned_through || '-')}`;
     } else if (r.request_type === 'convert_to_order') {
       title = `Convert Demo to Order — ${esc(r.details?.customer?.company_name || '')}`;
-      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity} @ ₹${i.price}`).join(', ');
+      subtitle = (r.details?.items || []).map(i => `${reqItemLabel(i)} x${i.quantity} @ ₹${i.price}`).join(', ');
     } else if (r.request_type === 'order') {
       title = `Order — ${r.details?.customer?.company_name || 'New customer'}`;
-      subtitle = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+      subtitle = (r.details?.items || []).map(i => `${reqItemLabel(i)} x${i.quantity}`).join(', ');
     } else if (r.request_type === 'media_review') {
       title = `Service Media — Service #${(r.details?.service_id || '').slice(0, 8)}`;
       subtitle = 'Video uploaded, awaiting download confirmation';
@@ -218,16 +246,14 @@ function openRequestDetailsModal(r) {
 
   if (r.request_type === 'demo_unit') {
     heading = 'Demo Unit Request';
-    const itemsRows = (d.items || []).map(i => `
-      <div class="detail"><small>Product</small><p>${esc(i.product_name)} — Qty: ${i.quantity ?? ''}</p></div>`).join('');
+    const itemsRows = (d.items || []).map(i => itemDetailBlock(i, true)).join('');
     body = `
       ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
       <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>
       <div class="detail"><small>Remarks</small><p>${esc(d.remarks || '-')}</p></div>`;
   } else if (r.request_type === 'return_demo') {
     heading = 'Demo Unit Return';
-    const itemsRows = (d.items || []).map(i => `
-      <div class="detail"><small>Product</small><p>${esc(i.product_name)} — Qty: ${i.quantity ?? ''}${i.serial_numbers?.length ? ', SN: ' + esc(i.serial_numbers.join(', ')) : ''}</p></div>`).join('');
+    const itemsRows = (d.items || []).map(i => itemDetailBlock(i, false)).join('');
     // proof file is a large base64 blob, so it is not part of the request list — loaded when this modal opens
     const proofHtml = (d.proof && (d.proof.name || d.proof.data))
       ? '<p id="proofBox" style="font-size:12px;color:#94a3b8;">Loading proof…</p>'
@@ -239,22 +265,20 @@ function openRequestDetailsModal(r) {
       <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>`;
   } else if (r.request_type === 'convert_to_order') {
     heading = 'Convert Demo to Order';
-    const itemsRows = (d.items || []).map(i => `
-      <div class="detail"><small>Product</small><p>${esc(i.product_name)} — Qty: ${i.quantity ?? ''}, Price: ₹${i.price ?? '-'}${i.serial_numbers?.length ? ', SN: ' + esc(i.serial_numbers.join(', ')) : ''}</p></div>`).join('');
+    const itemsRows = (d.items || []).map(i => itemDetailBlock(i, true)).join('');
     body = `
       ${itemsRows}
-      <div class="detail"><small>Company</small><p>${esc(d.customer?.company_name || '-')}</p></div>
-      <div class="detail"><small>Address</small><p>${esc(d.customer?.company_address || '-')}</p></div>
-      <div class="detail"><small>GST No.</small><p>${esc(d.customer?.gst_number || '-')}</p></div>
+      ${customerDetailBlock(d.customer)}
       <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>`;
   } else if (r.request_type === 'order') {
     heading = 'Order Request';
-    const itemsRows = (d.items || []).map(i => `
-      <div class="detail"><small>Product</small><p>${i.product_name ?? ''} — Qty: ${i.quantity ?? ''}, Price: ₹${i.price ?? '-'}</p></div>`).join('');
+    const itemsRows = (d.items || []).map(i => itemDetailBlock(i, true)).join('');
     body = `
       ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
-      <div class="detail"><small>Customer</small><p>${d.customer?.company_name ?? '-'}</p></div>
-      <div class="detail"><small>Address</small><p>${d.customer?.company_address ?? '-'}</p></div>`;
+      ${customerDetailBlock(d.customer)}
+      ${detailRow('Payment Mode', d.payment_mode)}${detailRow('Discount', d.discount ? '₹' + d.discount : '')}
+      <div class="detail"><small>Requested By</small><p>${esc(r.raised_by ?? '-')}</p></div>
+      ${(d.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${d.attachments.map((f, i) => `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(f.name)}</a>`).join('')}</p></div>` : ''}`;
   } else if (r.request_type === 'spare_part') {
     heading = 'Spare Part Request';
     body = `
@@ -274,6 +298,7 @@ function openRequestDetailsModal(r) {
       <div class="detail"><small>Requested By</small><p>${r.raised_by ?? '-'}</p></div>`;
   }
 
+  content.style.maxHeight = '86vh'; content.style.overflowY = 'auto';
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h3>${heading}</h3>
@@ -282,6 +307,20 @@ function openRequestDetailsModal(r) {
     ${body}`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async e => {
+    e.preventDefault();
+    const f = d.attachments[Number(link.dataset.i)];
+    try {
+      const res = await apiFetch(`/order_attachment/${r.request_id}/${f.stored_name}`);
+      if (!res.ok) throw new Error('could not download file');
+      const url = URL.createObjectURL(await res.blob());
+      const tmp = document.createElement('a');
+      tmp.href = url; tmp.download = f.name; tmp.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  }));
   modal.style.display = 'flex';
 
   const proofBox = document.getElementById('proofBox');
@@ -392,6 +431,9 @@ async function loadInventoryForAllocation() {
   }
 }
 
+const fmtDT = d => d ? new Date(d).toLocaleString('en-GB') : '-';
+const returnedOn = a => a.return_completed_at || a.returned_on;
+
 function returnMeta(a) {
   if (a.return_status === 'returned') return { label: 'Returned', cls: 'high', overdue: false, complete: true };
   const due = new Date(a.return_due_date);
@@ -400,6 +442,86 @@ function returnMeta(a) {
   if (msLeft <= 0) return { label: 'Overdue', cls: 'low', overdue: true, complete: false };
   const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
   return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false, complete: false };
+}
+
+function allocCardList(type) {
+  const all = allocState.allocations;
+  if (type === 'all') return all;
+  if (type === 'pending') return all.filter(a => !returnMeta(a).complete && !returnMeta(a).overdue);
+  if (type === 'overdue') return all.filter(a => !returnMeta(a).complete && returnMeta(a).overdue);
+  if (type === 'returned') return all.filter(a => returnMeta(a).complete);
+  return [];
+}
+
+function requestSummary(r) {
+  const items = r.details?.items || r.details?.items_list || [];
+  if (items.length) return items.map(i => `${esc(i.product_name || '')} x${i.quantity ?? 1}`).join(', ');
+  if (r.details?.customer?.company_name) return esc(r.details.customer.company_name);
+  if (r.details?.service_id) return `Service #${esc(r.details.service_id.slice(0, 8))}`;
+  return '-';
+}
+
+function openAllocCardDetailModal(type) {
+  const modal = document.getElementById('allocCardDetailModal');
+  const box = modal.querySelector('.modal-content');
+  const titles = { all: 'All Allocations', pending: 'Pending Return', overdue: 'Overdue Allocations', returned: 'Returned Allocations', requests: 'Pending Requests' };
+  const th = 'style="text-align:left;padding:8px;"';
+  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  let head;
+  let rows;
+  if (type === 'requests') {
+    const typeLabels = { demo_unit: 'Demo Unit', spare_part: 'Spare Part', order: 'Order', media_review: 'Service Media', status_update: 'Status Change', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
+    head = ['Type', 'Details', 'Raised By', 'Raised On'];
+    rows = allocState.requests
+      .filter(r => r.status === 'pending')
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .map(r => [typeLabels[r.request_type] || esc(r.request_type || '-'), requestSummary(r), esc(r.raised_by || '-'), r.created_at ? new Date(r.created_at).toLocaleDateString('en-GB') : '-']);
+  } else {
+    head = ['Type', 'Product / Spare Part', 'Serial No.', 'Sales Person / Service', 'Allotment Date', 'Return Due', 'Status'];
+    rows = allocCardList(type).map(a => {
+      const meta = returnMeta(a);
+      const isSpare = a.allocation_type === 'spare_part';
+      return [
+        isSpare ? 'Spare Part' : (a.allocation_type === 'demo_unit' ? 'Demo' : 'Product'),
+        isSpare ? sparePartLabel(a.spare_part) : (a.items || []).map(itemLabel).join(', '),
+        isSpare ? '-' : ((a.items || []).map(itemSerials).filter(Boolean).join(', ') || '-'),
+        isSpare ? `Service #${esc((a.spare_part?.service_id || '').slice(0, 8))}` : esc(a.sales_person?.name ?? ''),
+        a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-',
+        a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-',
+        `<span class="stock ${meta.cls}">${meta.label}</span>`,
+      ];
+    });
+  }
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${rows.length})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>${r.map(c => `<td ${td}>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+  box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.style.display = 'flex';
+}
+
+function wireAllocCardClicks() {
+  document.querySelectorAll('.cards .card[data-card-filter]').forEach(card => {
+    card.addEventListener('click', () => openAllocCardDetailModal(card.dataset.cardFilter));
+  });
+  const modal = document.getElementById('allocCardDetailModal');
+  modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+}
+
+function roleLabel(role) {
+  if (role === 'distributor') return 'Sales';
+  const r = String(role || '').replace(/_/g, ' ');
+  return r.charAt(0).toUpperCase() + r.slice(1);
 }
 
 function updateAllocationCards(allocations) {
@@ -420,10 +542,44 @@ function updateAllocationCards(allocations) {
 // both are shown correctly here.
 function itemLabel(i) {
   const qtyPart = (i.quantity || 1) > 1 ? ` x${i.quantity}` : '';
-  return `${i.product_name}${qtyPart}`;
+  // id + model identify exactly which variant/lot this unit came from (two
+  // products can share a name, e.g. same model in black vs grey) — shown as
+  // a small sub-line under the name, same pattern used on the Dispatch page.
+  const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+  const metaHtml = meta ? `<br><small style="color:#94a3b8;">${esc(meta)}</small>` : '';
+  return `${esc(i.product_name || '')}${qtyPart}${metaHtml}`;
 }
 function itemSerials(i) {
   return (i.serial_numbers || []).join(', ');
+}
+
+// Spare/service part allocations only carry the part's own name + quantity
+// (see allocation.py's spare_part shape) — not which product that part
+// belongs to. Inventory's matching spare_parts/service_parts lot DOES carry
+// that (parent_product_name), so it's looked up here from the inventory
+// list already loaded for the allocate wizard's product picker
+// (allocState.products, populated by loadInventoryForAllocation). Matched by
+// part name alone since a spare_part allocation has no product_type of its
+// own to disambiguate — first match wins.
+function sparePartParentName(partName) {
+  if (!partName) return '';
+  const needle = partName.trim().toLowerCase();
+  if (!needle) return '';
+  const match = (allocState.products || []).find(p =>
+    (p.product_type === 'spare_parts' || p.product_type === 'service_parts') &&
+    (p.product_name || '').trim().toLowerCase() === needle
+  );
+  return match?.parent_product_name || '';
+}
+
+function sparePartLabel(sp) {
+  const name = esc(sp?.part_name ?? '');
+  const qty = sp?.quantity ?? 1;
+  const parent = sparePartParentName(sp?.part_name);
+  const belongsTo = parent
+    ? `<br><small style="color:#94a3b8;">Belongs to: ${esc(parent)}</small>`
+    : '';
+  return `${name} x${qty}${belongsTo}`;
 }
 
 function renderAllocationsTable(allocations) {
@@ -443,7 +599,7 @@ function renderAllocationsTable(allocations) {
     const meta = returnMeta(a);
     const isSpare = a.allocation_type === 'spare_part';
     const productLabel = isSpare
-      ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
+      ? sparePartLabel(a.spare_part)
       : (a.items || []).map(itemLabel).join(', ');
     const serialLabel = isSpare
       ? '-'
@@ -465,9 +621,16 @@ function renderAllocationsTable(allocations) {
       <td>${addressLabel}</td>
       <td>${a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-'}</td>
       <td>${a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td>${esc(a.created_by || a.allocated_by || '-')}</td>
+      <td>${esc(a.returned_by || '-')}</td>
+      <td>${fmtDT(returnedOn(a))}</td>
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
+        ${window.__allocCanEdit && !isSpare && !a.dispatch && !meta.complete
+          ? '<button class="icon-btn edit-alloc-btn" title="Edit (serial / details)"><i class="fa-solid fa-pen"></i></button>' : ''}
+        ${window.__allocCanEdit && !isSpare && !meta.complete
+          ? '<button class="icon-btn convert-alloc-btn" title="Convert to Order"><i class="fa-solid fa-file-invoice-dollar"></i></button>' : ''}
         ${!isSpare && !a.dispatch && !a.sent_to_dispatch && window.__allocCanCreate
           ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}
         ${!isSpare && a.sent_to_dispatch && !a.dispatch
@@ -481,6 +644,8 @@ function renderAllocationsTable(allocations) {
   });
 
   tbody.querySelectorAll('.view-alloc-btn').forEach(btn => btn.addEventListener('click', e => openViewAllocationModal(rowAllocation(e))));
+  tbody.querySelectorAll('.edit-alloc-btn').forEach(btn => btn.addEventListener('click', e => openEditAllocationModal(rowAllocation(e))));
+  tbody.querySelectorAll('.convert-alloc-btn').forEach(btn => btn.addEventListener('click', e => openConvertAllocationModal(rowAllocation(e))));
   tbody.querySelectorAll('.dispatch-alloc-btn').forEach(btn => btn.addEventListener('click', e => sendToDispatch(rowAllocation(e))));
   tbody.querySelectorAll('.return-alloc-btn').forEach(btn => btn.addEventListener('click', e => openReturnModal(rowAllocation(e))));
   tbody.querySelectorAll('.damage-report-btn').forEach(btn => btn.addEventListener('click', e => openDamageReportModal(rowAllocation(e))));
@@ -519,6 +684,8 @@ function rowAllocation(e) {
 function openReturnModal(a) {
   if (!a) return;
   const isSpare = a.allocation_type === 'spare_part';
+  // plain text only here — this goes into a native confirm() dialog, which
+  // can't render the <br><small> markup itemLabel/sparePartLabel use elsewhere
   const label = isSpare
     ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
     : (a.items || []).map(i => `${i.product_name}${itemSerials(i) ? ' (SN: ' + itemSerials(i) + ')' : ''}`).join(', ');
@@ -546,15 +713,18 @@ function openViewAllocationModal(a) {
 
   const itemsHtml = isSpare
     ? `<div class="detail"><small>Spare Part</small><p>${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}</p></div>
+       ${detailRow('Belongs To', sparePartParentName(a.spare_part?.part_name))}
        <div class="detail"><small>Service ID</small><p>${a.spare_part?.service_id ?? ''}</p></div>`
-    : `<div class="detail"><small>Products</small><p>${(a.items || []).map(i => {
-         const idModel = [i.product_id, i.model_no].filter(Boolean).join(' · ');
-         return `${i.product_name}${idModel ? ' (' + idModel + ')' : ''} x${i.quantity}${i.serial_numbers?.length ? ' — SN: ' + i.serial_numbers.join(', ') : ''}`;
-       }).join('<br>')}</p></div>
-       <div class="detail"><small>Sales Person</small><p>${a.sales_person?.name ?? ''} — ${a.sales_person?.contact_number ?? ''}</p></div>
-       <div class="detail"><small>Company / Address</small><p>${a.company_name ?? ''}, ${a.address ?? ''}</p></div>
-       ${a.remarks ? `<div class="detail"><small>Remarks</small><p>${esc(a.remarks)}</p></div>` : ''}`;
+    : `${(a.items || []).map(i => itemDetailBlock(i, false)).join('')}
+       ${a.allocation_type === 'demo_unit'
+         ? customerDetailBlock(a.customer) + detailRow('Distributor', a.allocated_by)
+         : detailRow('Sales Person', [a.sales_person?.name, a.sales_person?.contact_number].filter(Boolean).join(' — '))
+           + detailRow('Company', a.company_name) + detailRow('Address', a.address)
+           + detailRow('GST No.', a.gst_number) + detailRow('Phone', a.phone_number)}
+       ${a.convert_request?.price ? detailRow('Requested Order Price', '₹' + a.convert_request.price + (a.convert_request.tax_rate ? ` (+${a.convert_request.tax_rate}% tax)` : '')) : ''}
+       ${detailRow('Remarks', a.remarks)}`;
 
+  content.style.maxHeight = '86vh'; content.style.overflowY = 'auto';
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h3>Allocation Details</h3>
@@ -564,9 +734,155 @@ function openViewAllocationModal(a) {
     ${itemsHtml}
     <div class="detail"><small>Allotment Date</small><p>${a.allotment_date ? new Date(a.allotment_date).toLocaleString() : '-'}</p></div>
     <div class="detail"><small>Return Due</small><p>${a.return_due_date ? new Date(a.return_due_date).toLocaleString() : '-'}</p></div>
+    <div class="detail"><small>Created By</small><p>${esc(a.created_by || a.allocated_by || '-')}</p></div>
+    ${a.return_status === 'returned' ? `<div class="detail"><small>Return Approved By</small><p>${esc(a.returned_by || '-')}</p></div>
+    <div class="detail"><small>Returned On</small><p>${fmtDT(returnedOn(a))}</p></div>` : ''}
     <div class="detail"><small>Status</small><p>${meta.label}</p></div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.style.display = 'flex';
+}
+
+// ---------- Edit allocation (serial number swap + details) ----------
+async function openEditAllocationModal(a) {
+  if (!a) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+  content.style.maxHeight = '86vh'; content.style.overflowY = 'auto';
+  const items = a.items || [];
+  const it = items.length === 1 ? items[0] : null;
+  const qty = it ? Math.max(1, Number(it.quantity) || (it.serial_numbers || []).length || 1) : 0;
+  const current = it ? (it.serial_numbers || []) : [];
+  const isDemo = a.allocation_type === 'demo_unit';
+  const inp = 'width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;';
+
+  content.innerHTML = '<p style="padding:20px;color:#64748b;">Loading available serial numbers…</p>';
+  modal.style.display = 'flex';
+
+  let available = [];
+  if (it) {
+    try {
+      const res = await apiFetch(`/inventory/available_serials?product_id=${encodeURIComponent(it.product_id || '')}&model_no=${encodeURIComponent(it.model_no || '')}`);
+      if (res.ok) available = (await res.json()).serial_numbers || [];
+    } catch (e) { /* picker just shows current serial */ }
+  }
+  const options = [...current, ...available.filter(x => !current.includes(x))];
+
+  const serialSelects = it ? Array.from({ length: qty }, (_, k) => `
+      <select class="editSerial" style="${inp}margin-bottom:6px;">
+        ${current[k] ? '' : '<option value="">— select serial —</option>'}
+        ${options.map(x => `<option value="${esc(x)}" ${x === current[k] ? 'selected' : ''}>${esc(x)}${x === current[k] ? ' (current)' : ''}</option>`).join('')}
+      </select>`).join('') : '';
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3>Edit Allocation</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${items.map(i => itemDetailBlock(i, false)).join('')}
+    ${it ? `<div class="detail"><small>Serial Number(s) — ${available.length} other available in inventory</small>${serialSelects}
+      <p style="font-size:12px;color:#64748b;">The new serial is deducted from inventory; the old one goes back to inventory.</p></div>` : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+      ${isDemo ? '' : `
+      <input id="editCompany" placeholder="Company Name" value="${esc(a.company_name || '')}" style="${inp}">
+      <input id="editAddress" placeholder="Address" value="${esc(a.address || '')}" style="${inp}">
+      <input id="editGst" placeholder="GST Number" value="${esc(a.gst_number || '')}" style="${inp}">
+      <input id="editPhone" placeholder="Phone Number" value="${esc(a.phone_number || '')}" style="${inp}">`}
+      <input id="editRemarks" placeholder="Remarks" value="${esc(a.remarks || '')}" style="${inp}">
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button type="button" id="editCancel" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+      <button type="button" id="editSave" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save Changes</button>
+    </div>`;
+
+  const close = () => modal.style.display = 'none';
+  content.querySelector('.close').addEventListener('click', close);
+  document.getElementById('editCancel').addEventListener('click', close);
+  document.getElementById('editSave').addEventListener('click', async () => {
+    const body = { remarks: document.getElementById('editRemarks').value };
+    if (!isDemo) {
+      body.company_name = document.getElementById('editCompany').value;
+      body.address = document.getElementById('editAddress').value;
+      body.gst_number = document.getElementById('editGst').value;
+      body.phone_number = document.getElementById('editPhone').value;
+    }
+    if (it) {
+      const picked = [...content.querySelectorAll('.editSerial')].map(sel => sel.value);
+      const filled = picked.filter(Boolean);
+      if (filled.length && filled.length !== qty) return alert('Select a serial number for every unit.');
+      if (new Set(filled).size !== filled.length) return alert('Serial numbers must be different.');
+      if (filled.length && JSON.stringify(filled) !== JSON.stringify(current)) body.serial_numbers = filled;
+    }
+    try {
+      const res = await apiFetch(`/allocation/edit/${a.allocation_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'update failed');
+      close();
+      await loadAllocations();
+      alert(data.message || 'Allocation updated');
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+}
+
+// ---------- Convert a dispatched demo unit straight into an order ----------
+function openConvertAllocationModal(a) {
+  if (!a) return;
+  const modal = document.getElementById('viewAllocationModal');
+  const content = modal.querySelector('.modal-content');
+  content.style.maxHeight = '86vh'; content.style.overflowY = 'auto';
+  const c = a.customer || {};
+  const inp = 'width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;';
+  const today = new Date().toISOString().slice(0, 10);
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3>Convert to Order</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${(a.items || []).map(i => itemDetailBlock(i, false)).join('')}
+    <p style="font-size:12px;color:#64748b;margin-bottom:8px;">Enter the customer's company details. The demo unit moves to Orders (stock is not changed again).</p>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <input id="cvCompany" placeholder="Company Name *" value="${esc(c.company_name || '')}" style="${inp}">
+      <input id="cvAddress" placeholder="Company Address *" value="${esc(c.company_address || c.address || '')}" style="${inp}">
+      <input id="cvGst" placeholder="GST Number" value="${esc(c.gst_number || '')}" style="${inp}">
+      <input id="cvPrice" type="number" min="0" step="any" placeholder="Price per unit (₹) *" value="${a.convert_request?.price || ''}" style="${inp}">
+      <input id="cvTax" type="number" min="0" step="any" placeholder="Tax Rate (%)" value="${a.convert_request?.tax_rate || ''}" style="${inp}">
+      <input id="cvInvNo" placeholder="Invoice Number *" style="${inp}">
+      <input id="cvInvDate" type="date" value="${today}" style="${inp}">
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button type="button" id="cvCancel" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+      <button type="button" id="cvSave" style="padding:10px 16px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Create Order</button>
+    </div>`;
+  const close = () => modal.style.display = 'none';
+  content.querySelector('.close').addEventListener('click', close);
+  document.getElementById('cvCancel').addEventListener('click', close);
+  document.getElementById('cvSave').addEventListener('click', async () => {
+    const v = id => document.getElementById(id).value.trim();
+    const body = {
+      company_name: v('cvCompany'), company_address: v('cvAddress'), gst_number: v('cvGst'),
+      price: Number(v('cvPrice')) || 0, tax_rate: Number(v('cvTax')) || 0,
+      invoice_no: v('cvInvNo'), invoice_date: v('cvInvDate'),
+    };
+    if (!body.company_name || !body.company_address) return alert('Company name and address are required.');
+    if (body.price <= 0) return alert('Enter a valid price.');
+    if (!body.invoice_no || !body.invoice_date) return alert('Invoice number and date are required.');
+    try {
+      const res = await apiFetch(`/allocation/convert_to_order_direct/${a.allocation_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'conversion failed');
+      close();
+      await loadAllocations();
+      alert(`${data.message}\nOrder ID: ${data.order_id}`);
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
   modal.style.display = 'flex';
 }
 
@@ -682,6 +998,7 @@ function wireTopActions() {
   // dispatch; admin/accounts/distributor/service_manager can return or
   // report damage.
   const role = getRole();
+  window.__allocCanEdit = role === 'admin' || role === 'accounts';
   window.__allocCanCreate = role === 'admin' || role === 'accounts' || role === 'service_manager';
   window.__allocCanReturnOrDamage = role === 'admin' || role === 'accounts' || role === 'distributor' || role === 'service_manager';
   if (!window.__allocCanCreate) {
@@ -713,16 +1030,20 @@ function exportAllocationsCSV() {
     personField: 'sales_person.name',
     getRows: () => allocState.allocations,
     onConfirm: (rows) => {
-      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Allotment Date', 'Return Due', 'Status'];
+      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Created By', 'Returned By', 'Returned On', 'Status'];
       const csvRows = rows.map(a => {
         const isSpare = a.allocation_type === 'spare_part';
         return [
           a.allocation_id,
           isSpare ? 'Spare Part' : 'Product',
-          isSpare ? `${a.spare_part?.part_name} x${a.spare_part?.quantity}` : (a.items || []).map(i => `${i.product_name} x${i.quantity}`).join(' | '),
+          isSpare ? `${a.spare_part?.part_name} x${a.spare_part?.quantity}` : (a.items || []).map(i => `${reqItemLabel(i)} x${i.quantity}`).join(' | '),
           isSpare ? a.spare_part?.service_id : a.sales_person?.name,
+          a.serial_numbers,
           a.allotment_date,
           a.return_due_date,
+          a.created_by || a.allocated_by || '',
+          a.returned_by || '',
+          returnedOn(a) || '',
           returnMeta(a).label
         ];
       });
@@ -907,7 +1228,7 @@ async function renderSystemUserStep() {
   const body = allocModalBody();
   allocWizTitle('Select User');
   body.innerHTML = `
-    <input id="spSearch" placeholder="Search user" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <input id="spSearch" placeholder="Search by name, username or role (e.g. Sales)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div id="spResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
     <div style="margin-top:14px;">
       <button type="button" id="backSp1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
@@ -928,12 +1249,15 @@ async function renderSystemUserStep() {
   }
   const draw = () => {
     const term = searchInput.value.trim().toLowerCase();
-    const list = users.filter(u => `${u.name || ''} ${u.username || ''} ${u.role || ''}`.toLowerCase().includes(term));
+    const list = users.filter(u => `${u.name || ''} ${u.username || ''} ${u.role || ''} ${roleLabel(u.role)}`.toLowerCase().includes(term));
     if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No users found.</small>'; return; }
     resultsBox.innerHTML = list.map(u => `
       <div class="sp-row" data-username="${u.username}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
-        <strong>${u.name || u.username}</strong><br>
-        <small style="color:#64748b;">${u.username} • ${u.role ?? ''}</small>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <strong>${u.name || u.username}</strong>
+          <span style="font-size:11px;font-weight:600;color:#1665ff;background:#eef3fb;border-radius:999px;padding:2px 10px;">${roleLabel(u.role)}</span>
+        </div>
+        <small style="color:#64748b;">${u.username}</small>
       </div>`).join('');
     resultsBox.querySelectorAll('.sp-row').forEach(row => row.addEventListener('click', () => {
       const u = users.find(x => x.username === row.dataset.username);

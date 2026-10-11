@@ -6,12 +6,12 @@ const AUTH = {
 
 const ROLE_ACCESS = {
   admin:           ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html'],
-  accounts:        ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'reports.html'],
+  accounts:        ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html'],
   service_manager: ['service.html', 'inventory.html', 'dispatch.html','allocated.html'],
-  assembly:        ['assembly.html'],
+  assembly:        ['assembly.html', 'inventory.html'],
   technician:      ['technician.html','technician_dashboard.html'],
   distributor:     ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html'],
-  inventory_manager: ['inventory.html'],
+  inventory_manager: ['inventory.html', 'distributor.html', 'distributor_orders.html', 'assembly.html', 'shipment.html'],
 };
 
 const ROLE_HOME = {
@@ -113,6 +113,17 @@ async function apiFetch(url, options = {}) {
   return res;
 }
 
+// Sidebar scrolls on its own when the menu is taller than the screen
+// (injected here so every page that loads common_auth.js gets it).
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+    .sidebar { overflow-y: auto; overflow-x: hidden; max-height: 100vh; scrollbar-width: thin; }
+    .sidebar::-webkit-scrollbar { width: 6px; }
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.35); border-radius: 6px; }`;
+  document.head.appendChild(st);
+})();
+
 function logoutNow() {
   clearSession();
   window.location.href = loginPath();
@@ -123,6 +134,13 @@ document.addEventListener('DOMContentLoaded', () => {
     checkPageAccess();
     filterSidebarByRole();
     initNotificationBell();
+    initMessaging();
+    if (getRole() === 'distributor') {
+      setTimeout(() => ['sidebarUserRole', 'headerUserRole'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = 'Sales';
+      }), 0);
+    }
   }
 });
 
@@ -347,4 +365,346 @@ function initNotificationBell() {
   loadNotifications();
   if (_notifPoll) clearInterval(_notifPoll);
   _notifPoll = setInterval(loadNotifications, 30000);
+}
+
+let _msgPoll = null;
+const _msgState = { users: [], selected: new Set(), tab: 'compose', inbox: [], search: '', replyTo: null, replyDraft: '' };
+
+function msgEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function msgRoleLabel(role) {
+  if (role === 'distributor') return 'Sales';
+  const r = String(role || '').replace(/_/g, ' ');
+  return r.charAt(0).toUpperCase() + r.slice(1);
+}
+
+function ensureMessageUI() {
+  let btn = document.getElementById('msgBtn');
+  if (!btn) {
+    const icon = document.querySelector('.right-header i.fa-envelope, header i.fa-envelope');
+    if (icon) btn = icon.closest('button');
+  }
+  if (!btn) return null;
+  btn.id = 'msgBtn';
+  btn.style.position = 'relative';
+
+  let badge = document.getElementById('msgBadge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.id = 'msgBadge';
+    badge.style.cssText = 'display:none;position:absolute;top:2px;right:2px;background:#d62828;color:#fff;font-size:10px;border-radius:999px;padding:1px 5px;';
+    badge.textContent = '0';
+    btn.appendChild(badge);
+  }
+
+  let modal = document.getElementById('msgModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'msgModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:1900;';
+    modal.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:24px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.2);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h3 style="color:#0f172a;">Messages</h3>
+          <button type="button" id="msgClose" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <button type="button" class="msgTab" data-tab="compose" style="flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;">New Message</button>
+          <button type="button" class="msgTab" data-tab="inbox" style="flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Inbox <span id="msgTabCount"></span></button>
+          ${getRole() === 'admin' ? '<button type="button" class="msgTab" data-tab="team" style="flex:1;padding:9px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Team</button>' : ''}
+        </div>
+        <div id="msgBody"></div>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.querySelector('#msgClose').addEventListener('click', () => { modal.style.display = 'none'; });
+    modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+    modal.querySelectorAll('.msgTab').forEach(t => t.addEventListener('click', () => {
+      _msgState.tab = t.dataset.tab;
+      renderMessageModal();
+    }));
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      _msgState.tab = 'compose';
+      modal.style.display = 'flex';
+      renderMessageModal();
+    });
+  }
+  return { btn, badge, modal };
+}
+
+function paintMsgTabs() {
+  document.querySelectorAll('#msgModal .msgTab').forEach(t => {
+    const active = t.dataset.tab === _msgState.tab;
+    t.style.background = active ? '#1665ff' : '#f1f5f9';
+    t.style.color = active ? '#fff' : '#475569';
+  });
+}
+
+function renderMessageModal() {
+  paintMsgTabs();
+  if (_msgState.tab === 'inbox') renderMessageInbox();
+  else if (_msgState.tab === 'team' && getRole() === 'admin') renderMessageTeam();
+  else renderMessageCompose();
+}
+
+async function renderMessageCompose() {
+  const body = document.getElementById('msgBody');
+  body.innerHTML = `
+    <input id="msgSearch" placeholder="Search by name, username or role (e.g. Sales)" value="${msgEsc(_msgState.search)}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12px;">
+      <span id="msgSelCount" style="color:#64748b;"></span>
+      <span>
+        <a href="#" id="msgSelAll" style="color:#1665ff;margin-right:12px;">Select all shown</a>
+        <a href="#" id="msgSelNone" style="color:#64748b;">Clear</a>
+      </span>
+    </div>
+    <div id="msgUserList" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;border:1px solid #eef1f6;border-radius:10px;padding:8px;"></div>
+    <textarea id="msgText" rows="4" maxlength="2000" placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-top:12px;resize:vertical;"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
+      <button type="button" id="msgSend" style="padding:10px 18px;border:none;border-radius:8px;background:#1665ff;color:#fff;font-weight:600;cursor:pointer;"><i class="fa-solid fa-paper-plane"></i> Send</button>
+    </div>`;
+
+  const list = document.getElementById('msgUserList');
+  if (!_msgState.users.length) {
+    list.innerHTML = '<small style="color:#94a3b8;">Loading...</small>';
+    try {
+      const res = await apiFetch('/message/recipients');
+      const data = await res.json();
+      _msgState.users = data.dataset || [];
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') list.innerHTML = '<small style="color:#d62828;">Could not load users.</small>';
+      return;
+    }
+  }
+
+  const visible = () => {
+    const term = _msgState.search.trim().toLowerCase();
+    return _msgState.users.filter(u => `${u.name || ''} ${u.username || ''} ${u.role || ''} ${msgRoleLabel(u.role)}`.toLowerCase().includes(term));
+  };
+  const updateCount = () => {
+    const n = _msgState.selected.size;
+    document.getElementById('msgSelCount').textContent = n ? `${n} selected` : 'Select one or more people';
+  };
+  const draw = () => {
+    const users = visible();
+    if (!users.length) { list.innerHTML = '<small style="color:#94a3b8;">No users found.</small>'; updateCount(); return; }
+    list.innerHTML = users.map(u => `
+      <label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;">
+        <input type="checkbox" class="msgUserChk" value="${msgEsc(u.username)}" ${_msgState.selected.has(u.username) ? 'checked' : ''}>
+        <span style="flex:1;"><strong>${msgEsc(u.name || u.username)}</strong><br><small style="color:#64748b;">${msgEsc(u.username)}</small></span>
+        <span style="font-size:11px;font-weight:600;color:#1665ff;background:#eef3fb;border-radius:999px;padding:2px 10px;">${msgEsc(msgRoleLabel(u.role))}</span>
+      </label>`).join('');
+    list.querySelectorAll('.msgUserChk').forEach(c => c.addEventListener('change', () => {
+      if (c.checked) _msgState.selected.add(c.value); else _msgState.selected.delete(c.value);
+      updateCount();
+    }));
+    updateCount();
+  };
+
+  document.getElementById('msgSearch').addEventListener('input', e => { _msgState.search = e.target.value; draw(); });
+  document.getElementById('msgSelAll').addEventListener('click', e => { e.preventDefault(); visible().forEach(u => _msgState.selected.add(u.username)); draw(); });
+  document.getElementById('msgSelNone').addEventListener('click', e => { e.preventDefault(); _msgState.selected.clear(); draw(); });
+  document.getElementById('msgSend').addEventListener('click', sendMessage);
+  draw();
+}
+
+async function sendMessage() {
+  const text = document.getElementById('msgText').value.trim();
+  const recipients = [..._msgState.selected];
+  if (!recipients.length) { showResponseModal('Select recipients', 'Choose at least one person to message.', false); return; }
+  if (!text) { showResponseModal('Empty message', 'Write a message before sending.', false); return; }
+  const sendBtn = document.getElementById('msgSend');
+  sendBtn.disabled = true;
+  try {
+    const res = await apiFetch('/message/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipients, body: text })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'message could not be sent');
+    _msgState.selected.clear();
+    _msgState.search = '';
+    document.getElementById('msgModal').style.display = 'none';
+    showResponseModal('Message sent', `Sent to ${data.sent} person${data.sent > 1 ? 's' : ''}.`, true);
+  } catch (err) {
+    sendBtn.disabled = false;
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Send failed', err.message, false);
+  }
+}
+
+async function loadMessageInbox() {
+  const ui = ensureMessageUI();
+  if (!ui) return;
+  try {
+    const res = await apiFetch('/message/inbox');
+    if (!res.ok) throw new Error('failed');
+    const data = await res.json();
+    _msgState.inbox = (data.dataset || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const unread = _msgState.inbox.filter(m => !m.read).length;
+    ui.badge.textContent = unread;
+    ui.badge.style.display = unread ? 'block' : 'none';
+    const tabCount = document.getElementById('msgTabCount');
+    if (tabCount) tabCount.textContent = unread ? `(${unread})` : '';
+    if (ui.modal.style.display === 'flex' && _msgState.tab === 'inbox') drawMessageInbox();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function drawMessageInbox() {
+  const body = document.getElementById('msgBody');
+  if (!body) return;
+  if (!_msgState.inbox.length) {
+    body.innerHTML = '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">No messages yet.</p>';
+    return;
+  }
+  const hasUnread = _msgState.inbox.some(m => !m.read);
+  body.innerHTML = `
+    ${hasUnread ? '<div style="text-align:right;margin-bottom:8px;"><a href="#" id="msgReadAll" style="color:#1665ff;font-size:12px;">Mark all as read</a></div>' : ''}
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${_msgState.inbox.map(m => `
+        <div class="msgItem" data-id="${msgEsc(m.message_id)}" style="border:1px solid ${m.read ? '#e2e8f0' : '#bfd4ff'};background:${m.read ? '#fff' : '#f0f6ff'};border-radius:10px;padding:10px 12px;cursor:pointer;">
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;margin-bottom:4px;">
+            <strong style="color:#0f172a;">${msgEsc(m.from_name || m.from_username)} <span style="font-weight:400;color:#64748b;">(${msgEsc(msgRoleLabel(m.from_role))})</span></strong>
+            <span>${m.created_at ? new Date(m.created_at).toLocaleString('en-GB') : ''}</span>
+          </div>
+          <div style="font-size:14px;color:#334155;white-space:pre-wrap;">${msgEsc(m.body)}</div>
+          <div class="msgReplyArea" style="margin-top:8px;">
+            ${_msgState.replyTo === m.message_id ? `
+              <textarea class="msgReplyText" rows="3" maxlength="2000" placeholder="Reply to ${msgEsc(m.from_name || m.from_username)}..." style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;">${msgEsc(_msgState.replyDraft)}</textarea>
+              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+                <button type="button" class="msgReplyCancel" style="padding:6px 12px;border:none;border-radius:8px;background:#eee;cursor:pointer;font-size:12px;">Cancel</button>
+                <button type="button" class="msgReplySend" data-id="${msgEsc(m.message_id)}" style="padding:6px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;font-weight:600;"><i class="fa-solid fa-paper-plane"></i> Send Reply</button>
+              </div>` : `<button type="button" class="msgReplyBtn" data-id="${msgEsc(m.message_id)}" style="padding:5px 12px;border:1px solid #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;font-size:12px;"><i class="fa-solid fa-reply"></i> Reply</button>`}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  body.querySelectorAll('.msgItem').forEach(el => el.addEventListener('click', async e => {
+    if (e.target.closest('.msgReplyArea')) return;
+    const m = _msgState.inbox.find(x => x.message_id === el.dataset.id);
+    if (!m || m.read) return;
+    try {
+      await apiFetch(`/message/read/${m.message_id}`, { method: 'POST' });
+      m.read = true;
+      loadMessageInbox();
+      drawMessageInbox();
+    } catch (err) { console.error(err); }
+  }));
+  body.querySelectorAll('.msgReplyBtn').forEach(btn => btn.addEventListener('click', async () => {
+    const m = _msgState.inbox.find(x => x.message_id === btn.dataset.id);
+    if (!m) return;
+    _msgState.replyTo = m.message_id;
+    _msgState.replyDraft = '';
+    drawMessageInbox();
+    const box = body.querySelector('.msgReplyText');
+    if (box) box.focus();
+    if (!m.read) {
+      try {
+        await apiFetch(`/message/read/${m.message_id}`, { method: 'POST' });
+        m.read = true;
+        loadMessageInbox();
+      } catch (err) { console.error(err); }
+    }
+  }));
+  body.querySelectorAll('.msgReplyText').forEach(t => t.addEventListener('input', () => { _msgState.replyDraft = t.value; }));
+  body.querySelectorAll('.msgReplyCancel').forEach(btn => btn.addEventListener('click', () => {
+    _msgState.replyTo = null;
+    _msgState.replyDraft = '';
+    drawMessageInbox();
+  }));
+  body.querySelectorAll('.msgReplySend').forEach(btn => btn.addEventListener('click', async () => {
+    const m = _msgState.inbox.find(x => x.message_id === btn.dataset.id);
+    const text = (_msgState.replyDraft || '').trim();
+    if (!m) return;
+    if (!text) { showResponseModal('Empty reply', 'Write a reply before sending.', false); return; }
+    btn.disabled = true;
+    try {
+      const res = await apiFetch('/message/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipients: [m.from_username], body: text })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'reply could not be sent');
+      _msgState.replyTo = null;
+      _msgState.replyDraft = '';
+      drawMessageInbox();
+      showResponseModal('Reply sent', `Your reply was sent to ${m.from_name || m.from_username}.`, true);
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Reply failed', err.message, false);
+    }
+  }));
+  const readAll = document.getElementById('msgReadAll');
+  if (readAll) readAll.addEventListener('click', async e => {
+    e.preventDefault();
+    try {
+      await apiFetch('/message/read_all', { method: 'POST' });
+      _msgState.inbox.forEach(m => { m.read = true; });
+      loadMessageInbox();
+      drawMessageInbox();
+    } catch (err) { console.error(err); }
+  });
+}
+
+async function renderMessageInbox() {
+  const body = document.getElementById('msgBody');
+  body.innerHTML = '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">Loading...</p>';
+  await loadMessageInbox();
+  drawMessageInbox();
+}
+
+async function renderMessageTeam() {
+  const body = document.getElementById('msgBody');
+  body.innerHTML = '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">Loading...</p>';
+  let all = [];
+  try {
+    const res = await apiFetch('/message/all');
+    if (!res.ok) throw new Error('failed');
+    const data = await res.json();
+    all = data.dataset || [];
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') body.innerHTML = '<p style="padding:16px;color:#d62828;font-size:13px;text-align:center;">Could not load team chats.</p>';
+    return;
+  }
+
+  const groups = {};
+  all.forEach(m => {
+    const key = m.batch_id || m.message_id;
+    if (!groups[key]) groups[key] = { from_name: m.from_name || m.from_username, from_username: m.from_username, from_role: m.from_role, body: m.body, created_at: m.created_at, to: [] };
+    groups[key].to.push({ name: m.to_name || m.to_username, username: m.to_username, read: m.read });
+  });
+  const chats = Object.values(groups).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  body.innerHTML = `
+    <input id="msgTeamSearch" placeholder="Search by person or message" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <p id="msgTeamCount" style="font-size:12px;color:#64748b;margin-bottom:8px;"></p>
+    <div id="msgTeamList" style="max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>`;
+
+  const list = document.getElementById('msgTeamList');
+  const draw = () => {
+    const term = document.getElementById('msgTeamSearch').value.trim().toLowerCase();
+    const shown = chats.filter(c => !term || `${c.from_name} ${c.from_username} ${c.body} ${c.to.map(t => t.name + ' ' + t.username).join(' ')}`.toLowerCase().includes(term));
+    document.getElementById('msgTeamCount').textContent = `${shown.length} message${shown.length === 1 ? '' : 's'}`;
+    list.innerHTML = shown.map(c => `
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#64748b;margin-bottom:4px;">
+          <strong style="color:#0f172a;">${msgEsc(c.from_name)} <span style="font-weight:400;">(${msgEsc(msgRoleLabel(c.from_role))})</span></strong>
+          <span>${c.created_at ? new Date(c.created_at).toLocaleString('en-GB') : ''}</span>
+        </div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:6px;">To: ${c.to.map(t => `<span style="display:inline-block;background:${t.read ? '#f1f5f9' : '#fff4e0'};border-radius:999px;padding:1px 8px;margin:0 4px 2px 0;" title="${t.read ? 'Read' : 'Unread'}">${msgEsc(t.name)}</span>`).join('')}</div>
+        <div style="font-size:14px;color:#334155;white-space:pre-wrap;">${msgEsc(c.body)}</div>
+      </div>`).join('') || '<p style="padding:16px;color:#94a3b8;font-size:13px;text-align:center;">No messages yet.</p>';
+  };
+  document.getElementById('msgTeamSearch').addEventListener('input', draw);
+  draw();
+}
+
+function initMessaging() {
+  const ui = ensureMessageUI();
+  if (!ui) return;
+  loadMessageInbox();
+  if (_msgPoll) clearInterval(_msgPoll);
+  _msgPoll = setInterval(loadMessageInbox, 30000);
 }

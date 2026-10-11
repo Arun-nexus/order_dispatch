@@ -456,7 +456,7 @@ function renderProductsStep() {
   wizTitle('Request Demo Unit');
   const products = dedupeProducts(spState.products || []);
   body.innerHTML = `
-    <div id="prodCatTabs" style="display:flex;gap:8px;margin-bottom:10px;"></div>
+    <div id="prodCatTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
@@ -480,7 +480,8 @@ function renderProductsStep() {
   const categories = [
     { type: 'product', label: 'Products' },
     { type: 'accessories', label: 'Accessories' },
-    { type: 'spare_parts', label: 'Spare Parts' }
+    { type: 'spare_parts', label: 'Spare Parts' },
+    { type: 'service_parts', label: 'Service Parts' }
   ];
   let activeCategory = 'product';
 
@@ -510,7 +511,7 @@ function renderProductsStep() {
     const qtyInCart = spWiz.cart[key]?.quantity ?? '';
     return `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${p.product_id}${p.model_no ? ' — ' + p.model_no : ''}</small></td>
+        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + (p.parent_product_name || '—') : p.product_id + (p.model_no ? ' — ' + p.model_no : '')}</small></td>
         <td>${p.quantity ?? 0}</td>
         <td><input type="number" min="0" max="${p.quantity ?? 0}" value="${qtyInCart}"
               data-row-key="${key}" class="qtyInput" style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
@@ -538,7 +539,7 @@ function renderProductsStep() {
     const term = document.getElementById('prodFilter').value.trim().toLowerCase();
     const base = currentCategoryProducts();
     const filtered = term
-      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term))
+      ? base.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term) || (p.parent_product_name || '').toLowerCase().includes(term))
       : base;
     renderRows(filtered);
   }

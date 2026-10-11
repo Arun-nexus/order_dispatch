@@ -10,7 +10,7 @@ class allocation_manager(mongodbclient):
 
     def __init__(self, sales_person=None, items=None, spare_part=None, company_name=None, address=None,
                  customer=None, allocated_by=None, gst_number=None, phone_number=None,
-                 allocation_type=None, request_id=None, remarks=None):
+                 allocation_type=None, request_id=None, remarks=None, created_by=None):
         """
         sales_person: dict snapshot -> {sales_person_id, name, company_name, address, contact_number, email}
                        (used for allocation_type='product': admin/employee allotting stock to a sales person)
@@ -34,6 +34,7 @@ class allocation_manager(mongodbclient):
         self.spare_part = spare_part or {}
         self.customer = customer or {}
         self.allocated_by = allocated_by
+        self.created_by = created_by or allocated_by   # who created this allocation record
         self.allocation_type = allocation_type      # optional override, e.g. 'demo_unit'
         self.request_id = request_id                # approved request this allocation came from
         self.remarks = remarks or ""
@@ -65,6 +66,7 @@ class allocation_manager(mongodbclient):
                 "sales_person": self.sales_person,
                 "customer": self.customer,
                 "allocated_by": self.allocated_by,
+                "created_by": self.created_by,
                 "request_id": self.request_id,
                 "remarks": self.remarks,
                 "items": self.items,

@@ -250,17 +250,25 @@ class inventory_manager(mongodbclient):
                 query["model_no"] = model_no
             else:
                 query["model_no"] = {"$in": [None, ""]}
+            serial_numbers = list(dict.fromkeys(s for s in (serial_numbers or []) if s))
             # An OK return should never get merged into a "damaged" lot that
             # happens to share the same product_id/name/model_no (e.g. an
             # earlier faulty return of the same product) — it belongs back
             # in the category it was actually stocked/sold under.
             query["product_type"] = {"$ne": "damaged"}
             existing = self.get_data(collection_name=collection_name, query=query)
+            # prefer the plain "product" lot over accessories etc. sharing the same id
+            existing.sort(key=lambda e: 0 if (e.get("product_type") or "product") == "product" else 1)
             if existing:
                 entry = existing[0]
                 current_serials = entry.get("serial_numbers") or []
-                merged_serials = current_serials + list(serial_numbers or [])
-                new_quantity = int(entry.get("quantity", 0) or 0) + int(quantity or 0)
+                # never re-add a serial the lot already holds (double-return / retry)
+                merged_serials = current_serials + [s for s in serial_numbers if s not in current_serials]
+                added = len(merged_serials) - len(current_serials)
+                # serialed units: quantity follows the serials actually added, so
+                # quantity and serial count can't drift apart
+                add_qty = added if serial_numbers else int(quantity or 0)
+                new_quantity = int(entry.get("quantity", 0) or 0) + add_qty
                 self.update_data(
                     collection_name=collection_name,
                     query={"_id": ObjectId(entry["_id"])},
@@ -370,19 +378,30 @@ class inventory_manager(mongodbclient):
 
     def get_available_quantity(self, collection_name, product_id, model_no=None):
         try:
-            query = {"product_id": product_id}
+            query = {"product_id": product_id, "product_type": {"$ne": "damaged"}}
             # model_no disambiguates between variants sharing the same product_id
             # (e.g. black vs grey) — only filter by it when one was actually given,
             # so callers that intentionally want the product_id-wide total still can
             if model_no is not None:
-                query["model_no"] = model_no
+                query["model_no"] = self._model_query(model_no)
             entries = self.get_data(collection_name=collection_name, query=query)
             return sum(int(e.get("quantity", 0) or 0) for e in entries)
         except Exception as e:
             logging.error("checking available quantity failed!")
             raise Exception(e)
 
-    def get_available_quantity_by_name(self, collection_name, product_name, product_type):
+    @staticmethod
+    def _part_query(product_name, product_type, parent_product_name=None, extra=None):
+        """product_name + product_type, plus parent_product_name (the product the part
+        belongs to) when given. Empty/None parent = legacy behaviour (match by name only)."""
+        q = {"product_name": product_name, "product_type": product_type}
+        if parent_product_name:
+            q["parent_product_name"] = parent_product_name
+        if extra:
+            q.update(extra)
+        return q
+
+    def get_available_quantity_by_name(self, collection_name, product_name, product_type, parent_product_name=None):
         """
         Same idea as get_available_quantity, but for entries that have no
         natural product_id (e.g. spare_parts pushed in from a shipment) —
@@ -391,14 +410,14 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type}
+                query=self._part_query(product_name, product_type, parent_product_name)
             )
             return sum(int(e.get("quantity", 0) or 0) for e in entries)
         except Exception as e:
             logging.error("checking available quantity by name failed!")
             raise Exception(e)
 
-    def get_hologram_available_by_name(self, collection_name, product_name, product_type):
+    def get_hologram_available_by_name(self, collection_name, product_name, product_type, parent_product_name=None):
         """
         Sums how many hologram numbers are on file (across every matching lot)
         for a product_name + product_type — used before assembly to make sure
@@ -407,14 +426,14 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type}
+                query=self._part_query(product_name, product_type, parent_product_name)
             )
             return sum(len(e.get("hologram_numbers") or []) for e in entries)
         except Exception as e:
             logging.error("checking available hologram numbers by name failed!")
             raise Exception(e)
 
-    def consume_quantity(self, collection_name, product_name, product_type, quantity):
+    def consume_quantity(self, collection_name, product_name, product_type, quantity, parent_product_name=None):
         """
         Deducts `quantity` units of a non-serialized product (e.g. a
         spare_parts entry) identified by product_name + product_type,
@@ -423,7 +442,7 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type, "quantity": {"$gt": 0}}
+                query=self._part_query(product_name, product_type, parent_product_name, {"quantity": {"$gt": 0}})
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 
@@ -447,7 +466,67 @@ class inventory_manager(mongodbclient):
             logging.error("consuming quantity from inventory failed!")
             raise Exception(e)
 
-    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity):
+    def restock_quantity(self, collection_name, product_name, product_type, quantity, updated_by=None, parent_product_name=None):
+        """
+        Opposite of consume_quantity: puts `quantity` units of a non-serialized
+        product (e.g. a spare_parts entry) back into inventory — used when an
+        assembly is edited and fewer parts are needed than were first deducted.
+
+        The units go back into the newest existing lot for that product_name +
+        product_type. If every lot was already used up (and therefore deleted
+        by _decrement_or_delete), a fresh lot is created instead.
+        """
+        try:
+            quantity = int(quantity or 0)
+            if quantity <= 0:
+                return {"mode": "skipped", "quantity_added": 0}
+
+            entries = self.get_data(
+                collection_name=collection_name,
+                query=self._part_query(product_name, product_type, parent_product_name)
+            )
+            if entries:
+                entries.sort(key=lambda e: e.get("purchase_date") or "")
+                entry = entries[-1]
+                new_quantity = int(entry.get("quantity", 0) or 0) + quantity
+                update_values = {"quantity": new_quantity}
+                if updated_by:
+                    update_values["updated_by"] = updated_by
+                self.update_data(collection_name=collection_name, query={"_id": ObjectId(entry["_id"])},
+                                 update_values=update_values)
+                logging.info(f"restocked {quantity} unit(s) of '{product_name}' into existing {product_type} entry")
+                return {"mode": "merged", "quantity_added": quantity}
+
+            from datetime import datetime, timezone
+            product_dic = {
+                "product_name": product_name,
+                "parent_product_name": parent_product_name or "",
+                "product_id": f"SP-{uuid.uuid4().hex[:8].upper()}",
+                "lot_no": "",
+                "supplier": "",
+                "supplier_address": "",
+                "price": 0,
+                "tax_rate": 0,
+                "purchase_date": datetime.now(timezone.utc).date().isoformat(),
+                "quantity": quantity,
+                "model_no": "",
+                "serial_numbers": [],
+                "product_type": product_type,
+                "part_category": None,
+                "warranty_until": None,
+                "hologram_numbers": [],
+                "reason": "restocked from assembly edit",
+                "created_by": updated_by,
+                "updated_by": updated_by,
+            }
+            super().add(collection_name=collection_name, dictionary=product_dic)
+            logging.info(f"created new {product_type} entry for restocked '{product_name}'")
+            return {"mode": "created", "quantity_added": quantity}
+        except Exception as e:
+            logging.error("restocking quantity into inventory failed!")
+            raise Exception(e)
+
+    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity, parent_product_name=None):
         """
         Deducts `quantity` units of a spare_parts/service_parts entry (matched by
         product_name + product_type) AND pulls that many hologram numbers along with
@@ -460,7 +539,7 @@ class inventory_manager(mongodbclient):
         try:
             entries = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_type": product_type, "quantity": {"$gt": 0}}
+                query=self._part_query(product_name, product_type, parent_product_name, {"quantity": {"$gt": 0}})
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 
@@ -498,6 +577,11 @@ class inventory_manager(mongodbclient):
             logging.error("hologram number allocation failed!")
             raise Exception(e)
 
+    @staticmethod
+    def _model_query(model_no):
+        """model_no "" / None both mean "no variant" — old lots store null, not ""."""
+        return model_no if model_no else {"$in": [None, ""]}
+
     def list_available_serials(self, collection_name, product_id, model_no=None):
         """
         Returns every serial number currently on file for product_id (optionally
@@ -508,14 +592,19 @@ class inventory_manager(mongodbclient):
         picked, and the rest of the list is what's available to switch to.
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            # damaged lots share product_id/model_no with the live lot — they must
+            # never show up as available (that was leaking faulty serials into orders)
+            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
             if model_no is not None:
-                query["model_no"] = model_no
+                query["model_no"] = self._model_query(model_no)
             entries = self.get_data(collection_name=collection_name, query=query)
             entries.sort(key=lambda e: e.get("purchase_date") or "")
-            serials = []
+            serials, seen = [], set()
             for entry in entries:
-                serials.extend(entry.get("serial_numbers") or [])
+                for s in (entry.get("serial_numbers") or []):
+                    if s not in seen:
+                        seen.add(s)
+                        serials.append(s)
             return serials
         except Exception as e:
             logging.error("listing available serial numbers failed!")
@@ -539,9 +628,9 @@ class inventory_manager(mongodbclient):
         elsewhere (e.g. allocate_serials/allocate_units).
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
             if model_no is not None:
-                query["model_no"] = model_no
+                query["model_no"] = self._model_query(model_no)
             entries = self.get_data(collection_name=collection_name, query=query)
 
             allocated = []
@@ -649,9 +738,9 @@ class inventory_manager(mongodbclient):
         all matching lots is insufficient.
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}}
+            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
             if model_no is not None:
-                query["model_no"] = model_no
+                query["model_no"] = self._model_query(model_no)
             entries = self.get_data(
                 collection_name=collection_name,
                 query=query
@@ -715,7 +804,8 @@ class inventory_manager(mongodbclient):
 
             existing = self.get_data(
                 collection_name=collection_name,
-                query={"product_name": product_name, "product_id": product_id, "model_no": model_no}
+                query={"product_name": product_name, "product_id": product_id,
+                       "model_no": self._model_query(model_no), "product_type": product_type}
             )
 
             if existing:
