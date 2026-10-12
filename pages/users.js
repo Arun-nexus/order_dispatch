@@ -72,7 +72,7 @@ async function loadCustomers() {
     renderCustomerTable();
   } catch (err) {
     console.error(err);
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load customers.');
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load companies.');
   }
 }
 
@@ -161,12 +161,15 @@ function openUserDetail(u) {
     esc((a.items || []).flatMap(i => i.serial_numbers || []).join(', ')) || '-',
     esc(a.customer?.company_name || a.sales_person?.name) || '-',
     fmtDate(a.return_due_date),
-    a.return_status === 'returned' ? 'Credit' : (a.dispatch ? 'With customer' : 'Allocated')
+    a.return_status === 'returned' ? 'Returned' : (a.dispatch ? 'With customer' : 'Allocated')
   ]);
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <h3>${esc(u.full_name ?? u.name) || esc(uname)} <span style="color:#94a3b8;font-weight:400;">@${esc(uname)}</span></h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button type="button" class="user-export" style="padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-download"></i> Export</button>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
       ${field('Role', displayRole(u.role))}
@@ -186,6 +189,7 @@ function openUserDetail(u) {
     <h4 style="margin:18px 0 8px;">Demo Units <span style="color:#94a3b8;font-weight:400;">(${demos.length})</span></h4>
     ${tableHTML(['Allotted', 'Items', 'Serial No.', 'Customer', 'Return Due', 'Status'], demoRows)}`;
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  box.querySelector('.user-export').addEventListener('click', () => openUserExportModal({ users: [u], title: `Export — ${u.full_name ?? u.name ?? uname}` }));
   modal.style.display = 'flex';
 }
 
@@ -239,23 +243,36 @@ function wireHeaderSearch() {
   });
 }
 
+// keeps big rupee amounts on one line so they never run into the next column
+const nw = n => `<span style="white-space:nowrap;">${money(n)}</span>`;
+
+function entryTime(x) {
+  return new Date(x.return_date || x.debit_date || x.added_at || 0).getTime() || 0;
+}
+
 function customerStats(c) {
   const orders = userState.orders
     .filter(o => o.customer?.customer_id === c.customer_id)
     .sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
-  const creditGiven = orders.filter(o => o.payment_mode === 'Credit').reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
-  const returns = (c.returns || []).slice().sort((a, b) => new Date(b.return_date) - new Date(a.return_date));
+  const orderCredit = orders.filter(o => o.payment_mode === 'Credit').reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
+  // manual Credit entries (old "Return" data, stored in `returns`)
+  const returns = (c.returns || []).slice().sort((a, b) => entryTime(b) - entryTime(a));
   const manualReturned = returns.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  // manual Debit entries (stored in `debits`) — add to the Debit side
+  const debits = (c.debits || []).slice().sort((a, b) => entryTime(b) - entryTime(a));
+  const manualDebited = debits.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   // purchases made FROM this party (recorded by the Inventory add form). Paid ones are
-  // history only; ones bought on credit count towards Returned.
+  // history only; ones bought on credit count towards Credit.
   const purchases = (c.purchases || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
   const purchaseCredit = purchases.filter(p => p.payment_mode === 'credit').reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const purchasePaid = purchases.filter(p => p.payment_mode !== 'credit').reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const returned = manualReturned + purchaseCredit;
+  const returned = manualReturned + purchaseCredit;      // total Credit
+  const creditGiven = orderCredit + manualDebited;       // total Debit (order credit + manual debits)
   const limit = Number(c.credit_limit) || 0;
   const outstanding = Math.max(creditGiven - returned, 0);
   return {
-    orders, returns, purchases, manualReturned, purchaseCredit, purchasePaid, creditGiven, returned, limit, outstanding,
+    orders, returns, debits, purchases, manualReturned, manualDebited, orderCredit, purchaseCredit, purchasePaid,
+    creditGiven, returned, limit, outstanding,
     available: limit - outstanding,
     totalOrders: orders.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0)
   };
@@ -288,37 +305,39 @@ function renderCustomerTable() {
   const rows = customerRows();
   tbody.innerHTML = rows.map(({ c, s }) => `
     <tr data-id="${esc(c.customer_id)}">
-      <td><strong>${esc(c.company_name)}</strong><br><small style="color:#94a3b8;">${esc(c.company_address)}</small></td>
+      <td class="wide"><strong>${esc(c.company_name)}</strong><br><small style="color:#94a3b8;">${esc(c.company_address)}</small></td>
       <td>${esc(c.gst_number) || '-'}</td>
       <td>${esc(c.contractor_person) || '-'}<br><small style="color:#94a3b8;">${esc(c.contractor_number)}</small></td>
-      <td>${money(s.limit)}</td>
-      <td>${money(s.creditGiven)}</td>
-      <td>${money(s.returned)}</td>
-      <td><strong style="color:${overallInfo(s).color};">${overallInfo(s).text}</strong></td>
-      <td>
+      <td class="amt">${money(s.limit)}</td>
+      <td class="amt">${money(s.creditGiven)}</td>
+      <td class="amt" style="color:#16a34a;">${money(s.returned)}</td>
+      <td class="amt"><strong style="color:${overallInfo(s).color};">${overallInfo(s).text}</strong></td>
+      <td style="white-space:nowrap;">
         <button class="icon-btn cust-history" title="History"><i class="fa-solid fa-clock-rotate-left"></i></button>
-        <button class="icon-btn cust-return" title="Add Return"><i class="fa-solid fa-rotate-left"></i></button>
+        <button class="icon-btn cust-credit" title="Add Credit"><i class="fa-solid fa-circle-plus" style="color:#16a34a;"></i></button>
+        <button class="icon-btn cust-debit" title="Add Debit"><i class="fa-solid fa-circle-minus" style="color:#d62828;"></i></button>
         <button class="icon-btn cust-edit" title="Edit"><i class="fa-solid fa-pen"></i></button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No customers found</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No companies found</td></tr>';
 
   const tot = rows.reduce((t, { s }) => ({
     limit: t.limit + s.limit, creditGiven: t.creditGiven + s.creditGiven,
     returned: t.returned + s.returned, outstanding: t.outstanding + s.outstanding
   }), { limit: 0, creditGiven: 0, returned: 0, outstanding: 0 });
   tfoot.innerHTML = `
-    <tr style="font-weight:700;background:#f8fafc;">
-      <td colspan="3">Total (${rows.length} customer${rows.length === 1 ? '' : 's'})</td>
-      <td>${money(tot.limit)}</td>
-      <td>${money(tot.creditGiven)}</td>
-      <td>${money(tot.returned)}</td>
-      <td><strong style="color:${overallInfo(tot).color};">${overallInfo(tot).text}</strong></td>
+    <tr>
+      <td colspan="3">Total (${rows.length} ${rows.length === 1 ? 'company' : 'companies'})</td>
+      <td class="amt">${money(tot.limit)}</td>
+      <td class="amt">${money(tot.creditGiven)}</td>
+      <td class="amt" style="color:#16a34a;">${money(tot.returned)}</td>
+      <td class="amt"><strong style="color:${overallInfo(tot).color};">${overallInfo(tot).text}</strong></td>
       <td></td>
     </tr>`;
 
   const byId = e => userState.customers.find(c => c.customer_id === e.target.closest('tr').dataset.id);
   tbody.querySelectorAll('.cust-history').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e))));
-  tbody.querySelectorAll('.cust-return').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e), true)));
+  tbody.querySelectorAll('.cust-credit').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e), 'credit')));
+  tbody.querySelectorAll('.cust-debit').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e), 'debit')));
   tbody.querySelectorAll('.cust-edit').forEach(b => b.addEventListener('click', e => openCustomerEditModal(byId(e))));
 }
 
@@ -360,8 +379,13 @@ function wireCardClicks() {
     card.addEventListener('click', () => openUserCardDetail(card.dataset.cardFilter)));
 }
 
+const CARD_TITLES = { all: 'All Users', admin: 'Admins', accounts: 'Accounts', technician: 'Technicians', distributor: 'Employee-Sales Persons', inventory_manager: 'Inventory Managers', customers: 'All Companies' };
+
+function userCardList(type) {
+  return type === 'all' ? userState.users : userState.users.filter(u => u.role === type);
+}
+
 function openUserCardDetail(type) {
-  const titles = { all: 'All Users', admin: 'Admins', accounts: 'Accounts', technician: 'Technicians', distributor: 'Employee-Sales Persons', inventory_manager: 'Inventory Managers', customers: 'All Customers' };
   const box = document.querySelector('#userCardDetailModal .modal-content');
   let table;
   let count;
@@ -369,50 +393,58 @@ function openUserCardDetail(type) {
     const rows = userState.customers.map(c => ({ c, s: customerStats(c) }));
     count = rows.length;
     table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Debit', 'Credit', 'Overall'],
-      rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, money(s.limit), money(s.creditGiven), money(s.returned), overallInfo(s).text]));
+      rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, nw(s.limit), nw(s.creditGiven), nw(s.returned), `<span style="white-space:nowrap;">${overallInfo(s).text}</span>`]));
   } else {
-    const list = type === 'all' ? userState.users : userState.users.filter(u => u.role === type);
+    const list = userCardList(type);
     count = list.length;
     table = tableHTML(['Username', 'Name', 'Role', 'Company', 'Mobile'],
       list.map(u => [esc(u.username), esc(u.full_name ?? u.name), displayRole(u.role), esc(u.company_name), esc(u.mobile_no ?? u.phone)]));
   }
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${count})</span></h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      <h3>${CARD_TITLES[type]} <span style="color:#94a3b8;font-weight:400;">(${count})</span></h3>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button type="button" class="card-export" style="padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-download"></i> Export</button>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
     </div>${table}`;
   box.querySelector('.close').addEventListener('click', () => { document.getElementById('userCardDetailModal').style.display = 'none'; });
+  box.querySelector('.card-export').addEventListener('click', () => {
+    if (type === 'customers') openCompanyExportModal();
+    else openUserExportModal({ type });
+  });
   document.getElementById('userCardDetailModal').style.display = 'flex';
 }
 
-function openCustomerHistory(c, focusReturn) {
+function openCustomerHistory(c, focusEntry) {
   if (!c) return;
   const s = customerStats(c);
   const modal = document.getElementById('customerHistoryModal');
   const box = modal.querySelector('.modal-content');
   const tile = (label, value, color) => `
-    <div style="flex:1;min-width:120px;background:#f8fafc;border-radius:10px;padding:10px 12px;">
+    <div style="flex:1;min-width:170px;background:#f8fafc;border-radius:10px;padding:12px 14px;">
       <small style="color:#64748b;">${label}</small>
-      <div style="font-weight:700;font-size:16px;color:${color || '#0f172a'};">${value}</div>
+      <div style="font-weight:700;font-size:17px;white-space:nowrap;color:${color || '#0f172a'};">${value}</div>
     </div>`;
   const orderRows = s.orders.map(o => [
     fmtDate(o.order_date),
     esc((o.order_id || '').slice(0, 8)),
     esc((o.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ')),
     esc(o.payment_mode || '-'),
-    money(o.total_mrp),
-    o.payment_mode === 'Credit' ? money(o.total_mrp) : '-'
+    nw(o.total_mrp),
+    o.payment_mode === 'Credit' ? nw(o.total_mrp) : '-'
   ]);
-  const returnRows = s.returns.map(r => [fmtDate(r.return_date), money(r.amount), esc(r.note) || '-', esc(r.added_by) || '-']);
+  const entryRows = list => list.map(r => [fmtDate(r.return_date || r.debit_date), nw(r.amount), esc(r.note) || '-', esc(r.added_by) || '-']);
   const purchaseRows = s.purchases.map(p => [
     fmtDate(p.date),
     esc(`${p.product_name || ''}${p.model_no ? ' · ' + p.model_no : ''} x${p.quantity ?? ''}`),
     esc(p.lot_no) || '-',
     p.payment_mode === 'credit' ? 'Credit' : 'Paid',
-    money(p.amount),
-    p.payment_mode === 'credit' ? money(p.amount) : '-'
+    nw(p.amount),
+    p.payment_mode === 'credit' ? nw(p.amount) : '-'
   ]);
   const today = new Date().toISOString().slice(0, 10);
+  const inputCss = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
 
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
@@ -426,29 +458,40 @@ function openCustomerHistory(c, focusReturn) {
       ${esc(c.company_address) || '-'} • GST: ${esc(c.gst_number) || '-'}<br>
       ${esc(c.contractor_person) || '-'} • ${esc(c.contractor_number) || '-'} • ${esc(c.contractor_email) || '-'}
     </p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
       ${tile('Credit Limit', money(s.limit))}
-      ${tile('Debit', money(s.creditGiven))}
+      ${tile('Debit', money(s.creditGiven), '#d62828')}
       ${tile('Credit', money(s.returned), '#16a34a')}
       ${tile('Overall', overallInfo(s).text, overallInfo(s).color)}
       ${tile('Available Credit', money(s.available), s.available < 0 ? '#d62828' : '#0f172a')}
     </div>
 
-    <h4 style="margin-bottom:8px;">Add Return</h4>
-    <div id="histReturnForm" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;">
-      <input id="retAmount" type="number" min="0" step="0.01" placeholder="Amount (₹)" style="flex:1;min-width:120px;padding:9px;border:1px solid #e2e8f0;border-radius:8px;">
-      <input id="retDate" type="date" value="${today}" style="padding:9px;border:1px solid #e2e8f0;border-radius:8px;">
-      <input id="retNote" placeholder="Note (optional)" style="flex:2;min-width:160px;padding:9px;border:1px solid #e2e8f0;border-radius:8px;">
-      <button type="button" id="retSave" style="padding:9px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;">Add Return</button>
+    <h4 style="margin-bottom:8px;">Add Credit / Debit</h4>
+    <div id="histEntryForm" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px;">
+      <input id="entAmount" type="number" min="0" step="0.01" placeholder="Amount (₹)" style="flex:1;min-width:150px;${inputCss}">
+      <input id="entDate" type="date" value="${today}" style="${inputCss}">
+      <input id="entNote" placeholder="Note (optional)" style="flex:2;min-width:200px;${inputCss}">
+      <button type="button" id="creditSave" style="padding:10px 18px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-circle-plus"></i> Add Credit</button>
+      <button type="button" id="debitSave" style="padding:10px 18px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-circle-minus"></i> Add Debit</button>
     </div>
+    <p style="font-size:12px;color:#94a3b8;margin-bottom:18px;">Credit is added to the Credit total (payment / adjustment received). Debit is added to the Debit total (extra amount charged). Overall = Credit − Debit.</p>
 
     <h4 style="margin-bottom:8px;">Order History <span style="color:#94a3b8;font-weight:400;">(${s.orders.length})</span></h4>
     ${tableHTML(['Date', 'Order ID', 'Items', 'Payment', 'Order Total', 'Debit'], orderRows)}
-    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Total orders: ${money(s.totalOrders)} • Total debit: ${money(s.creditGiven)}</strong></p>
+    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Total orders: ${money(s.totalOrders)} • Order debit: ${money(s.orderCredit)} • Manual debits: ${money(s.manualDebited)} • Total debit: ${money(s.creditGiven)}</strong></p>
 
-    <h4 style="margin-bottom:8px;">Returns <span style="color:#94a3b8;font-weight:400;">(${s.returns.length})</span></h4>
-    ${tableHTML(['Date', 'Amount', 'Note', 'Added By'], returnRows)}
-    <p style="text-align:right;font-size:13px;margin:6px 0 18px;"><strong>Manual credits: ${money(s.manualReturned)} • Credit purchases: ${money(s.purchaseCredit)} • Total credit: ${money(s.returned)}</strong></p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px;margin-bottom:18px;">
+      <div>
+        <h4 style="margin-bottom:8px;color:#16a34a;">Credits <span style="color:#94a3b8;font-weight:400;">(${s.returns.length})</span></h4>
+        ${tableHTML(['Date', 'Amount', 'Note', 'Added By'], entryRows(s.returns))}
+        <p style="text-align:right;font-size:13px;margin-top:6px;"><strong>Manual credits: ${money(s.manualReturned)} • Credit purchases: ${money(s.purchaseCredit)} • Total credit: ${money(s.returned)}</strong></p>
+      </div>
+      <div>
+        <h4 style="margin-bottom:8px;color:#d62828;">Debits <span style="color:#94a3b8;font-weight:400;">(${s.debits.length})</span></h4>
+        ${tableHTML(['Date', 'Amount', 'Note', 'Added By'], entryRows(s.debits))}
+        <p style="text-align:right;font-size:13px;margin-top:6px;"><strong>Total manual debits: ${money(s.manualDebited)}</strong></p>
+      </div>
+    </div>
 
     <h4 style="margin-bottom:8px;">Purchase History <span style="color:#94a3b8;font-weight:400;">(${s.purchases.length})</span> <small style="color:#94a3b8;font-weight:400;">— bought from this party via Inventory</small></h4>
     ${tableHTML(['Date', 'Item', 'Lot No.', 'Payment', 'Amount', 'Added to Credit'], purchaseRows)}
@@ -456,25 +499,30 @@ function openCustomerHistory(c, focusReturn) {
 
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
   box.querySelector('#histEdit').addEventListener('click', () => { modal.style.display = 'none'; openCustomerEditModal(c); });
-  box.querySelector('#retSave').addEventListener('click', async () => {
-    const amount = Number(box.querySelector('#retAmount').value);
-    if (!amount || amount <= 0) { alert('Enter a valid return amount.'); return; }
-    const date = box.querySelector('#retDate').value;
+
+  const saveEntry = async kind => {
+    const amount = Number(box.querySelector('#entAmount').value);
+    if (!amount || amount <= 0) { alert(`Enter a valid ${kind} amount.`); return; }
+    const date = box.querySelector('#entDate').value;
+    const url = kind === 'credit' ? `/customer/add_return/${c.customer_id}` : `/customer/add_debit/${c.customer_id}`;
     try {
-      const res = await apiFetch(`/customer/add_return/${c.customer_id}`, {
+      const res = await apiFetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount, note: box.querySelector('#retNote').value, return_date: date ? new Date(date).toISOString() : '' })
+        body: JSON.stringify({ amount, note: box.querySelector('#entNote').value, return_date: date ? new Date(date).toISOString() : '' })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'return could not be added');
+      if (!res.ok) throw new Error(data.detail || `${kind} could not be added`);
       await loadCustomers();
       openCustomerHistory(userState.customers.find(x => x.customer_id === c.customer_id));
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
-  });
+  };
+  box.querySelector('#creditSave').addEventListener('click', () => saveEntry('credit'));
+  box.querySelector('#debitSave').addEventListener('click', () => saveEntry('debit'));
+
   modal.style.display = 'flex';
-  if (focusReturn) box.querySelector('#retAmount').focus();
+  if (focusEntry) box.querySelector('#entAmount').focus();
 }
 
 function openCustomerEditModal(c) {
@@ -486,7 +534,7 @@ function openCustomerEditModal(c) {
     <input name="${name}" type="${type || 'text'}" value="${esc(value)}" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>Edit Customer</h3>
+      <h3>Edit Company</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     <form id="custEditForm" style="display:flex;flex-direction:column;gap:6px;">
@@ -677,12 +725,14 @@ function openDeleteModal(u) {
 }
 
 // =========================================================
-// Export (CSV) — same filters as the on-screen lists, pre-filled
-// from whatever is currently applied, editable before exporting.
+// Export (CSV)
+//  - Users: 3 kinds of export (user details / orders / allocations & demo units),
+//    for everyone in the current list or only for particular users.
+//  - Companies: filters pre-filled from whatever is applied, editable before exporting.
 // =========================================================
 function downloadCSV(header, rows, filename) {
   const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
-  const csv = '\ufeff' + [header, ...rows].map(r => r.map(q).join(',')).join('\n');
+  const csv = '﻿' + [header, ...rows].map(r => r.map(q).join(',')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = filename;
@@ -691,11 +741,11 @@ function downloadCSV(header, rows, filename) {
 }
 
 function wireExportButtons() {
-  document.querySelectorAll('.export-users-btn').forEach(b => b.addEventListener('click', () => openExportModal('users')));
-  document.querySelectorAll('.export-customers-btn').forEach(b => b.addEventListener('click', () => openExportModal('customers')));
+  document.querySelectorAll('.export-users-btn').forEach(b => b.addEventListener('click', () => openUserExportModal({})));
+  document.querySelectorAll('.export-customers-btn').forEach(b => b.addEventListener('click', () => openCompanyExportModal()));
 }
 
-function openExportModal(type) {
+function getExportModal() {
   let modal = document.getElementById('exportModal');
   if (!modal) {
     modal = document.createElement('div');
@@ -705,40 +755,210 @@ function openExportModal(type) {
     document.body.appendChild(modal);
     modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
   }
+  return modal;
+}
+
+async function ensureAllocations() {
+  if (!userState.allocations || !userState.allocations.length) await loadAllocations();
+  return userState.allocations || [];
+}
+
+// same rule as the user detail popup: orders referred by the user (or raised by them)
+function orderPerson(o) {
+  return o.reference || o.creator?.raised_by || '';
+}
+
+function allocTypeLabel(a) {
+  if (a.allocation_type === 'spare_part') return 'Spare Part';
+  if (a.allocation_type === 'demo_unit') return 'Demo Unit';
+  return 'Product Allocation';
+}
+
+const EXPORT_KINDS = {
+  details: { icon: 'fa-solid fa-id-card', label: 'User details', sub: 'Username, name, role, company, mobile, email, GST, team manager' },
+  orders: { icon: 'fa-solid fa-cart-shopping', label: 'Orders', sub: 'Orders created / raised by the selected users' },
+  allocations: { icon: 'fa-solid fa-people-carry-box', label: 'Allocations / Demo units', sub: 'Allocations and demo units given to or created by the selected users' }
+};
+
+function openUserExportModal(opts) {
+  opts = opts || {};
+  const modal = getExportModal();
+  const fixed = opts.users || (opts.type ? userCardList(opts.type) : null);   // opened from a card -> that card's users
+  const title = opts.title || (opts.type ? `Export — ${CARD_TITLES[opts.type]}` : 'Export Users');
   const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;width:100%;';
   const lbl = 'font-size:13px;color:#64748b;';
-  const isUsers = type === 'users';
-  const f = userState.customerFilter;
   const roleNow = document.getElementById('roleFilter').value;
-  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Debit'], ['returned', 'Credit'], ['outstanding', 'Overall'], ['total_orders', 'Total Orders']];
+  const radioCard = (name, value, html, checked) => `
+    <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;cursor:pointer;">
+      <input type="radio" name="${name}" value="${value}" ${checked ? 'checked' : ''} style="margin-top:4px;">
+      <span>${html}</span>
+    </label>`;
 
   modal.innerHTML = `
-    <div style="background:#fff;border-radius:16px;padding:26px;width:400px;max-width:94vw;max-height:88vh;overflow-y:auto;">
+    <div style="background:#fff;border-radius:16px;padding:26px;width:520px;max-width:94vw;max-height:90vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3>Export ${isUsers ? 'Users' : 'Customers'}</h3>
+        <h3>${esc(title)}</h3>
         <button type="button" class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
       <form id="exportForm" style="display:flex;flex-direction:column;gap:8px;">
-        ${isUsers ? `
-          <label style="${lbl}">Role</label>
+        <label style="${lbl}">What do you want to export?</label>
+        ${Object.entries(EXPORT_KINDS).map(([v, k], i) =>
+          radioCard('what', v, `<strong style="font-size:14px;"><i class="${k.icon}"></i> ${k.label}</strong><br><small style="color:#64748b;">${k.sub}</small>`, i === 0)).join('')}
+
+        ${fixed ? '' : `
+          <label style="${lbl};margin-top:6px;">Role</label>
           <select name="role" style="${inp}">
             ${[['', 'All Roles'], ['admin', 'Admin'], ['accounts', 'Accounts'], ['service_manager', 'Service Manager'], ['assembly', 'Assembly'], ['technician', 'Technician'], ['distributor', 'Employee-Sales Person'], ['inventory_manager', 'Inventory Manager']]
               .map(([v, l]) => `<option value="${v}" ${(roleNow === v || (v === '' && roleNow === 'All Roles')) ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
           <label style="${lbl}">Search (username or name)</label>
-          <input name="text" style="${inp}" placeholder="Search username or name" value="${esc(userState.userSearch)}">
-        ` : `
-          <label style="${lbl}">Search (company, GST, contact, address)</label>
-          <input name="text" style="${inp}" placeholder="Search" value="${esc(f.text)}">
-          <label style="${lbl}">Amount field</label>
-          <select name="field" style="${inp}">
-            ${amountOpts.map(([v, l]) => `<option value="${v}" ${f.field === v ? 'selected' : ''}>${l}</option>`).join('')}
-          </select>
-          <label style="${lbl}">Min amount</label>
-          <input name="min" type="number" min="0" style="${inp}" placeholder="Min" value="${esc(f.min)}">
-          <label style="${lbl}">Max amount</label>
-          <input name="max" type="number" min="0" style="${inp}" placeholder="Max" value="${esc(f.max)}">
-        `}
+          <input name="text" style="${inp}" placeholder="Search username or name" value="${esc(userState.userSearch)}">`}
+
+        <label style="${lbl};margin-top:6px;">For whom?</label>
+        ${radioCard('scope', 'all', `<strong style="font-size:14px;">Everyone in this list</strong> <small style="color:#64748b;">(<span id="allCount">0</span> users)</small>`, true)}
+        ${radioCard('scope', 'particular', `<strong style="font-size:14px;">Particular users only</strong>`, false)}
+
+        <div id="pickBox" style="display:none;border:1px solid #e2e8f0;border-radius:10px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px;">
+            <span><strong id="pickCount">0</strong> selected</span>
+            <span>
+              <button type="button" id="pickAll" style="border:none;background:none;color:#1665ff;cursor:pointer;">Select all</button> •
+              <button type="button" id="pickNone" style="border:none;background:none;color:#1665ff;cursor:pointer;">Clear</button>
+            </span>
+          </div>
+          <div id="pickList" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;"></div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;"><i class="fa-solid fa-download"></i> Export</button>
+        </div>
+      </form>
+    </div>`;
+
+  const form = modal.querySelector('#exportForm');
+  const roleSel = form.querySelector('[name=role]');
+  const textInp = form.querySelector('[name=text]');
+  const selected = new Set();
+  const baseList = () => fixed || filteredUsers(roleSel ? roleSel.value : '', textInp ? textInp.value : '');
+  const scopeVal = () => form.querySelector('[name=scope]:checked').value;
+  const updatePickCount = () => { form.querySelector('#pickCount').textContent = baseList().filter(u => selected.has(u.username)).length; };
+
+  const refresh = () => {
+    const base = baseList();
+    form.querySelector('#allCount').textContent = base.length;
+    form.querySelector('#pickBox').style.display = scopeVal() === 'particular' ? 'block' : 'none';
+    form.querySelector('#pickList').innerHTML = base.map(u => `
+      <label style="display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer;font-size:13px;">
+        <input type="checkbox" class="pick" value="${esc(u.username)}" ${selected.has(u.username) ? 'checked' : ''}>
+        <span>${esc(u.full_name ?? u.name ?? u.username)} <small style="color:#94a3b8;">(${esc(u.username)}) • ${esc(displayRole(u.role))}</small></span>
+      </label>`).join('') || '<p style="color:#94a3b8;font-size:13px;">No users match</p>';
+    updatePickCount();
+  };
+
+  form.addEventListener('change', e => {
+    if (e.target.classList.contains('pick')) {
+      if (e.target.checked) selected.add(e.target.value); else selected.delete(e.target.value);
+      updatePickCount();
+    } else {
+      refresh();
+    }
+  });
+  form.addEventListener('input', e => { if (e.target === textInp) refresh(); });
+  form.querySelector('#pickAll').addEventListener('click', () => { baseList().forEach(u => selected.add(u.username)); refresh(); });
+  form.querySelector('#pickNone').addEventListener('click', () => { selected.clear(); refresh(); });
+  modal.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.querySelector('.cancel-btn').addEventListener('click', () => { modal.style.display = 'none'; });
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const base = baseList();
+    const list = scopeVal() === 'all' ? base : base.filter(u => selected.has(u.username));
+    if (!list.length) { alert(scopeVal() === 'all' ? 'No users match these filters.' : 'Select at least one user.'); return; }
+    const what = form.querySelector('[name=what]:checked').value;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const byUsername = new Map(list.map(u => [u.username, u]));
+    const nameOf = u => u.full_name ?? u.name ?? '';
+
+    try {
+      if (what === 'details') {
+        downloadCSV(['Username', 'Name', 'Role', 'Company', 'Mobile', 'Email', 'GST Number', 'Team Manager'],
+          list.map(u => [u.username, nameOf(u), displayRole(u.role), u.company_name, u.mobile_no ?? u.phone,
+            u.email_id ?? u.email ?? '', u.gst_number ?? '', u.role === 'distributor' ? (u.manager || '') : '']),
+          `users_${stamp}.csv`);
+      } else if (what === 'orders') {
+        const rows = [];
+        userState.orders.forEach(o => {
+          const u = byUsername.get(orderPerson(o));
+          if (!u) return;
+          const items = o.items || [];
+          const cr = o.creator || {};
+          rows.push([u.username, nameOf(u), o.order_id, fmtDate(o.order_date), o.customer?.company_name, o.customer?.gst_number,
+            items.map(i => `${i.product_name} x${i.quantity}`).join('; '),
+            items.flatMap(i => i.serial_numbers || []).join('; '),
+            o.payment_mode, o.total_mrp, o.status,
+            cr.type === 'request' ? `Request (approved by ${cr.approved_by || '-'})` : 'Direct']);
+        });
+        if (!rows.length) { alert('No orders found for the selected users.'); return; }
+        downloadCSV(['Username', 'Name', 'Order ID', 'Order Date', 'Company', 'GST', 'Items', 'Serial Numbers', 'Payment Mode', 'Order Total', 'Status', 'Created Via'],
+          rows, `user_orders_${stamp}.csv`);
+      } else {
+        const allocations = await ensureAllocations();
+        const rows = [];
+        allocations.forEach(a => {
+          if (a.allocation_type === 'spare_part') return;
+          const u = byUsername.get(a.allocated_by) || byUsername.get(a.sales_person?.username);
+          if (!u) return;
+          const isSpare = a.allocation_type === 'spare_part';
+          const items = isSpare ? [] : (a.items || []);
+          const what2 = isSpare
+            ? `${a.spare_part?.part_name || ''} x${a.spare_part?.quantity || 1}`
+            : items.map(i => `${i.product_name} x${i.quantity}`).join('; ');
+          rows.push([u.username, nameOf(u), a.allocation_id, allocTypeLabel(a), fmtDate(a.allotment_date),
+            a.customer?.company_name || a.company_name || '', what2,
+            items.flatMap(i => i.serial_numbers || []).join('; '),
+            a.sales_person?.name || a.allocated_by || '', a.created_by || '',
+            a.return_status === 'returned' ? 'Returned' : (a.dispatch ? 'With customer' : 'Allocated'), a.dispatch ? 'Yes' : 'No', a.dispatch?.invoice_no || '']);
+        });
+        if (!rows.length) { alert('No allocations / demo units found for the selected users.'); return; }
+        downloadCSV(['Username', 'Name', 'Allocation ID', 'Type', 'Date', 'Company / Customer', 'Items / Part', 'Serial Numbers', 'Allocated To', 'Created By', 'Return Status', 'Dispatched', 'Invoice No'],
+          rows, `user_allocations_${stamp}.csv`);
+      }
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not export: ' + err.message);
+      return;
+    }
+    modal.style.display = 'none';
+  });
+
+  refresh();
+  modal.style.display = 'flex';
+}
+
+function openCompanyExportModal() {
+  const modal = getExportModal();
+  const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;width:100%;';
+  const lbl = 'font-size:13px;color:#64748b;';
+  const f = userState.customerFilter;
+  const amountOpts = [['credit_limit', 'Credit Limit'], ['credit_given', 'Debit'], ['returned', 'Credit'], ['outstanding', 'Overall'], ['total_orders', 'Total Orders']];
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:26px;width:400px;max-width:94vw;max-height:88vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3>Export Companies</h3>
+        <button type="button" class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <form id="exportForm" style="display:flex;flex-direction:column;gap:8px;">
+        <label style="${lbl}">Search (company, GST, contact, address)</label>
+        <input name="text" style="${inp}" placeholder="Search" value="${esc(f.text)}">
+        <label style="${lbl}">Amount field</label>
+        <select name="field" style="${inp}">
+          ${amountOpts.map(([v, l]) => `<option value="${v}" ${f.field === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <label style="${lbl}">Min amount</label>
+        <input name="min" type="number" min="0" style="${inp}" placeholder="Min" value="${esc(f.min)}">
+        <label style="${lbl}">Max amount</label>
+        <input name="max" type="number" min="0" style="${inp}" placeholder="Max" value="${esc(f.max)}">
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:12px;">
           <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
           <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;"><i class="fa-solid fa-download"></i> Export</button>
@@ -752,21 +972,12 @@ function openExportModal(type) {
     e.preventDefault();
     const fd = new FormData(e.target);
     const stamp = new Date().toISOString().slice(0, 10);
-    if (isUsers) {
-      const list = filteredUsers(fd.get('role') || '', fd.get('text') || '');
-      if (!list.length) { alert('No users match these filters.'); return; }
-      downloadCSV(['Username', 'Name', 'Role', 'Company', 'Mobile', 'Email', 'GST Number', 'Team Manager'],
-        list.map(u => [u.username, u.full_name ?? u.name, displayRole(u.role), u.company_name, u.mobile_no ?? u.phone,
-          u.email_id ?? u.email ?? '', u.gst_number ?? '', u.role === 'distributor' ? (u.manager || '') : '']),
-        `users_${stamp}.csv`);
-    } else {
-      const rows = customerRows({ text: fd.get('text') || '', field: fd.get('field') || 'credit_limit', min: fd.get('min') ?? '', max: fd.get('max') ?? '' });
-      if (!rows.length) { alert('No customers match these filters.'); return; }
-      downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Overall', 'Total Orders'],
-        rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
-          s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
-        `customers_${stamp}.csv`);
-    }
+    const rows = customerRows({ text: fd.get('text') || '', field: fd.get('field') || 'credit_limit', min: fd.get('min') ?? '', max: fd.get('max') ?? '' });
+    if (!rows.length) { alert('No companies match these filters.'); return; }
+    downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Overall', 'Total Orders'],
+      rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
+        s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
+      `companies_${stamp}.csv`);
     modal.style.display = 'none';
   });
   modal.style.display = 'flex';

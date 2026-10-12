@@ -3840,6 +3840,35 @@ def add_customer_return(customer_id: str, request: CustomerReturnRequest, user: 
         raise HTTPException(status_code=500, detail="return could not be added")
 
 
+@app.post("/customer/add_debit/{customer_id}")
+def add_customer_debit(customer_id: str, request: CustomerReturnRequest, user: dict = Depends(require_role("admin", "accounts"))):
+    """Adds a manual Debit entry for a company (counts towards its Debit total).
+    Credit entries (formerly 'returns') are still added via /customer/add_return/{customer_id}."""
+    try:
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="debit amount must be greater than zero")
+        db = customer_manager()
+        found = db.get_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id})
+        if not found:
+            raise HTTPException(status_code=404, detail="no customer found with this id")
+        debits = list(found[0].get("debits") or [])
+        debits.append({
+            "amount": request.amount,
+            "note": (request.note or "").strip(),
+            "debit_date": request.return_date or datetime.now(timezone.utc).isoformat(),
+            "added_by": user["username"],
+            "added_at": datetime.now(timezone.utc).isoformat()
+        })
+        db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
+                  update_values={"debits": debits})
+        return {"message": "debit added", "customer_id": customer_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("adding customer debit failed!")
+        raise HTTPException(status_code=500, detail="debit could not be added")
+
+
 @app.post("/customer/delete/{customer_id}")
 def delete_customer(customer_id: str, user: dict = Depends(require_role("admin"))):
     try:

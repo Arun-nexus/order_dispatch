@@ -16,6 +16,15 @@
     .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
     .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
   </style>
+  <style id="companies-table-fix">
+    /* Companies table: big amounts must never run into each other */
+    #customersSection .table-container { overflow-x: auto; }
+    #customersSection table { table-layout: auto; width: 100%; min-width: 1300px; }
+    #customersSection th, #customersSection td { padding: 12px 16px; vertical-align: middle; }
+    #customersSection th.amt, #customersSection td.amt { text-align: right; white-space: nowrap; min-width: 160px; font-variant-numeric: tabular-nums; }
+    #customersSection td.wide { min-width: 220px; }
+    #customersSection tfoot td { font-weight: 700; background: #f8fafc; border-top: 2px solid #e2e8f0; }
+  </style>
 </head>
 
 <body>
@@ -124,7 +133,7 @@
           <i class="fa-solid fa-boxes-stacked"></i>
         </div>
         <div class="card" data-card-filter="customers" style="cursor:pointer;">
-          <div><span>Customers</span>
+          <div><span>Companies</span>
             <h2 id="cardCustomers">0</h2>
             <p>Credit &amp; order history</p>
           </div>
@@ -134,7 +143,7 @@
 
       <div style="display:flex;gap:8px;margin:0 0 14px;">
         <button type="button" class="sectionTab" data-tab="users" style="padding:10px 20px;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Users</button>
-        <button type="button" class="sectionTab" data-tab="customers" style="padding:10px 20px;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Customers <span id="customerTabCount"></span></button>
+        <button type="button" class="sectionTab" data-tab="customers" style="padding:10px 20px;border:none;border-radius:8px;cursor:pointer;font-weight:600;">Companies <span id="customerTabCount"></span></button>
       </div>
 
       <div id="usersSection">
@@ -217,8 +226,8 @@
           <table>
             <thead>
               <tr>
-                <th>Customer</th><th>GST</th><th>Contact</th><th>Credit Limit</th>
-                <th>Debit</th><th>Credit</th><th>Overall</th><th>Actions</th>
+                <th>Company</th><th>GST</th><th>Contact</th><th class="amt">Credit Limit</th>
+                <th class="amt">Debit</th><th class="amt">Credit</th><th class="amt">Overall</th><th>Actions</th>
               </tr>
             </thead>
             <tbody id="customersTbody"></tbody>
@@ -253,10 +262,10 @@
       style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;"></div>
   </div>
 
-  <!-- Customer modals (content built by users.js) -->
+  <!-- Company modals (content built by users.js) -->
   <div id="customerHistoryModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:720px;max-width:94vw;max-height:88vh;overflow-y:auto;"></div>
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:28px;width:1100px;max-width:96vw;max-height:92vh;overflow-y:auto;"></div>
   </div>
   <div id="customerEditModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
@@ -264,7 +273,7 @@
   </div>
   <div id="userCardDetailModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:760px;max-width:94vw;max-height:88vh;overflow-y:auto;"></div>
+    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:960px;max-width:96vw;max-height:90vh;overflow-y:auto;"></div>
   </div>
 
   <!-- Delete Confirm Modal -->
