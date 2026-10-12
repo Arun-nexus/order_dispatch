@@ -60,6 +60,26 @@ function curMoney(n, cur) {
 function draftTotal(s) {
   return (s.products || []).reduce((t, p) => t + (Number(p.price) || 0) * (Number(p.quantity) || 0), 0);
 }
+const PAYMENT_LABELS = { paid: 'Paid', partial: 'Partial (part now, rest on credit)', credit: 'Credit' };
+function addDays(dateStr, days) {
+  const d = new Date(dateStr || todayStr());
+  if (isNaN(d)) return '';
+  d.setDate(d.getDate() + (Number(days) || 0));
+  return d.toISOString().slice(0, 10);
+}
+// payment summary for the view modal
+function paymentSummaryHtml(s) {
+  const total = draftTotal(s);
+  const mode = s.paymentMode || 'paid';
+  if (mode === 'paid') return '<div class="detail"><small>Payment</small><p>Paid in full</p></div>';
+  const paid = mode === 'partial' ? (Number(s.paidAmount) || 0) : 0;
+  const due = s.dueDate || addDays(s.dispatchDate, s.creditDays);
+  return `
+    <div class="detail"><small>Payment</small><p>${mode === 'partial' ? 'Partial — part paid, rest on credit' : 'Credit'}</p></div>
+    <div class="detail"><small>Paid now</small><p>${curMoney(paid, s.currency)}</p></div>
+    <div class="detail"><small>On credit (balance)</small><p>${curMoney(Math.max(total - paid, 0), s.currency)}</p></div>
+    <div class="detail"><small>Credit time</small><p>${s.creditDays} day(s) — due ${due || '—'}<br><small style="color:#94a3b8;">Later payments are tracked in Users → Companies.</small></p></div>`;
+}
 async function loadCompanyList() {
   try {
     const r = await apiFetch('/customer/company_list');
@@ -74,6 +94,9 @@ function fromServerShape(s) {
     companyAddress: s.company_address,
     customerId: s.customer_id || '',
     paymentMode: s.payment_mode || 'paid',
+    paidAmount: Number(s.paid_amount) || 0,
+    creditDays: Number(s.credit_days) || 0,
+    dueDate: s.due_date || '',
     currency: s.currency || 'INR',
     exchangeRate: Number(s.exchange_rate) || 1,
     totalInr: s.total_inr,
@@ -100,6 +123,8 @@ function toServerShape(s) {
     contractor_number: s.contactNumber || '',
     contractor_email: s.contactEmail || '',
     payment_mode: s.paymentMode || 'paid',
+    paid_amount: s.paymentMode === 'partial' ? (Number(s.paidAmount) || 0) : 0,
+    credit_days: s.paymentMode === 'paid' ? 0 : (Number(s.creditDays) || 0),
     currency: s.currency || 'INR',
     exchange_rate: Number(s.exchangeRate) || 1,
     dispatch_date: s.dispatchDate,
@@ -301,7 +326,7 @@ function openViewModal(id) {
     </div>
     <div class="detail"><small>Company Name</small><p>${s.companyName}</p></div>
     <div class="detail"><small>Company Address</small><p>${s.companyAddress || '—'}</p></div>
-    <div class="detail"><small>Payment</small><p>${s.paymentMode === 'credit' ? 'Credit' : 'Paid'}</p></div>
+    ${paymentSummaryHtml(s)}
     <div class="detail"><small>Total</small><p>${curMoney(draftTotal(s), s.currency)}${s.currency !== 'INR' ? ` ≈ ${money(s.totalInr)} (₹${s.exchangeRate}/${s.currency})` : ''}</p></div>
     <div class="detail"><small>Dispatch Date</small><p>${s.dispatchDate || '—'}</p></div>
     <div class="detail"><small>Received Date</small><p>${s.receivedDate || 'Not received yet'}</p></div>
@@ -442,6 +467,8 @@ async function openAddShipmentModal() {
     contactNumber: '',
     contactEmail: '',
     paymentMode: 'paid',
+    paidAmount: 0,
+    creditDays: '',
     currency: 'INR',
     exchangeRate: 1,
     rateNote: '',
@@ -483,6 +510,7 @@ function readStep1() {
   if (g('s1Dispatch')) d.dispatchDate = g('s1Dispatch').value;
   if (g('s1ReceivedDate')) d.receivedDate = g('s1ReceivedDate').value;
   if (g('s1Payment')) d.paymentMode = g('s1Payment').value;
+  if (g('s1CreditDays')) d.creditDays = g('s1CreditDays').value;
   if (g('s1Rate')) d.exchangeRate = Number(g('s1Rate').value) || 0;
   if (g('s1CompanyName')) {
     d.companyName = g('s1CompanyName').value.trim();
@@ -543,8 +571,9 @@ function renderStep1() {
         <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
           <label style="font-size:13px;color:#64748b;">Payment</label>
           <select id="s1Payment">
-            <option value="paid" ${d.paymentMode === 'paid' ? 'selected' : ''}>Paid</option>
-            <option value="credit" ${d.paymentMode === 'credit' ? 'selected' : ''}>Credit</option>
+            <option value="paid" ${d.paymentMode === 'paid' ? 'selected' : ''}>Paid (full)</option>
+            <option value="partial" ${d.paymentMode === 'partial' ? 'selected' : ''}>Partial (part now, rest later)</option>
+            <option value="credit" ${d.paymentMode === 'credit' ? 'selected' : ''}>Credit (pay later)</option>
           </select>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
@@ -554,6 +583,15 @@ function renderStep1() {
           </select>
         </div>
       </div>
+      ${d.paymentMode !== 'paid' ? `
+        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;">
+          <label style="font-size:13px;color:#9a3412;font-weight:600;">In how many days will the ${d.paymentMode === 'partial' ? 'remaining' : ''} payment be made?</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="s1CreditDays" type="number" min="1" max="365" step="1" placeholder="Credit time (days)" value="${esc(d.creditDays)}" style="flex:1;">
+            <span style="font-size:12px;color:#9a3412;white-space:nowrap;" id="s1DueHint"></span>
+          </div>
+          ${d.paymentMode === 'partial' ? '<small style="color:#9a3412;">The amount paid now is asked on the next step, once products and prices are added.</small>' : ''}
+        </div>` : ''}
       ${d.currency !== 'INR' ? `
         <div style="display:flex;gap:8px;align-items:center;">
           <span style="font-size:13px;color:#64748b;white-space:nowrap;">1 ${d.currency} = ₹</span>
@@ -585,6 +623,21 @@ function renderStep1() {
     d.contactEmail = c ? (c.contractor_email || '') : '';
     renderStep1();
   });
+  box.querySelector('#s1Payment').addEventListener('change', (e) => {
+    readStep1();
+    d.paymentMode = e.target.value;
+    renderStep1();
+  });
+  const refreshDueHint = () => {
+    const hint = box.querySelector('#s1DueHint');
+    if (!hint) return;
+    const days = Number(box.querySelector('#s1CreditDays').value) || 0;
+    const disp = box.querySelector('#s1Dispatch').value;
+    hint.textContent = days > 0 ? `Due on ${addDays(disp, days)}` : '';
+  };
+  box.querySelector('#s1CreditDays')?.addEventListener('input', refreshDueHint);
+  box.querySelector('#s1Dispatch').addEventListener('change', refreshDueHint);
+  refreshDueHint();
   box.querySelector('#s1Currency').addEventListener('change', (e) => {
     readStep1();
     d.currency = e.target.value;
@@ -596,6 +649,11 @@ function renderStep1() {
     readStep1();
     if (!d.companyName) return showResponseModal('Company required', 'Select a company or enter its name.', false);
     if (d.currency !== 'INR' && !(d.exchangeRate > 0)) return showResponseModal('Rate required', 'Enter a valid exchange rate.', false);
+    if (d.paymentMode !== 'paid') {
+      const days = Number(d.creditDays);
+      if (!Number.isInteger(days) || days < 1 || days > 365) return showResponseModal('Credit time required', 'Enter in how many days (1-365) the payment will be made.', false);
+      d.creditDays = days;
+    }
     shipmentStep = 2;
     renderShipmentStep();
   });
@@ -613,6 +671,12 @@ function renderStep2() {
     <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Add every product going out in this shipment.</p>
     <div id="productRows" style="display:flex;flex-direction:column;gap:10px;"></div>
     <p id="shipTotals" style="margin-top:12px;font-size:13px;font-weight:600;color:#334155;text-align:right;"></p>
+    ${shipmentDraft.paymentMode === 'partial' ? `
+      <div style="margin-top:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px;">
+        <label style="font-size:13px;color:#9a3412;font-weight:600;">Amount paid now (${shipmentDraft.currency})</label>
+        <input id="s2PaidAmount" type="number" min="0" step="any" placeholder="e.g. half of the total" value="${shipmentDraft.paidAmount || ''}" style="width:100%;margin-top:4px;">
+        <p id="s2PaidHint" style="font-size:12px;color:#9a3412;margin-top:6px;"></p>
+      </div>` : ''}
     <button type="button" id="addProductRowBtn" style="margin-top:10px;padding:10px 14px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
       <i class="fa-solid fa-plus"></i> Add Product
     </button>
@@ -635,12 +699,21 @@ function renderStep2() {
     renderProductRows();
   });
 
+  box.querySelector('#s2PaidAmount')?.addEventListener('input', updateShipTotals);
   box.querySelector('#shipNextToPartsBtn').addEventListener('click', () => {
     readProductRowsIntoDraft();
     const valid = shipmentDraft.products.filter(p => p.name && p.quantity);
     if (!valid.length) {
       showResponseModal('Add a product', 'Please add at least one product with a name and quantity.', false);
       return;
+    }
+    if (shipmentDraft.paymentMode === 'partial') {
+      const total = draftTotal({ products: valid });
+      const paid = Number(shipmentDraft.paidAmount) || 0;
+      if (!(paid > 0) || paid >= total) {
+        showResponseModal('Check paid amount', 'For a partial payment, the amount paid now must be more than 0 and less than the total (' + curMoney(total, shipmentDraft.currency) + ').', false);
+        return;
+      }
     }
     shipmentDraft.products = valid.map(p => ({ ...p, warranty: p.warranty || '', parts: p.parts || [] }));
     shipmentStep = 3;
@@ -686,6 +759,15 @@ function updateShipTotals() {
   el.textContent = d.currency === 'INR'
     ? `Total: ${money(t)}`
     : `Total: ${curMoney(t, d.currency)} ≈ ${money(Math.round(t * d.exchangeRate * 100) / 100)} (at ₹${d.exchangeRate}/${d.currency})`;
+  const paidInput = document.getElementById('s2PaidAmount');
+  if (paidInput) {
+    d.paidAmount = Number(paidInput.value) || 0;
+    const hint = document.getElementById('s2PaidHint');
+    if (hint) {
+      const left = Math.max(t - d.paidAmount, 0);
+      hint.textContent = `Balance ${curMoney(left, d.currency)} on credit for ${d.creditDays} day(s) — due ${addDays(d.dispatchDate, d.creditDays)}`;
+    }
+  }
 }
 
 function readProductRowsIntoDraft() {
@@ -837,6 +919,11 @@ async function finalizeShipment() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(toServerShape(shipmentDraft))
     });
+    if (res.status === 400 || res.status === 422) {
+      const err = await res.json().catch(() => ({}));
+      showResponseModal('Shipment not saved', typeof err.detail === 'string' ? err.detail : 'Please check the payment details.', false);
+      return;
+    }
     if (res.ok) {
       const data = await res.json();
       if (data.shipment_id) shipmentDraft.id = data.shipment_id;

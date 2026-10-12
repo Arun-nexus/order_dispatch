@@ -829,60 +829,112 @@ async function openEditAllocationModal(a) {
 }
 
 // ---------- Convert a dispatched demo unit straight into an order ----------
-function openConvertAllocationModal(a) {
+// The company is picked from the companies already on file (Users → Companies);
+// "Create new company" is still there for a customer that is not registered yet.
+async function openConvertAllocationModal(a) {
   if (!a) return;
   const modal = document.getElementById('viewAllocationModal');
   const content = modal.querySelector('.modal-content');
   content.style.maxHeight = '86vh'; content.style.overflowY = 'auto';
+
+  let companies = [];
+  try {
+    const r = await apiFetch('/customer/company_list');
+    if (r.ok) companies = (await r.json()).dataset || [];
+  } catch (e) { companies = []; }
+
   const c = a.customer || {};
-  const inp = 'width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;';
   const today = new Date().toISOString().slice(0, 10);
-  content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <h3>Convert to Order</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-    </div>
-    ${(a.items || []).map(i => itemDetailBlock(i, false)).join('')}
-    <p style="font-size:12px;color:#64748b;margin-bottom:8px;">Enter the customer's company details. The demo unit moves to Orders (stock is not changed again).</p>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <input id="cvCompany" placeholder="Company Name *" value="${esc(c.company_name || '')}" style="${inp}">
-      <input id="cvAddress" placeholder="Company Address *" value="${esc(c.company_address || c.address || '')}" style="${inp}">
-      <input id="cvGst" placeholder="GST Number" value="${esc(c.gst_number || '')}" style="${inp}">
-      <input id="cvPrice" type="number" min="0" step="any" placeholder="Price per unit (₹) *" value="${a.convert_request?.price || ''}" style="${inp}">
-      <input id="cvTax" type="number" min="0" step="any" placeholder="Tax Rate (%)" value="${a.convert_request?.tax_rate || ''}" style="${inp}">
-      <input id="cvInvNo" placeholder="Invoice Number *" style="${inp}">
-      <input id="cvInvDate" type="date" value="${today}" style="${inp}">
-    </div>
-    <div style="display:flex;justify-content:space-between;margin-top:14px;">
-      <button type="button" id="cvCancel" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
-      <button type="button" id="cvSave" style="padding:10px 16px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Create Order</button>
-    </div>`;
-  const close = () => modal.style.display = 'none';
-  content.querySelector('.close').addEventListener('click', close);
-  document.getElementById('cvCancel').addEventListener('click', close);
-  document.getElementById('cvSave').addEventListener('click', async () => {
-    const v = id => document.getElementById(id).value.trim();
-    const body = {
-      company_name: v('cvCompany'), company_address: v('cvAddress'), gst_number: v('cvGst'),
-      price: Number(v('cvPrice')) || 0, tax_rate: Number(v('cvTax')) || 0,
-      invoice_no: v('cvInvNo'), invoice_date: v('cvInvDate'),
-    };
-    if (!body.company_name || !body.company_address) return alert('Company name and address are required.');
-    if (body.price <= 0) return alert('Enter a valid price.');
-    if (!body.invoice_no || !body.invoice_date) return alert('Invoice number and date are required.');
-    try {
-      const res = await apiFetch(`/allocation/convert_to_order_direct/${a.allocation_id}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'conversion failed');
-      close();
-      await loadAllocations();
-      alert(`${data.message}\nOrder ID: ${data.order_id}`);
-    } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  const inp = 'width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;';
+  const norm = v => String(v || '').trim().toLowerCase();
+  // pre-select the company the demo was allotted against, if it is already registered
+  const preset = companies.find(x => c.customer_id && x.customer_id === c.customer_id)
+    || companies.find(x => norm(x.company_name) && norm(x.company_name) === norm(c.company_name));
+  const st = {
+    customerId: preset ? preset.customer_id : '',
+    company: c.company_name || '', address: c.company_address || c.address || '', gst: c.gst_number || '',
+    price: a.convert_request?.price || '', tax: a.convert_request?.tax_rate || '', invNo: '', invDate: today,
+  };
+
+  const draw = () => {
+    const picked = companies.find(x => x.customer_id === st.customerId);
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h3>Convert to Order</h3>
+        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      ${(a.items || []).map(i => itemDetailBlock(i, false)).join('')}
+      <p style="font-size:12px;color:#64748b;margin-bottom:8px;">Pick the customer's company. The demo unit moves to Orders (stock is not changed again).</p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <select id="cvPick" style="${inp}">
+          <option value="">➕ Create new company</option>
+          ${companies.map(x => `<option value="${esc(x.customer_id)}" ${x.customer_id === st.customerId ? 'selected' : ''}>${esc(x.company_name)}</option>`).join('')}
+        </select>
+        ${picked ? `
+          <div style="background:#f8fafc;border-radius:10px;padding:10px;font-size:13px;color:#475569;">
+            <div><strong>${esc(picked.company_name)}</strong></div>
+            <div>${esc(picked.company_address) || '—'}</div>
+            <div>GST: ${esc(picked.gst_number) || '—'}${picked.contractor_person ? ' • ' + esc(picked.contractor_person) : ''} ${esc(picked.contractor_number || '')}</div>
+          </div>` : `
+          <input id="cvCompany" placeholder="Company Name *" value="${esc(st.company)}" style="${inp}">
+          <input id="cvAddress" placeholder="Company Address *" value="${esc(st.address)}" style="${inp}">
+          <input id="cvGst" placeholder="GST Number" value="${esc(st.gst)}" style="${inp}">`}
+        <input id="cvPrice" type="number" min="0" step="any" placeholder="Price per unit (₹) *" value="${esc(st.price)}" style="${inp}">
+        <input id="cvTax" type="number" min="0" step="any" placeholder="Tax Rate (%)" value="${esc(st.tax)}" style="${inp}">
+        <input id="cvInvNo" placeholder="Invoice Number *" value="${esc(st.invNo)}" style="${inp}">
+        <input id="cvInvDate" type="date" value="${esc(st.invDate)}" style="${inp}">
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:14px;">
+        <button type="button" id="cvCancel" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
+        <button type="button" id="cvSave" style="padding:10px 16px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Create Order</button>
+      </div>`;
+    wire();
+  };
+
+  // keep what was typed when the company choice switches between "existing" and "new"
+  const readFields = () => {
+    const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
+    for (const [key, id] of [['company', 'cvCompany'], ['address', 'cvAddress'], ['gst', 'cvGst'], ['price', 'cvPrice'], ['tax', 'cvTax'], ['invNo', 'cvInvNo'], ['invDate', 'cvInvDate']]) {
+      const val = v(id);
+      if (val !== null) st[key] = val;
     }
-  });
+  };
+
+  const wire = () => {
+    const close = () => modal.style.display = 'none';
+    content.querySelector('.close').addEventListener('click', close);
+    document.getElementById('cvCancel').addEventListener('click', close);
+    document.getElementById('cvPick').addEventListener('change', e => { readFields(); st.customerId = e.target.value; draw(); });
+    document.getElementById('cvSave').addEventListener('click', async () => {
+      readFields();
+      const picked = companies.find(x => x.customer_id === st.customerId);
+      const body = {
+        customer_id: picked ? picked.customer_id : '',
+        company_name: picked ? picked.company_name : st.company,
+        company_address: picked ? (picked.company_address || '') : st.address,
+        gst_number: picked ? (picked.gst_number || '') : st.gst,
+        price: Number(st.price) || 0, tax_rate: Number(st.tax) || 0,
+        invoice_no: st.invNo, invoice_date: st.invDate,
+      };
+      if (!picked && (!body.company_name || !body.company_address)) return alert('Select a company, or enter the new company name and address.');
+      if (body.price <= 0) return alert('Enter a valid price.');
+      if (!body.invoice_no || !body.invoice_date) return alert('Invoice number and date are required.');
+      try {
+        const res = await apiFetch(`/allocation/convert_to_order_direct/${a.allocation_id}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'conversion failed');
+        close();
+        await loadAllocations();
+        alert(`${data.message}\nOrder ID: ${data.order_id}`);
+      } catch (err) {
+        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+      }
+    });
+  };
+
+  draw();
   modal.style.display = 'flex';
 }
 
@@ -1028,6 +1080,7 @@ function exportAllocationsCSV() {
     dateLabel: 'Allotment Date',
     personOptions: uniqueSalesPersonNames(),
     personField: 'sales_person.name',
+    withTypeFilter: true,
     getRows: () => allocState.allocations,
     onConfirm: (rows) => {
       const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Created By', 'Returned By', 'Returned On', 'Status'];
@@ -1062,7 +1115,7 @@ function downloadCSV(header, rows, filename) {
   a.click();
 }
 
-function openExportWizard({ title, statusOptions, statusField, dateField, dateLabel, personOptions, personField, getRows, onConfirm }) {
+function openExportWizard({ title, statusOptions, statusField, dateField, dateLabel, personOptions, personField, withTypeFilter, getRows, onConfirm }) {
   const field = statusField || 'status';
   let modal = document.getElementById('exportWizardModal');
   if (!modal) {
@@ -1079,6 +1132,13 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
       <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
+        ${withTypeFilter ? `
+        <label style="font-size:13px;color:#64748b;">What to export</label>
+        <select name="kind" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+          <option value="both">Both (spare parts + demo products)</option>
+          <option value="spare">Spare parts only</option>
+          <option value="demo">Demo products only</option>
+        </select>` : ''}
         ${statusOptions ? `
         <label style="font-size:13px;color:#64748b;">Status</label>
         <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
@@ -1112,10 +1172,13 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
     const fd = new FormData(e.target);
     const status = fd.get('status');
     const person = fd.get('person');
+    const kind = fd.get('kind') || 'both';
     const dateFrom = fd.get('dateFrom');
     const dateTo = fd.get('dateTo');
 
     const filtered = getRows().filter(row => {
+      if (kind === 'spare' && row.allocation_type !== 'spare_part') return false;
+      if (kind === 'demo' && row.allocation_type === 'spare_part') return false;
       if (status && row[field] !== status) return false;
       // "All" (empty) keeps every allocation type; picking a name only keeps
       // that sales person's product allocations (spare parts/demo units have

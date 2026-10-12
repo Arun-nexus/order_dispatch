@@ -1666,6 +1666,111 @@ async function loadSupplierCompanies() {
   } catch (err) { /* picker still works in manual mode */ }
 }
 
+// ---------- payment block (Paid / Partial / Credit + credit days) shared by the lot and part forms ----------
+function paymentBlockHTML(selId, hintId, required, emptyLabel) {
+  const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
+  return `
+      <select name="payment_mode" id="${selId}" ${required ? 'required' : ''} style="${inp}">
+        <option value="">${emptyLabel}</option>
+        <option value="paid">Paid (full)</option>
+        <option value="partial">Partial (part now, rest later)</option>
+        <option value="credit">Credit (pay later)</option>
+      </select>
+      <div class="payExtra" style="display:none;flex-direction:column;gap:8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px;">
+        <div class="payPaidWrap" style="display:none;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;color:#9a3412;font-weight:600;">Amount paid now (₹)</label>
+          <input name="paid_amount" type="number" min="0" step="any" placeholder="e.g. half of the total" style="${inp}">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label class="payDaysLabel" style="font-size:12px;color:#9a3412;font-weight:600;">In how many days will the payment be made?</label>
+          <input name="credit_days" type="number" min="1" max="365" step="1" placeholder="Credit time (days)" style="${inp}">
+        </div>
+      </div>
+      <div id="${hintId}" style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;"></div>`;
+}
+
+function paymentTotal(form) {
+  const qty = Math.max(0, Number(form.querySelector('[name="quantity"]').value) || 0);
+  const price = Number(String(form.querySelector('[name="price"]').value).replace(/,/g, '')) || 0;
+  const tax = Number(form.querySelector('[name="tax_rate"]').value) || 0;
+  return Math.round(price * qty * (1 + tax / 100) * 100) / 100;
+}
+
+function paymentDueDate(form) {
+  const days = Number(form.querySelector('[name="credit_days"]').value) || 0;
+  const base = form.querySelector('[name="purchase_date"]').value || new Date().toISOString().slice(0, 10);
+  const d = new Date(base);
+  if (!days || isNaN(d)) return '';
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// returns an error message, or '' when the payment fields are fine
+function validatePaymentFields(form) {
+  const mode = form.querySelector('[name="payment_mode"]').value;
+  if (mode !== 'partial' && mode !== 'credit') return '';
+  const days = Number(form.querySelector('[name="credit_days"]').value);
+  if (!Number.isInteger(days) || days < 1 || days > 365) return 'Enter in how many days (1-365) the payment will be made.';
+  if (mode === 'partial') {
+    const paid = Number(form.querySelector('[name="paid_amount"]').value) || 0;
+    const total = paymentTotal(form);
+    if (paid <= 0) return 'Enter the amount paid now for a partial payment.';
+    if (total > 0 && paid >= total) return 'Partial payment must be less than the total — choose Paid instead.';
+  }
+  return '';
+}
+
+function readPaymentFields(form) {
+  const mode = form.querySelector('[name="payment_mode"]').value;
+  return {
+    payment_mode: mode || '',
+    paid_amount: mode === 'partial' ? (Number(form.querySelector('[name="paid_amount"]').value) || 0) : 0,
+    credit_days: (mode === 'partial' || mode === 'credit') ? (Number(form.querySelector('[name="credit_days"]').value) || 0) : 0
+  };
+}
+
+// shows/hides the extra fields and keeps the coloured hint under the select up to date
+function wirePaymentBlock(form, selId, hintId) {
+  const sel = form.querySelector('#' + selId);
+  const hint = form.querySelector('#' + hintId);
+  const extra = form.querySelector('.payExtra');
+  const refresh = () => {
+    const mode = sel.value;
+    extra.style.display = (mode === 'partial' || mode === 'credit') ? 'flex' : 'none';
+    form.querySelector('.payPaidWrap').style.display = mode === 'partial' ? 'flex' : 'none';
+    form.querySelector('.payDaysLabel').textContent = mode === 'partial'
+      ? 'In how many days will the remaining payment be made?' : 'In how many days will the payment be made?';
+    if (!mode) { hint.style.display = 'none'; return; }
+    const total = paymentTotal(form);
+    const fmt = n => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const sup = readSupplier(form).supplier;
+    const due = paymentDueDate(form);
+    const dueTxt = due ? `, due on ${due}` : '';
+    hint.style.display = 'block';
+    if (!sup) {
+      hint.style.cssText += 'background:#fef3c7;color:#92400e;';
+      hint.textContent = 'Select a company above so this purchase can be recorded against it.';
+    } else if (mode === 'credit') {
+      hint.style.cssText += 'background:#fee2e2;color:#991b1b;';
+      hint.textContent = `Credit: ${fmt(total)} will be added to "${sup}" under Credit (Users → Companies) and shown in its history${dueTxt}.`;
+    } else if (mode === 'partial') {
+      const paid = Number(form.querySelector('[name="paid_amount"]').value) || 0;
+      hint.style.cssText += 'background:#ffedd5;color:#9a3412;';
+      hint.textContent = `Partial: ${fmt(paid)} paid now, ${fmt(Math.max(total - paid, 0))} of ${fmt(total)} goes on Credit for "${sup}"${dueTxt}.`;
+    } else {
+      hint.style.cssText += 'background:#dcfce7;color:#166534;';
+      hint.textContent = `Paid: ${fmt(total)} is noted in "${sup}" history only — nothing added to Credit.`;
+    }
+  };
+  sel.addEventListener('change', refresh);
+  form.addEventListener('supplierchange', refresh);
+  ['quantity', 'price', 'tax_rate', 'paid_amount', 'credit_days', 'purchase_date'].forEach(n => {
+    const el = form.querySelector(`[name="${n}"]`);
+    if (el) { el.addEventListener('input', refresh); el.addEventListener('change', refresh); }
+  });
+  return refresh;
+}
+
 function supplierBlockHTML(optional) {
   const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
   return `
@@ -1806,12 +1911,7 @@ function renderPartDetailsStep() {
       <input name="price" type="number" min="0" step="any" placeholder="Price (per unit)" required>
       <input name="tax_rate" type="number" min="0" step="any" placeholder="Tax Rate (%)" required>
       ${lbl('Payment — how was this purchase paid?')}
-      <select name="payment_mode" id="partPaymentMode" required style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-        <option value="">Select payment type</option>
-        <option value="paid">Paid</option>
-        <option value="credit">Credit (pay later)</option>
-      </select>
-      <div id="partPaymentHint" style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;"></div>
+      ${paymentBlockHTML('partPaymentMode', 'partPaymentHint', true, 'Select payment type')}
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
         <button type="button" id="backPart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save</button>
@@ -1820,30 +1920,7 @@ function renderPartDetailsStep() {
   document.getElementById('backPart').addEventListener('click', renderAddTypeStep);
   const partFormEl = document.getElementById('partForm');
   initSupplierPicker(partFormEl, false);
-  const partHint = partFormEl.querySelector('#partPaymentHint');
-  const refreshPartHint = () => {
-    const mode = partFormEl.querySelector('#partPaymentMode').value;
-    if (!mode) { partHint.style.display = 'none'; return; }
-    const qty = Math.max(0, Number(partFormEl.querySelector('[name="quantity"]').value) || 0);
-    const price = Number(partFormEl.querySelector('[name="price"]').value) || 0;
-    const tax = Number(partFormEl.querySelector('[name="tax_rate"]').value) || 0;
-    const money = '₹' + (price * qty * (1 + tax / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    const sup = readSupplier(partFormEl).supplier;
-    partHint.style.display = 'block';
-    if (!sup) {
-      partHint.style.cssText += 'background:#fef3c7;color:#92400e;';
-      partHint.textContent = 'Select a company above so this purchase can be recorded against it.';
-    } else if (mode === 'credit') {
-      partHint.style.cssText += 'background:#fee2e2;color:#991b1b;';
-      partHint.textContent = `Credit: ${money} will be added to "${sup}" under Credit (Users → Customers) and shown in its history.`;
-    } else {
-      partHint.style.cssText += 'background:#dcfce7;color:#166534;';
-      partHint.textContent = `Paid: ${money} is noted in "${sup}" history only — nothing added to Credit.`;
-    }
-  };
-  partFormEl.querySelector('#partPaymentMode').addEventListener('change', refreshPartHint);
-  partFormEl.addEventListener('supplierchange', refreshPartHint);
-  ['quantity', 'price', 'tax_rate'].forEach(n => partFormEl.querySelector(`[name="${n}"]`).addEventListener('input', refreshPartHint));
+  wirePaymentBlock(partFormEl, 'partPaymentMode', 'partPaymentHint');
 
   document.getElementById('partForm').addEventListener('submit', async e => {
     e.preventDefault();
@@ -1872,9 +1949,11 @@ function renderPartDetailsStep() {
       purchase_date: fd.get('purchase_date'),
       price: String(fd.get('price') || '0'),
       tax_rate: Number(fd.get('tax_rate')) || 0,
-      payment_mode: fd.get('payment_mode') || ''
+      ...readPaymentFields(e.target)
     };
     if (!payload.supplier) { alert('Please select or enter the company this part was purchased from.'); return; }
+    const payErr = validatePaymentFields(e.target);
+    if (payErr) { alert(payErr); return; }
     try {
       const res = await apiFetch('/inventory/create', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -1927,12 +2006,7 @@ function renderLotDetailsStep() {
       <input name="price" placeholder="Price (per unit)${isFaulty ? ' (optional)' : ''}" ${req}>
       <input name="tax_rate" type="number" placeholder="Tax Rate (%)${isFaulty ? ' (optional)' : ''}" ${req}>
       ${lbl('Payment — how was this purchase paid?')}
-      <select name="payment_mode" id="lotPaymentMode" ${isFaulty ? '' : 'required'} style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-        <option value="">${isFaulty ? 'Select payment (optional)' : 'Select payment type'}</option>
-        <option value="paid">Paid</option>
-        <option value="credit">Credit (pay later)</option>
-      </select>
-      <div id="paymentHint" style="display:none;font-size:12px;border-radius:8px;padding:8px 10px;"></div>
+      ${paymentBlockHTML('lotPaymentMode', 'paymentHint', !isFaulty, isFaulty ? 'Select payment (optional)' : 'Select payment type')}
       ${isFaulty ? `${lbl('Warranty Until (optional)')}
       <input name="warranty_until" type="date">
       <textarea name="reason" rows="2" placeholder="Reason of damage" required></textarea>` : ''}
@@ -1947,33 +2021,8 @@ function renderLotDetailsStep() {
   const form = document.getElementById('lotForm');
   initSupplierPicker(form, isFaulty);
 
-  // live hint: total amount, and what Credit does on the customer ledger
-  const paymentSel = form.querySelector('#lotPaymentMode');
-  const paymentHint = form.querySelector('#paymentHint');
-  const refreshPaymentHint = () => {
-    const mode = paymentSel.value;
-    if (!mode) { paymentHint.style.display = 'none'; return; }
-    const qty = Math.max(0, Number(form.querySelector('[name="quantity"]').value) || 0);
-    const price = Number(String(form.querySelector('[name="price"]').value).replace(/,/g, '')) || 0;
-    const tax = Number(form.querySelector('[name="tax_rate"]').value) || 0;
-    const total = price * qty * (1 + tax / 100);
-    const money = '₹' + total.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    const sup = readSupplier(form).supplier;
-    paymentHint.style.display = 'block';
-    if (!sup) {
-      paymentHint.style.cssText += 'background:#fef3c7;color:#92400e;';
-      paymentHint.textContent = 'Select a company above so this purchase can be recorded against it.';
-    } else if (mode === 'credit') {
-      paymentHint.style.cssText += 'background:#fee2e2;color:#991b1b;';
-      paymentHint.textContent = `Credit: ${money} will be added to "${sup}" under Credit (Users → Customers) and shown in its history.`;
-    } else {
-      paymentHint.style.cssText += 'background:#dcfce7;color:#166534;';
-      paymentHint.textContent = `Paid: ${money} is noted in "${sup}" history only — nothing added to Credit.`;
-    }
-  };
-  paymentSel.addEventListener('change', refreshPaymentHint);
-  form.addEventListener('supplierchange', refreshPaymentHint);
-  ['quantity', 'price', 'tax_rate'].forEach(n => form.querySelector(`[name="${n}"]`).addEventListener('input', refreshPaymentHint));
+  // live hint: total amount, and what Credit / Partial does on the company ledger
+  wirePaymentBlock(form, 'lotPaymentMode', 'paymentHint');
   const typeSelect = document.getElementById('lotProductType');
   const qtyInput = form.querySelector('[name="quantity"]');
   const firstSerialInput = document.getElementById('firstSerialInput');
@@ -2157,9 +2206,11 @@ function renderLotDetailsStep() {
       purchase_date: fd.get('purchase_date'),
       price: fd.get('price') || '0',
       tax_rate: Number(fd.get('tax_rate')) || 0,
-      payment_mode: fd.get('payment_mode') || ''
+      ...readPaymentFields(form)
     };
     if (payload.payment_mode && !payload.supplier) { alert('Select the company this purchase was made from.'); return; }
+    const payErr = validatePaymentFields(form);
+    if (payErr) { alert(payErr); return; }
 
     try {
       const res = await apiFetch('/inventory/create', {

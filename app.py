@@ -16,7 +16,7 @@ from user.customer_details import customer_manager
 from sales.sales_person_manager import sales_person_manager
 from allocation.allocation import allocation_manager
 from request.request_manager import request_manager
-from shipment.manage_shipment import shipment_manager
+from shipment.manage_shipment import shipment_manager, compute_payment
 from assembly.manage_assembly import assembly_manager
 from auth import create_access_token, get_current_user, require_role
 from fastapi.responses import FileResponse,RedirectResponse
@@ -318,6 +318,8 @@ class InventoryRequest(BaseModel):
     supplier_contact_person: str = ""
     supplier_contact_number: str = ""
     supplier_contact_email: str = ""
+    paid_amount: float = 0            # payment_mode "partial": amount paid now (INR)
+    credit_days: int = 0              # payment_mode "partial" / "credit": days to pay the rest
 
 
 class InventoryUpdateRequest(BaseModel):
@@ -356,7 +358,9 @@ class CreateShipmentRequest(BaseModel):
     contractor_person: str = ""
     contractor_number: str = ""
     contractor_email: str = ""
-    payment_mode: str = "paid"
+    payment_mode: str = "paid"    # "paid" | "partial" | "credit"
+    paid_amount: float = 0        # partial only: amount paid now (shipment currency)
+    credit_days: int = 0          # partial / credit: days within which the rest is paid
     currency: str = "INR"
     exchange_rate: float = 1
 
@@ -1484,19 +1488,54 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
     return sync_results
 
 
+def _validate_payment(mode, total, paid_amount, credit_days):
+    """400s on a bad paid / partial / credit choice (total and paid_amount in the same currency)."""
+    mode = (mode or "").strip().lower()
+    if mode not in ("paid", "partial", "credit"):
+        return
+    if mode in ("partial", "credit") and int(credit_days or 0) <= 0:
+        raise HTTPException(status_code=400, detail="enter in how many days the remaining payment will be made")
+    if mode in ("partial", "credit") and int(credit_days or 0) > 365:
+        raise HTTPException(status_code=400, detail="credit days cannot be more than 365")
+    if mode == "partial":
+        paid = float(paid_amount or 0)
+        if paid <= 0:
+            raise HTTPException(status_code=400, detail="enter the amount paid now for a partial payment")
+        if float(total or 0) > 0 and paid >= float(total):
+            raise HTTPException(status_code=400, detail="partial payment must be less than the total - choose Paid instead")
+
+
+def _purchase_record_payment(mode, amount_inr, paid_inr, credit_days, base_date, old_payments=None):
+    """Payment fields stored on a customer["purchases"] row (all INR)."""
+    pay = compute_payment(mode, amount_inr, paid_inr, credit_days, base_date)
+    return {
+        "payment_mode": pay["payment_mode"],
+        "paid_amount": pay["paid_amount"],      # paid at purchase time
+        "credit_days": pay["credit_days"],
+        "due_date": pay["due_date"],
+        "payments": list(old_payments or []),   # settlements recorded later from the users page
+    }
+
+
 def _sync_shipment_ledger(shipment: dict, user: dict, contact: dict = None):
     sid = shipment["shipment_id"]
     db = customer_manager()
+    old_payments = []     # settlements recorded later must survive a shipment edit
     for c in db.get_data(collection_name=CUSTOMER_COLLECTION, query={}):
         old = c.get("purchases") or []
         kept = [p for p in old if p.get("shipment_id") != sid]
         if len(kept) != len(old):
+            for p in old:
+                if p.get("shipment_id") == sid:
+                    old_payments += list(p.get("payments") or [])
             db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": c["customer_id"]}, update_values={"purchases": kept})
     mode = (shipment.get("payment_mode") or "").lower()
     amount = float(shipment.get("total_inr") or 0)
     name = (shipment.get("company_name") or "").strip()
-    if mode not in ("paid", "credit") or amount <= 0 or not name:
+    if mode not in ("paid", "partial", "credit") or amount <= 0 or not name:
         return None
+    rate = float(shipment.get("exchange_rate") or 1)
+    paid_inr = round(float(shipment.get("paid_amount") or 0) * rate, 2)
     contact = contact or {}
     rows = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
     match = next((c for c in rows if shipment.get("customer_id") and c.get("customer_id") == shipment["customer_id"]), None)
@@ -1527,7 +1566,8 @@ def _sync_shipment_ledger(shipment: dict, user: dict, contact: dict = None):
         "quantity": sum(int(p.get("quantity") or 0) for p in products),
         "lot_no": f"Shipment {sid[:8]}",
         "amount": round(amount, 2),
-        "payment_mode": mode,
+        **_purchase_record_payment(mode, amount, paid_inr, shipment.get("credit_days"),
+                                   shipment.get("dispatch_date"), old_payments),
         "currency": shipment.get("currency", "INR"),
         "exchange_rate": shipment.get("exchange_rate", 1),
         "original_amount": shipment.get("total_amount", amount),
@@ -1583,6 +1623,8 @@ def track_shipment(shipment_id: str, user: dict = Depends(require_role("inventor
 @app.post("/shipment/create")
 def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
+        _validate_payment(request.payment_mode, sum(float(p.price or 0) * float(p.quantity or 0) for p in request.products),
+                          request.paid_amount, request.credit_days)
         shipment_dict = {
             "company_name": request.company_name,
             "company_address": request.company_address,
@@ -1599,6 +1641,8 @@ def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require
             payment_mode=request.payment_mode,
             currency=request.currency,
             exchange_rate=request.exchange_rate,
+            paid_amount=request.paid_amount,
+            credit_days=request.credit_days,
         )
         _, shipment_id = shipment_item.add(collection_name=SHIPMENT_COLLECTION)
         ledger_customer_id = None
@@ -1679,12 +1723,17 @@ def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict
             updated["currency"] = (updated["currency"] or "INR").upper()
             if updated["currency"] == "INR":
                 updated["exchange_rate"] = 1.0
-        if updated.get("payment_mode") not in (None, "paid", "credit"):
+        if updated.get("payment_mode") not in (None, "paid", "partial", "credit"):
             updated["payment_mode"] = "paid"
         merged = {**existing[0], **updated}
         total_amount = sum((float(p.get("price") or 0) * float(p.get("quantity") or 0)) for p in merged.get("products", []))
         updated["total_amount"] = total_amount
         updated["total_inr"] = round(total_amount * float(merged.get("exchange_rate") or 1), 2)
+        _validate_payment(merged.get("payment_mode"), total_amount, merged.get("paid_amount"), merged.get("credit_days"))
+        pay = compute_payment(merged.get("payment_mode"), total_amount, merged.get("paid_amount"), merged.get("credit_days"),
+                              merged.get("dispatch_date"))
+        updated.update({"payment_mode": pay["payment_mode"], "paid_amount": pay["paid_amount"],
+                        "credit_days": pay["credit_days"], "due_date": pay["due_date"]})
         # keep status in sync if the caller is editing received_date directly
         if "received_date" in updated:
             updated["status"] = "received" if updated["received_date"] else "pending"
@@ -3276,6 +3325,13 @@ def available_serials(product_id: str, model_no: str = "", user: dict = Depends(
         raise HTTPException(status_code=500, detail="available serial numbers cannot be fetched")
 
 
+def _unit_price(request):
+    try:
+        return float(str(request.price or 0).replace(",", "").strip() or 0)
+    except ValueError:
+        return 0
+
+
 def _record_purchase_on_customer(request, user):
     """
     Called after a product lot is added to inventory. The supplier company is a
@@ -3289,12 +3345,9 @@ def _record_purchase_on_customer(request, user):
     try:
         name = (request.supplier or "").strip()
         mode = (request.payment_mode or "").strip().lower()
-        if not name or mode not in ("paid", "credit"):
+        if not name or mode not in ("paid", "partial", "credit"):
             return None
-        try:
-            unit_price = float(str(request.price or 0).replace(",", "").strip() or 0)
-        except ValueError:
-            unit_price = 0
+        unit_price = _unit_price(request)
         amount = round(unit_price * int(request.quantity or 0) * (1 + float(request.tax_rate or 0) / 100), 2)
         if amount <= 0:
             return None
@@ -3330,7 +3383,8 @@ def _record_purchase_on_customer(request, user):
             "unit_price": unit_price,
             "tax_rate": request.tax_rate,
             "amount": amount,
-            "payment_mode": mode,
+            **_purchase_record_payment(mode, amount, request.paid_amount, request.credit_days,
+                                       request.purchase_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")),
             "lot_no": request.lot_no,
             "added_by": user["username"],
             "added_at": datetime.now(timezone.utc).isoformat(),
@@ -3362,6 +3416,9 @@ def company_list(user: dict = Depends(require_role("service_manager", "admin", "
 @app.post("/inventory/create")
 def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     try:
+        _validate_payment(request.payment_mode,
+                          round(_unit_price(request) * int(request.quantity or 0) * (1 + float(request.tax_rate or 0) / 100), 2),
+                          request.paid_amount, request.credit_days)
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
         serial_optional_types = ("accessories", "spare_parts", "service_parts")
@@ -3838,6 +3895,53 @@ def add_customer_return(customer_id: str, request: CustomerReturnRequest, user: 
     except Exception:
         logging.error("adding customer return failed!")
         raise HTTPException(status_code=500, detail="return could not be added")
+
+
+class PurchasePaymentRequest(BaseModel):
+    amount: float
+    note: str = ""
+    payment_date: str = ""
+
+
+@app.post("/customer/purchase_payment/{customer_id}/{purchase_id}")
+def add_purchase_payment(customer_id: str, purchase_id: str, request: PurchasePaymentRequest,
+                         user: dict = Depends(require_role("admin", "accounts"))):
+    """Records a later payment against the unpaid balance of a credit / partial purchase."""
+    try:
+        if request.amount <= 0:
+            raise HTTPException(status_code=400, detail="payment amount must be greater than zero")
+        db = customer_manager()
+        found = db.get_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id})
+        if not found:
+            raise HTTPException(status_code=404, detail="no customer found with this id")
+        purchases = list(found[0].get("purchases") or [])
+        target = next((p for p in purchases if p.get("purchase_id") == purchase_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="no purchase found with this id")
+        amount = float(target.get("amount") or 0)
+        if (target.get("payment_mode") or "paid") == "paid":
+            raise HTTPException(status_code=400, detail="this purchase is already fully paid")
+        # legacy credit rows have no paid_amount -> nothing was paid up front
+        paid_before = float(target.get("paid_amount") or 0) + sum(float(x.get("amount") or 0) for x in (target.get("payments") or []))
+        balance = round(amount - paid_before, 2)
+        if request.amount > balance + 0.005:
+            raise HTTPException(status_code=400, detail=f"payment is more than the pending balance (Rs {balance})")
+        payments = list(target.get("payments") or [])
+        payments.append({
+            "amount": round(request.amount, 2),
+            "note": (request.note or "").strip(),
+            "payment_date": request.payment_date or datetime.now(timezone.utc).isoformat(),
+            "added_by": user["username"],
+            "added_at": datetime.now(timezone.utc).isoformat(),
+        })
+        target["payments"] = payments
+        db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id}, update_values={"purchases": purchases})
+        return {"message": "payment recorded", "balance": round(balance - request.amount, 2)}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("recording purchase payment failed!")
+        raise HTTPException(status_code=500, detail="payment could not be recorded")
 
 
 @app.post("/customer/add_debit/{customer_id}")
@@ -4408,25 +4512,32 @@ def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver:
     carried over (with the entered invoice details), and the allocation entry is removed.
     Stock is NOT touched — the units were already deducted when the demo was allotted."""
     cust = dict(details.get("customer") or {})
-    new_customer = customer_manager(
-        company_name=cust.get("company_name"),
-        company_address=cust.get("company_address"),
-        gst_number=cust.get("gst_number"),
-        contractor_person="",
-        contractor_number="",
-        contractor_email="",
-    )
-    new_customer.add(collection_name=CUSTOMER_COLLECTION)
-    customer_manager().update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
-                                    update_values={"created_by": raised_by})
-    customer_snapshot = {
-        "customer_id": new_customer.customer_id,
-        "company_name": new_customer.company_name,
-        "company_address": new_customer.company_address,
-        "gst_number": new_customer.gst_number,
-        "contractor_person": "", "contractor_number": "", "contractor_email": "",
-        "created_by": raised_by,
-    }
+    existing = []
+    if cust.get("customer_id"):
+        # an already-registered company was picked: reuse it instead of creating a duplicate
+        existing = customer_manager().get_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": cust["customer_id"]})
+    if existing:
+        customer_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
+    else:
+        new_customer = customer_manager(
+            company_name=cust.get("company_name"),
+            company_address=cust.get("company_address"),
+            gst_number=cust.get("gst_number"),
+            contractor_person="",
+            contractor_number="",
+            contractor_email="",
+        )
+        new_customer.add(collection_name=CUSTOMER_COLLECTION)
+        customer_manager().update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
+                                        update_values={"created_by": raised_by})
+        customer_snapshot = {
+            "customer_id": new_customer.customer_id,
+            "company_name": new_customer.company_name,
+            "company_address": new_customer.company_address,
+            "gst_number": new_customer.gst_number,
+            "contractor_person": "", "contractor_number": "", "contractor_email": "",
+            "created_by": raised_by,
+        }
 
     price = details.get("price", 0)
     tax_rate = details.get("tax_rate", 0)
@@ -5143,8 +5254,9 @@ def edit_allocation(allocation_id: str, request: EditAllocationRequest, user: di
 
 
 class AdminConvertRequest(BaseModel):
-    company_name: str
-    company_address: str
+    customer_id: str = ""          # set when an existing company was picked (no new company is created)
+    company_name: str = ""
+    company_address: str = ""
     gst_number: str = ""
     price: float
     tax_rate: float = 0
@@ -5156,7 +5268,13 @@ class AdminConvertRequest(BaseModel):
 def convert_demo_to_order_direct(allocation_id: str, request: AdminConvertRequest, user: dict = Depends(require_role("admin", "accounts"))):
     """Admin/accounts converts a dispatched demo unit straight into an order (no approval step)."""
     try:
-        if not request.company_name.strip() or not request.company_address.strip():
+        picked = None
+        if request.customer_id.strip():
+            rows = customer_manager().get_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": request.customer_id.strip()})
+            if not rows:
+                raise HTTPException(status_code=404, detail="selected company not found")
+            picked = rows[0]
+        elif not request.company_name.strip() or not request.company_address.strip():
             raise HTTPException(status_code=400, detail="company name and address are required")
         if request.price <= 0:
             raise HTTPException(status_code=400, detail="enter a valid price")
@@ -5177,11 +5295,13 @@ def convert_demo_to_order_direct(allocation_id: str, request: AdminConvertReques
         if (alloc.get("return_request") or {}).get("status") == "pending":
             raise HTTPException(status_code=400, detail="a return request is pending for this demo unit")
 
-        details = {
-            "customer": {"company_name": request.company_name.strip(), "company_address": request.company_address.strip(),
-                         "gst_number": request.gst_number.strip()},
-            "price": request.price, "tax_rate": request.tax_rate,
-        }
+        if picked:
+            customer = {"customer_id": picked["customer_id"], "company_name": picked.get("company_name", ""),
+                        "company_address": picked.get("company_address", ""), "gst_number": picked.get("gst_number", "")}
+        else:
+            customer = {"company_name": request.company_name.strip(), "company_address": request.company_address.strip(),
+                        "gst_number": request.gst_number.strip()}
+        details = {"customer": customer, "price": request.price, "tax_rate": request.tax_rate}
         order_id = _convert_demo_to_order(alloc, details, alloc.get("allocated_by") or user["username"], user["username"],
                                           request.invoice_no.strip(), request.invoice_date.strip())
         return {"message": "demo unit converted to order", "order_id": order_id}

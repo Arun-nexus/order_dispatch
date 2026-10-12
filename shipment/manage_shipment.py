@@ -2,13 +2,42 @@ from mongodb.mongodb_connection import mongodbclient
 from logger import logging
 from datetime import datetime, timezone
 import uuid
+from datetime import timedelta
+
+PAYMENT_MODES = ("paid", "partial", "credit")
+
+
+def compute_payment(mode, total, paid_amount=0, credit_days=0, base_date=None):
+    """
+    Normalises a payment choice into the fields stored on a shipment / purchase:
+      paid    -> everything paid now, no due date
+      partial -> `paid_amount` paid now, the rest is on credit for `credit_days`
+      credit  -> nothing paid now, everything on credit for `credit_days`
+    due_date = base_date (YYYY-MM-DD) + credit_days. `total` and `paid_amount`
+    must be in the same currency.
+    """
+    mode = (mode or "paid").strip().lower()
+    if mode not in PAYMENT_MODES:
+        mode = "paid"
+    total = round(float(total or 0), 2)
+    if mode == "paid":
+        return {"payment_mode": "paid", "paid_amount": total, "credit_days": 0, "due_date": None}
+    paid = 0.0 if mode == "credit" else round(min(max(float(paid_amount or 0), 0.0), total), 2)
+    days = max(int(credit_days or 0), 0)
+    try:
+        base = datetime.strptime((base_date or "")[:10], "%Y-%m-%d")
+    except ValueError:
+        base = datetime.now(timezone.utc).replace(tzinfo=None)
+    due = (base + timedelta(days=days)).strftime("%Y-%m-%d") if days else None
+    return {"payment_mode": mode, "paid_amount": paid, "credit_days": days, "due_date": due}
 
 
 class shipment_manager(mongodbclient):
 
     def __init__(self, company_name=None, company_address=None, dispatch_date=None,
                  received_date=None, products=None, created_by=None,
-                 customer_id=None, payment_mode="paid", currency="INR", exchange_rate=1):
+                 customer_id=None, payment_mode="paid", currency="INR", exchange_rate=1,
+                 paid_amount=0, credit_days=0):
         """
         company_name / company_address: destination company details
         dispatch_date: str (YYYY-MM-DD) -> required, when the shipment left
@@ -35,7 +64,9 @@ class shipment_manager(mongodbclient):
         self.products = products or []
         self.created_by = created_by
         self.customer_id = customer_id or ""
-        self.payment_mode = payment_mode if payment_mode in ("paid", "credit") else "paid"
+        self.payment_mode = payment_mode if payment_mode in PAYMENT_MODES else "paid"
+        self.paid_amount = float(paid_amount or 0)
+        self.credit_days = int(credit_days or 0)
         self.currency = (currency or "INR").upper()
         self.exchange_rate = float(exchange_rate or 1) if self.currency != "INR" else 1.0
 
@@ -90,6 +121,7 @@ class shipment_manager(mongodbclient):
                 raise Exception("every product must have a name")
 
             total_amount = sum(p["line_total"] for p in products)
+            pay = compute_payment(self.payment_mode, total_amount, self.paid_amount, self.credit_days, self.dispatch_date)
             shipment_dict = {
                 "shipment_id": self.shipment_id,
                 "company_name": self.company_name,
@@ -100,7 +132,10 @@ class shipment_manager(mongodbclient):
                 "products": products,
                 "created_by": self.created_by,
                 "customer_id": self.customer_id,
-                "payment_mode": self.payment_mode,
+                "payment_mode": pay["payment_mode"],
+                "paid_amount": pay["paid_amount"],          # in the shipment's own currency
+                "credit_days": pay["credit_days"],
+                "due_date": pay["due_date"],
                 "currency": self.currency,
                 "exchange_rate": self.exchange_rate,
                 "total_amount": total_amount,

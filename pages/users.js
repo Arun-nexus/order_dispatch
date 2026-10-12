@@ -70,6 +70,7 @@ async function loadCustomers() {
     userState.orders = (await oRes.json()).dataset || [];
     renderCards();
     renderCustomerTable();
+    alertOverduePayments();
   } catch (err) {
     console.error(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert('Could not load companies.');
@@ -250,6 +251,30 @@ function entryTime(x) {
   return new Date(x.return_date || x.debit_date || x.added_at || 0).getTime() || 0;
 }
 
+const todayISO = () => new Date().toISOString().slice(0, 10);
+function addDaysISO(dateStr, days) {
+  const d = new Date(dateStr || todayISO());
+  if (isNaN(d)) return '';
+  d.setDate(d.getDate() + (Number(days) || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+// one purchase row -> how much is paid, what is still pending, when it is due
+function purchaseInfo(p) {
+  const amount = Number(p.amount) || 0;
+  const mode = p.payment_mode || 'paid';
+  const settled = (p.payments || []).reduce((t, x) => t + (Number(x.amount) || 0), 0);
+  // legacy credit rows have no paid_amount -> nothing was paid up front
+  const upfront = mode === 'paid' ? amount : (mode === 'partial' ? (Number(p.paid_amount) || 0) : 0);
+  const paid = Math.min(upfront + settled, amount);
+  const balance = mode === 'paid' ? 0 : Math.max(Math.round((amount - paid) * 100) / 100, 0);
+  const days = Number(p.credit_days) || 0;
+  const due = mode === 'paid' ? '' : (p.due_date || (days ? addDaysISO(p.date, days) : ''));
+  const overdue = balance > 0.005 && !!due && due < todayISO();
+  const lateDays = overdue ? Math.floor((new Date(todayISO()) - new Date(due)) / 86400000) : 0;
+  return { mode, amount, paid, balance, days, due, overdue, lateDays, settled };
+}
+
 function customerStats(c) {
   const orders = userState.orders
     .filter(o => o.customer?.customer_id === c.customer_id)
@@ -264,14 +289,19 @@ function customerStats(c) {
   // purchases made FROM this party (recorded by the Inventory add form). Paid ones are
   // history only; ones bought on credit count towards Credit.
   const purchases = (c.purchases || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const purchaseCredit = purchases.filter(p => p.payment_mode === 'credit').reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const purchasePaid = purchases.filter(p => p.payment_mode !== 'credit').reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  // Partial purchases: only the unpaid balance counts as Credit; later payments reduce it.
+  const infos = purchases.map(purchaseInfo);
+  const purchaseCredit = infos.reduce((t, i) => t + i.balance, 0);
+  const purchasePaid = infos.reduce((t, i) => t + (i.amount - i.balance), 0);
+  const overduePurchases = purchases.map((p, i) => ({ p, info: infos[i] })).filter(x => x.info.overdue);
+  const overdueAmount = overduePurchases.reduce((t, x) => t + x.info.balance, 0);
   const returned = manualReturned + purchaseCredit;      // total Credit
   const creditGiven = orderCredit + manualDebited;       // total Debit (order credit + manual debits)
   const limit = Number(c.credit_limit) || 0;
   const outstanding = Math.max(creditGiven - returned, 0);
   return {
     orders, returns, debits, purchases, manualReturned, manualDebited, orderCredit, purchaseCredit, purchasePaid,
+    overduePurchases, overdueAmount,
     creditGiven, returned, limit, outstanding,
     available: limit - outstanding,
     totalOrders: orders.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0)
@@ -304,8 +334,8 @@ function renderCustomerTable() {
   if (!tbody) return;
   const rows = customerRows();
   tbody.innerHTML = rows.map(({ c, s }) => `
-    <tr data-id="${esc(c.customer_id)}">
-      <td class="wide"><strong>${esc(c.company_name)}</strong><br><small style="color:#94a3b8;">${esc(c.company_address)}</small></td>
+    <tr data-id="${esc(c.customer_id)}" ${s.overduePurchases.length ? 'style="background:#fff5f5;"' : ''}>
+      <td class="wide"><strong>${esc(c.company_name)}</strong>${s.overduePurchases.length ? ` <span class="due-badge" title="Credit time is over" style="background:#fee2e2;color:#b91c1c;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;white-space:nowrap;">PAYMENT DUE ${nw(s.overdueAmount)}</span>` : ''}<br><small style="color:#94a3b8;">${esc(c.company_address)}</small></td>
       <td>${esc(c.gst_number) || '-'}</td>
       <td>${esc(c.contractor_person) || '-'}<br><small style="color:#94a3b8;">${esc(c.contractor_number)}</small></td>
       <td class="amt">${money(s.limit)}</td>
@@ -334,11 +364,52 @@ function renderCustomerTable() {
       <td></td>
     </tr>`;
 
+  renderOverdueBanner();
   const byId = e => userState.customers.find(c => c.customer_id === e.target.closest('tr').dataset.id);
   tbody.querySelectorAll('.cust-history').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e))));
   tbody.querySelectorAll('.cust-credit').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e), 'credit')));
   tbody.querySelectorAll('.cust-debit').forEach(b => b.addEventListener('click', e => openCustomerHistory(byId(e), 'debit')));
   tbody.querySelectorAll('.cust-edit').forEach(b => b.addEventListener('click', e => openCustomerEditModal(byId(e))));
+}
+
+// red strip above the Companies table listing every company whose credit time is over
+function renderOverdueBanner() {
+  const section = document.getElementById('customersSection');
+  const container = section && section.querySelector('.table-container');
+  if (!container) return;
+  let banner = document.getElementById('overdueBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'overdueBanner';
+    container.parentNode.insertBefore(banner, container);
+  }
+  const due = userState.customers.map(c => ({ c, s: customerStats(c) })).filter(x => x.s.overduePurchases.length);
+  if (!due.length) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+  banner.style.cssText = 'display:block;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 16px;margin:0 0 14px;';
+  banner.innerHTML = `
+    <div style="font-weight:700;color:#b91c1c;margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Payment due — credit time is over for ${due.length} ${due.length === 1 ? 'company' : 'companies'}</div>
+    ${due.map(({ c, s }) => {
+      const worst = Math.max(...s.overduePurchases.map(x => x.info.lateDays));
+      return `<div style="font-size:13px;color:#7f1d1d;padding:2px 0;">
+        <a href="#" class="due-open" data-id="${esc(c.customer_id)}" style="color:#b91c1c;font-weight:600;">${esc(c.company_name)}</a>
+        — ${nw(s.overdueAmount)} pending, ${worst} day${worst === 1 ? '' : 's'} late
+        (${s.overduePurchases.length} purchase${s.overduePurchases.length === 1 ? '' : 's'})</div>`;
+    }).join('')}`;
+  banner.querySelectorAll('.due-open').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    openCustomerHistory(userState.customers.find(c => c.customer_id === a.dataset.id));
+  }));
+}
+
+// one popup per page load when something is overdue
+function alertOverduePayments() {
+  if (userState.overdueAlerted) return;
+  const due = userState.customers.map(c => ({ c, s: customerStats(c) })).filter(x => x.s.overduePurchases.length);
+  if (!due.length) return;
+  userState.overdueAlerted = true;
+  const list = due.slice(0, 5).map(({ c, s }) => `${c.company_name} (${money(s.overdueAmount)})`).join(' • ');
+  const more = due.length > 5 ? ` and ${due.length - 5} more` : '';
+  showResponseModal('Payment due', `${due.length} ${due.length === 1 ? 'company has' : 'companies have'} crossed the credit time: ${list}${more}. Open Companies to see details.`, false);
 }
 
 function wireCustomerFilter() {
@@ -435,14 +506,36 @@ function openCustomerHistory(c, focusEntry) {
     o.payment_mode === 'Credit' ? nw(o.total_mrp) : '-'
   ]);
   const entryRows = list => list.map(r => [fmtDate(r.return_date || r.debit_date), nw(r.amount), esc(r.note) || '-', esc(r.added_by) || '-']);
-  const purchaseRows = s.purchases.map(p => [
-    fmtDate(p.date),
-    esc(`${p.product_name || ''}${p.model_no ? ' · ' + p.model_no : ''} x${p.quantity ?? ''}`),
-    esc(p.lot_no) || '-',
-    p.payment_mode === 'credit' ? 'Credit' : 'Paid',
-    nw(p.amount),
-    p.payment_mode === 'credit' ? nw(p.amount) : '-'
-  ]);
+  const modeBadge = i => i.mode === 'paid'
+    ? '<span style="background:#dcfce7;color:#166534;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;">Paid</span>'
+    : i.mode === 'partial'
+      ? '<span style="background:#ffedd5;color:#9a3412;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;">Partial</span>'
+      : '<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;">Credit</span>';
+  const dueCell = i => {
+    if (i.mode === 'paid') return '-';
+    const when = i.due ? `${fmtDate(i.due)}<br><small style="color:#94a3b8;">${i.days} day${i.days === 1 ? '' : 's'}</small>` : '-';
+    if (i.balance <= 0.005) return `${when}<br><small style="color:#16a34a;font-weight:600;">Settled</small>`;
+    return i.overdue
+      ? `${when}<br><small style="color:#b91c1c;font-weight:700;">DUE — ${i.lateDays} day${i.lateDays === 1 ? '' : 's'} late</small>`
+      : when;
+  };
+  const purchaseRows = s.purchases.map(p => {
+    const i = purchaseInfo(p);
+    const history = (p.payments || []).map(x => `${fmtDate(x.payment_date)}: ${money(x.amount)}${x.note ? ' (' + esc(x.note) + ')' : ''}`).join('<br>');
+    return [
+      fmtDate(p.date),
+      esc(`${p.product_name || ''}${p.model_no ? ' · ' + p.model_no : ''} x${p.quantity ?? ''}`),
+      esc(p.lot_no) || '-',
+      modeBadge(i),
+      nw(i.amount),
+      i.mode === 'paid' ? '-' : `${nw(i.paid)}${history ? `<br><small style="color:#64748b;">${history}</small>` : ''}`,
+      i.mode === 'paid' ? '-' : `<strong style="color:${i.balance > 0.005 ? '#b91c1c' : '#16a34a'};">${nw(i.balance)}</strong>`,
+      dueCell(i),
+      i.mode !== 'paid' && i.balance > 0.005
+        ? `<button type="button" class="pur-pay" data-id="${esc(p.purchase_id)}" style="padding:5px 10px;border:none;border-radius:6px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;white-space:nowrap;">Record payment</button>`
+        : ''
+    ];
+  });
   const today = new Date().toISOString().slice(0, 10);
   const inputCss = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
 
@@ -458,6 +551,7 @@ function openCustomerHistory(c, focusEntry) {
       ${esc(c.company_address) || '-'} • GST: ${esc(c.gst_number) || '-'}<br>
       ${esc(c.contractor_person) || '-'} • ${esc(c.contractor_number) || '-'} • ${esc(c.contractor_email) || '-'}
     </p>
+    ${s.overduePurchases.length ? `<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> Payment due: ${money(s.overdueAmount)} is pending past its credit time (${s.overduePurchases.length} purchase${s.overduePurchases.length === 1 ? '' : 's'}).</div>` : ''}
     <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;">
       ${tile('Credit Limit', money(s.limit))}
       ${tile('Debit', money(s.creditGiven), '#d62828')}
@@ -494,8 +588,8 @@ function openCustomerHistory(c, focusEntry) {
     </div>
 
     <h4 style="margin-bottom:8px;">Purchase History <span style="color:#94a3b8;font-weight:400;">(${s.purchases.length})</span> <small style="color:#94a3b8;font-weight:400;">— bought from this party via Inventory</small></h4>
-    ${tableHTML(['Date', 'Item', 'Lot No.', 'Payment', 'Amount', 'Added to Credit'], purchaseRows)}
-    <p style="text-align:right;font-size:13px;margin-top:6px;"><strong>Paid purchases: ${money(s.purchasePaid)} • Credit purchases: ${money(s.purchaseCredit)}</strong></p>`;
+    ${tableHTML(['Date', 'Item', 'Lot No.', 'Payment', 'Amount', 'Paid', 'Balance (Credit)', 'Credit Time / Due', ''], purchaseRows)}
+    <p style="text-align:right;font-size:13px;margin-top:6px;"><strong>Paid so far: ${money(s.purchasePaid)} • Pending on credit: ${money(s.purchaseCredit)}${s.overdueAmount ? ` • <span style="color:#b91c1c;">Overdue: ${money(s.overdueAmount)}</span>` : ''}</strong></p>`;
 
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
   box.querySelector('#histEdit').addEventListener('click', () => { modal.style.display = 'none'; openCustomerEditModal(c); });
@@ -518,11 +612,63 @@ function openCustomerHistory(c, focusEntry) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   };
+  box.querySelectorAll('.pur-pay').forEach(b => b.addEventListener('click', () => {
+    const p = s.purchases.find(x => x.purchase_id === b.dataset.id);
+    if (p) openPurchasePaymentModal(c, p);
+  }));
   box.querySelector('#creditSave').addEventListener('click', () => saveEntry('credit'));
   box.querySelector('#debitSave').addEventListener('click', () => saveEntry('debit'));
 
   modal.style.display = 'flex';
   if (focusEntry) box.querySelector('#entAmount').focus();
+}
+
+// records a later payment against the pending balance of a credit / partial purchase
+function openPurchasePaymentModal(c, p) {
+  const info = purchaseInfo(p);
+  const modal = document.getElementById('customerEditModal');
+  const box = modal.querySelector('.modal-content');
+  const inputCss = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3>Record Payment</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <p style="font-size:13px;color:#64748b;margin-bottom:12px;">${esc(c.company_name)} — ${esc(p.product_name || '')}<br>
+      Total ${money(info.amount)} • Paid ${money(info.paid)} • <strong style="color:#b91c1c;">Pending ${money(info.balance)}</strong></p>
+    <form id="purPayForm" style="display:flex;flex-direction:column;gap:8px;">
+      <input id="purPayAmount" type="number" min="0" step="0.01" max="${info.balance}" value="${info.balance}" placeholder="Amount (₹)" style="${inputCss}">
+      <input id="purPayDate" type="date" value="${todayISO()}" style="${inputCss}">
+      <input id="purPayNote" placeholder="Note (optional)" style="${inputCss}">
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px;">
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save Payment</button>
+      </div>
+    </form>`;
+  const close = () => { modal.style.display = 'none'; };
+  box.querySelector('.close').addEventListener('click', close);
+  box.querySelector('.cancel-btn').addEventListener('click', close);
+  box.querySelector('#purPayForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const amount = Number(box.querySelector('#purPayAmount').value);
+    if (!amount || amount <= 0) { alert('Enter a valid payment amount.'); return; }
+    if (amount > info.balance + 0.005) { alert('Payment cannot be more than the pending balance.'); return; }
+    const date = box.querySelector('#purPayDate').value;
+    try {
+      const res = await apiFetch(`/customer/purchase_payment/${c.customer_id}/${p.purchase_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount, note: box.querySelector('#purPayNote').value, payment_date: date ? new Date(date).toISOString() : '' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'payment could not be recorded');
+      close();
+      await loadCustomers();
+      openCustomerHistory(userState.customers.find(x => x.customer_id === c.customer_id));
+    } catch (err) {
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    }
+  });
+  modal.style.display = 'flex';
 }
 
 function openCustomerEditModal(c) {

@@ -1,4 +1,8 @@
-const svcState = { services: [], orders: [], activeServiceId: null, technicians: [], hologramPool: [] };
+const svcState = { services: [], orders: [], activeServiceId: null, assignees: [], hologramPool: [] };
+
+function esc(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -53,23 +57,19 @@ function wireHeaderSearch() {
   });
 }
 
+// every assignable person (all users except admin) as flat options — no role grouping/labels
+function assigneeOptionsHtml(placeholder) {
+  return `<option value="">${placeholder}</option>` + svcState.assignees
+    .map(u => `<option value="${esc(u.username)}">${esc(u.username)}${u.name && u.name !== u.username ? ' — ' + esc(u.name) : ''}</option>`)
+    .join('');
+}
+
 async function populateTechnicianFilter() {
   const select = document.querySelectorAll('.filter-box select')[1];
   if (!select) return;
-  const { technicians, distributors } = await loadTechnicians();
+  await loadAssignees();
   const current = select.value;
-  let html = '<option value="">Technician</option>';
-  if (technicians.length) {
-    html += '<optgroup label="Technicians">' +
-      technicians.map(t => `<option value="${t.username}">${t.username}${t.name ? ' — ' + t.name : ''}</option>`).join('') +
-      '</optgroup>';
-  }
-  if (distributors.length) {
-    html += '<optgroup label="Distributors">' +
-      distributors.map(d => `<option value="${d.username}">${d.username}${d.name ? ' — ' + d.name : ''}</option>`).join('') +
-      '</optgroup>';
-  }
-  select.innerHTML = html;
+  select.innerHTML = assigneeOptionsHtml('Technician');
   if (current && [...select.options].some(o => o.value === current)) select.value = current;
 }
 
@@ -95,22 +95,29 @@ async function loadServices() {
   }
 }
 
-async function loadTechnicians() {
+// Everyone except admins can be assigned a service. /account/users lists all accounts
+// (admin / accounts / service_manager may call it); if that is refused, fall back to the
+// technician + distributor lists so the dropdown is never empty.
+async function loadAssignees() {
+  let list = [];
   try {
-    const [techRes, distRes] = await Promise.all([
-      apiFetch('/account/technicians'),
-      apiFetch('/account/distributors')
-    ]);
-    const techData = techRes.ok ? await techRes.json() : { dataset: [] };
-    const distData = distRes.ok ? await distRes.json() : { dataset: [] };
-    svcState.technicians = techData.dataset || [];
-    svcState.distributors = distData.dataset || [];
+    const res = await apiFetch('/account/users');
+    if (res.ok) {
+      list = ((await res.json()).dataset || []).filter(u => u.username && u.role !== 'admin');
+    } else {
+      const [t, d] = await Promise.all([apiFetch('/account/technicians'), apiFetch('/account/distributors')]);
+      const tech = t.ok ? (await t.json()).dataset || [] : [];
+      const dist = d.ok ? (await d.json()).dataset || [] : [];
+      list = [...tech, ...dist].filter(u => u.username);
+    }
   } catch (err) {
     console.error(err);
-    svcState.technicians = [];
-    svcState.distributors = [];
   }
-  return { technicians: svcState.technicians, distributors: svcState.distributors };
+  const seen = new Set();
+  svcState.assignees = list
+    .filter(u => !seen.has(u.username) && seen.add(u.username))
+    .sort((x, y) => x.username.localeCompare(y.username));
+  return svcState.assignees;
 }
 
 function findOrderItemForService(s) {
@@ -537,7 +544,7 @@ async function openCreateModal() {
           </select>
           <input name="serial_no" placeholder="Serial No" required>
           <select name="technician_id" id="technicianSelect" required>
-            <option value="">Select Technician</option>
+            <option value="">Select person</option>
           </select>
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
@@ -624,24 +631,10 @@ async function openCreateModal() {
   // reflects current usernames from Users → technician accounts
   const select = modal.querySelector('#technicianSelect');
   select.innerHTML = '<option value="">Loading...</option>';
-  const { technicians, distributors } = await loadTechnicians();
-
-  if (!technicians.length && !distributors.length) {
-    select.innerHTML = '<option value="">No technicians/distributors found — add one from Users</option>';
-  } else {
-    let html = '<option value="">Select Technician/Distributor</option>';
-    if (technicians.length) {
-      html += '<optgroup label="Technicians">' +
-        technicians.map(t => `<option value="${t.username}">${t.username}${t.name ? ' — ' + t.name : ''}</option>`).join('') +
-        '</optgroup>';
-    }
-    if (distributors.length) {
-      html += '<optgroup label="Distributors">' +
-        distributors.map(d => `<option value="${d.username}">${d.username}${d.name ? ' — ' + d.name : ''}</option>`).join('') +
-        '</optgroup>';
-    }
-    select.innerHTML = html;
-  }
+  await loadAssignees();
+  select.innerHTML = svcState.assignees.length
+    ? assigneeOptionsHtml('Select person')
+    : '<option value="">No users found — add one from Users</option>';
 
   modal.style.display = 'flex';
 }
