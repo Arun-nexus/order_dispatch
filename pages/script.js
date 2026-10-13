@@ -141,17 +141,17 @@ function openServiceCardDetailModal(type) {
   const titles = { all: 'All Services', active: 'Active Services', in_progress: 'In Progress Services', completed: 'Completed Services', rejected: 'Rejected Services' };
   const list = serviceCardList(type);
   const th = 'style="text-align:left;padding:8px;"';
-  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  const td = 'style="padding:8px;border-top:1px solid var(--border);"';
   const head = ['Product Name', 'Product ID', 'Model No.', 'Serial No.', 'Technician', 'Status', 'Listed On'];
   const box = document.querySelector('#serviceCardDetailModal .modal-content');
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${list.length})</span></h3>
+      <h3>${titles[type]} <span style="color:var(--text-light);font-weight:400;">(${list.length})</span></h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <thead style="background:var(--bg-light);"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
         <tbody>
           ${list.map(s => {
             const info = serviceProductInfo(s);
@@ -164,7 +164,7 @@ function openServiceCardDetailModal(type) {
               <td ${td}><span class="${statusBadge(s.status)}">${(s.status ?? '').replace('_', ' ')}</span></td>
               <td ${td}>${s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '-'}</td>
             </tr>`;
-          }).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+          }).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:var(--text-light);padding:24px;">Nothing to show</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -304,7 +304,7 @@ function openActionMenu(s, evt) {
     const btn = document.createElement('button');
     btn.textContent = item.label;
     btn.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border:none;background:none;border-radius:6px;cursor:pointer;font-size:14px;';
-    btn.onmouseenter = () => btn.style.background = '#f1f5f9';
+    btn.onmouseenter = () => btn.style.background = 'var(--bg-hover)';
     btn.onmouseleave = () => btn.style.background = 'none';
     btn.addEventListener('click', () => { closeActionMenu(); item.action(); });
     menu.appendChild(btn);
@@ -460,19 +460,19 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
       </div>
       <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
         ${statusOptions ? `
-        <label style="font-size:13px;color:#64748b;">Status</label>
-        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <label style="font-size:13px;color:var(--text-muted);">Status</label>
+        <select name="status" style="padding:10px;border:1px solid var(--border);border-radius:8px;">
           <option value="">All Statuses</option>
           ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
         </select>` : ''}
         ${dateField ? `
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} From</label>
         <input type="date" name="dateFrom">
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} To</label>
         <input type="date" name="dateTo">` : ''}
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Export</button>
         </div>
       </form>
     </div>`;
@@ -549,14 +549,14 @@ async function openCreateModal() {
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
           <textarea name="spare_parts" placeholder="Spare parts requested (optional)" style="min-height:50px;"></textarea>
-          <label style="font-size:12px;color:#64748b;">Image proof (optional, max 2MB)</label>
+          <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 2MB)</label>
           <input type="file" name="image_file" accept="image/*">
-          <label style="font-size:12px;color:#64748b;">Video proof (optional, max 20MB)</label>
+          <label style="font-size:12px;color:var(--text-muted);">Video proof (optional, max 20MB)</label>
           <input type="file" name="video_file" accept="video/*">
-          <p id="createServiceMediaError" style="color:#d62828;font-size:12px;display:none;"></p>
+          <p id="createServiceMediaError" style="color:var(--danger);font-size:12px;display:none;"></p>
           <div style="display:flex;justify-content:flex-end;gap:10px;">
-            <button type="button" id="cancelCreateService" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Create</button>
+            <button type="button" id="cancelCreateService" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Create</button>
           </div>
         </form>
       </div>`;
@@ -661,7 +661,7 @@ function wireModals() {
         <select class="part-new-hologram-select" style="flex:1;" disabled>
           <option value="">Select part first…</option>
         </select>
-        <button type="button" class="remove-part-btn" style="border:none;background:#eee;border-radius:6px;padding:8px 10px;cursor:pointer;">&times;</button>
+        <button type="button" class="remove-part-btn" style="border:none;background:var(--border);border-radius:6px;padding:8px 10px;cursor:pointer;">&times;</button>
       </div>`;
 
     const addPartRow = () => {
@@ -686,8 +686,8 @@ function wireModals() {
     const renderSpareUsed = () => {
       spareBtns.forEach(b => {
         const active = (b.dataset.used === 'true') === spareUsed;
-        b.style.background = active ? '#1665ff' : '#fff';
-        b.style.color = active ? '#fff' : '#1665ff';
+        b.style.background = active ? 'var(--primary)' : '#fff';
+        b.style.color = active ? '#fff' : 'var(--primary)';
       });
       partsList.style.display = spareUsed ? 'flex' : 'none';
       addPartBtn.style.display = spareUsed ? 'block' : 'none';

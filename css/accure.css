@@ -21,6 +21,10 @@
   --danger-bg: #ffe3e3;
   --info: #1665ff;
   --info-bg: #edf4ff;
+  --border: #e3e3e3;
+  --success-dark: #15924d;
+  --warning-dark: #d97706;
+  --danger-dark: #b91c1c;
   --shadow-sm: 0 8px 18px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 15px 30px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 20px 45px rgba(22, 101, 255, 0.15);

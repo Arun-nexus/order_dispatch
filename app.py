@@ -5373,6 +5373,7 @@ def send_message(request: SendMessageRequest, user: dict = Depends(get_current_u
                 "to_username": target,
                 "body": body,
                 "read": False,
+                "delivered": False,
                 "created_at": now,
             })
         logging.info(f"message sent by {user['username']} to {len(targets)} recipient(s)")
@@ -5436,6 +5437,71 @@ def message_mark_all_read(user: dict = Depends(get_current_user)):
     except Exception:
         logging.error("messages could not be marked as read")
         raise HTTPException(status_code=500, detail="messages could not be updated")
+
+
+def _chat_filter(me: str, other: str = None):
+    if other is None:
+        return {"$or": [{"from_username": me}, {"to_username": me}]}
+    return {"$or": [
+        {"from_username": me, "to_username": other},
+        {"from_username": other, "to_username": me},
+    ]}
+
+
+@app.get("/message/conversations")
+def message_conversations(user: dict = Depends(get_current_user)):
+    try:
+        me = user["username"]
+        db = mongodbclient()
+        msgs = db.get_data(collection_name=MESSAGES_COLLECTION, query=_chat_filter(me), projection={"_id": 0})
+        accounts = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
+        names = {a.get("username"): (a.get("name") or a.get("username")) for a in accounts}
+        roles = {a.get("username"): a.get("role") for a in accounts}
+        for m in msgs:
+            if m.get("to_username") == me and not m.get("delivered") and not m.get("read"):
+                db.update_data(collection_name=MESSAGES_COLLECTION,
+                               query={"message_id": m["message_id"], "to_username": me},
+                               update_values={"delivered": True})
+                m["delivered"] = True
+        convs = {}
+        for m in sorted(msgs, key=lambda x: x.get("created_at") or ""):
+            mine = m.get("from_username") == me
+            other = m.get("to_username") if mine else m.get("from_username")
+            c = convs.setdefault(other, {"username": other, "name": names.get(other, other),
+                                         "role": roles.get(other), "unread": 0, "last": None})
+            c["last"] = {"body": m.get("body"), "created_at": m.get("created_at"), "mine": mine,
+                         "read": bool(m.get("read")), "delivered": bool(m.get("delivered") or m.get("read"))}
+            if not mine and not m.get("read"):
+                c["unread"] += 1
+        dataset = sorted(convs.values(), key=lambda c: c["last"]["created_at"] or "", reverse=True)
+        return {"message": "conversations", "dataset": dataset}
+    except Exception:
+        logging.error("conversations cannot be fetched")
+        raise HTTPException(status_code=500, detail="conversations cannot be fetched")
+
+
+@app.get("/message/thread/{other}")
+def message_thread(other: str, user: dict = Depends(get_current_user)):
+    try:
+        me = user["username"]
+        db = mongodbclient()
+        msgs = db.get_data(collection_name=MESSAGES_COLLECTION, query=_chat_filter(me, other), projection={"_id": 0})
+        msgs = sorted(msgs, key=lambda m: m.get("created_at") or "")[-300:]
+        now = datetime.now(timezone.utc).isoformat()
+        for m in msgs:
+            if m.get("to_username") == me and not m.get("read"):
+                db.update_data(collection_name=MESSAGES_COLLECTION,
+                               query={"message_id": m["message_id"], "to_username": me},
+                               update_values={"read": True, "delivered": True, "read_at": now})
+                m["read"] = True
+                m["delivered"] = True
+                m["read_at"] = now
+            m["mine"] = m.get("from_username") == me
+            m["delivered"] = bool(m.get("delivered") or m.get("read"))
+        return {"message": "thread", "dataset": msgs}
+    except Exception:
+        logging.error("thread cannot be fetched")
+        raise HTTPException(status_code=500, detail="thread cannot be fetched")
 
 
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")

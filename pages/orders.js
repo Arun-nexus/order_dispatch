@@ -111,16 +111,16 @@ function openOrderHistoryModal(o) {
   const entries = [];
 
   entries.push(`
-    <div style="border-left:3px solid #1665ff;padding-left:10px;">
+    <div style="border-left:3px solid var(--primary);padding-left:10px;">
       <strong>Created by ${escapeHtml(orderCreatorLabel(o))}</strong>
-      <div style="color:#94a3b8;font-size:12px;">${fmt(o.order_date)}</div>
+      <div style="color:var(--text-light);font-size:12px;">${fmt(o.order_date)}</div>
     </div>`);
 
   (o.edit_history || []).forEach(h => {
     entries.push(`
-      <div style="border-left:3px solid #f59e0b;padding-left:10px;">
+      <div style="border-left:3px solid var(--warning);padding-left:10px;">
         <strong>Edited by ${escapeHtml(h.edited_by)}</strong>
-        <div style="color:#94a3b8;font-size:12px;">${fmt(h.edited_at)}</div>
+        <div style="color:var(--text-light);font-size:12px;">${fmt(h.edited_at)}</div>
         <div style="margin-top:4px;">${escapeHtml(h.remark)}</div>
       </div>`);
   });
@@ -163,8 +163,8 @@ function renderOrdersTable(orders) {
 
     tr.innerHTML = `
       <td><input type="checkbox"></td>
-      <td><button type="button" class="creator-cell" style="background:none;border:none;padding:0;color:#1665ff;cursor:pointer;font:inherit;text-align:left;" title="View who created and edited this order">${creatorLabel}</button></td>
-      <td>${productLabel}${productSubLabel ? `<br><small style="color:#94a3b8;">${productSubLabel}</small>` : ''}</td>
+      <td><button type="button" class="creator-cell" style="background:none;border:none;padding:0;color:var(--primary);cursor:pointer;font:inherit;text-align:left;" title="View who created and edited this order">${creatorLabel}</button></td>
+      <td>${productLabel}${productSubLabel ? `<br><small style="color:var(--text-light);">${productSubLabel}</small>` : ''}</td>
       <td>${qtyLabel}</td>
       <td>${companyName}</td>
       <td>${o.payment_mode ?? ''}</td>
@@ -217,7 +217,7 @@ function openOrderActionMenu(o, evt) {
     const b = document.createElement('button');
     b.textContent = item.label;
     b.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border:none;background:none;border-radius:6px;cursor:pointer;font-size:14px;';
-    b.onmouseenter = () => b.style.background = '#f1f5f9';
+    b.onmouseenter = () => b.style.background = 'var(--bg-hover)';
     b.onmouseleave = () => b.style.background = 'none';
     b.addEventListener('click', () => { closeOrderActionMenu(); item.action(); });
     menu.appendChild(b);
@@ -360,55 +360,55 @@ function openEditOrderModal(o) {
     </div>
     <form id="editOrderForm" style="display:flex;flex-direction:column;gap:14px;">
       <div id="editItemsBox" style="display:flex;flex-direction:column;gap:10px;max-height:320px;overflow-y:auto;"></div>
-      <div style="border-top:1px solid #e2e8f0;padding-top:12px;display:flex;flex-direction:column;gap:10px;">
-        <input name="company_name" placeholder="Company Name" value="${customer.company_name ?? ''}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-        <input name="gst_number" placeholder="GST Number" value="${customer.gst_number ?? ''}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-        <input name="discount" type="number" min="0" placeholder="Discount" value="${o.discount ?? 0}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-        <select name="payment_mode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+      <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:10px;">
+        <input name="company_name" placeholder="Company Name" value="${customer.company_name ?? ''}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <input name="gst_number" placeholder="GST Number" value="${customer.gst_number ?? ''}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <input name="discount" type="number" min="0" placeholder="Discount" value="${o.discount ?? 0}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <select name="payment_mode" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
           ${PAYMENT_MODES.map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
         </select>
         <textarea name="remark" class="edit-remark" placeholder="Remark for this edit (required)" rows="2" required
-          style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;resize:vertical;"></textarea>
+          style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;resize:vertical;"></textarea>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px;">
-        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>`;
 
   const itemsBox = content.querySelector('#editItemsBox');
   itemsBox.innerHTML = items.map((it, idx) => `
-    <div class="editItemRow" data-idx="${idx}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+    <div class="editItemRow" data-idx="${idx}" style="border:1px solid var(--border);border-radius:8px;padding:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
         <div style="font-size:13px;font-weight:600;">
           ${it.product_name ?? ''}
-          <small style="color:#94a3b8;font-weight:400;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>
+          <small style="color:var(--text-light);font-weight:400;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>
         </div>
         <button type="button" class="removeItemBtn" title="Remove this product from the order"
-          style="border:none;background:none;color:#d62828;cursor:pointer;font-size:14px;padding:2px 4px;">
+          style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:14px;padding:2px 4px;">
           <i class="fa-solid fa-trash"></i>
         </button>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <label style="font-size:11px;color:#64748b;width:70px;">Qty
-          <input type="number" min="1" class="editQty" value="${it.quantity ?? 1}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        <label style="font-size:11px;color:var(--text-muted);width:70px;">Qty
+          <input type="number" min="1" class="editQty" value="${it.quantity ?? 1}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
         </label>
-        <label style="font-size:11px;color:#64748b;width:100px;">Price
-          <input type="number" min="0" class="editPrice" value="${it.price ?? 0}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        <label style="font-size:11px;color:var(--text-muted);width:100px;">Price
+          <input type="number" min="0" class="editPrice" value="${it.price ?? 0}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
         </label>
-        <label style="font-size:11px;color:#64748b;width:80px;">Tax %
-          <input type="number" min="0" class="editTax" value="${it.tax_rate ?? 0}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+        <label style="font-size:11px;color:var(--text-muted);width:80px;">Tax %
+          <input type="number" min="0" class="editTax" value="${it.tax_rate ?? 0}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
         </label>
       </div>
-      <label style="font-size:11px;color:#64748b;display:block;margin-top:8px;">Serial Numbers (comma separated)
-        <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-top:8px;">Serial Numbers (comma separated)
+        <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
       </label>
       <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
-        <button type="button" class="editSerialFileBtn" style="padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:none;cursor:pointer;font-size:11px;color:#64748b;">
+        <button type="button" class="editSerialFileBtn" style="padding:6px 10px;border:1px dashed var(--text-light);border-radius:6px;background:none;cursor:pointer;font-size:11px;color:var(--text-muted);">
           <i class="fa-solid fa-file-arrow-up"></i> Upload serials from Excel/CSV
         </button>
         <input type="file" class="editSerialFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
-        <span class="editSerialFilePreview" style="font-size:11px;color:#0369a1;"></span>
+        <span class="editSerialFilePreview" style="font-size:11px;color:var(--primary-dark);"></span>
       </div>
     </div>`).join('');
 
@@ -455,7 +455,7 @@ function openEditOrderModal(o) {
         if (qtyInput) qtyInput.value = serials.length;
         preview.textContent = `${serials.length} serial number(s) loaded from file.`;
         fileInput.value = '';
-      }, (msg) => { preview.textContent = msg; preview.style.color = '#d62828'; fileInput.value = ''; });
+      }, (msg) => { preview.textContent = msg; preview.style.color = 'var(--danger)'; fileInput.value = ''; });
     });
   });
 
@@ -573,20 +573,20 @@ function renderReturnItemsBox(box, o) {
   box.innerHTML = items.map((it, idx) => {
     const serials = it.serial_numbers || [];
     return `
-    <div class="returnItemRow" data-idx="${idx}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+    <div class="returnItemRow" data-idx="${idx}" style="border:1px solid var(--border);border-radius:8px;padding:10px;">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;">
         <input type="checkbox" class="returnItemCheck">
-        ${it.product_name ?? ''} <small style="color:#94a3b8;font-weight:400;">(qty ${it.quantity ?? 0})</small>
+        ${it.product_name ?? ''} <small style="color:var(--text-light);font-weight:400;">(qty ${it.quantity ?? 0})</small>
       </label>
       <div class="returnItemDetails" style="display:none;margin-top:8px;padding-left:22px;">
         ${serials.length ? `
-        <p style="font-size:11px;color:#64748b;margin-bottom:4px;">Which unit(s) came back?</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Which unit(s) came back?</p>
         ${serials.map(sn => `
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:4px;">
             <input type="checkbox" class="returnSerialCheck" value="${sn}"> ${sn}
           </label>`).join('')}
         ` : ''}
-        <p style="font-size:11px;color:#64748b;margin:6px 0 4px;">Condition</p>
+        <p style="font-size:11px;color:var(--text-muted);margin:6px 0 4px;">Condition</p>
         <div style="display:flex;gap:14px;font-size:12px;">
           <label><input type="radio" name="condition-${idx}" class="returnConditionOk" value="ok" checked> OK — restock</label>
           <label><input type="radio" name="condition-${idx}" class="returnConditionFaulty" value="faulty"> Faulty — mark damaged</label>
@@ -724,7 +724,7 @@ function productCellHtml(it) {
   const m = itemMeta(it);
   const sub = [it.product_id ? `ID: ${escapeHtml(it.product_id)}` : '', it.model_no ? `Model: ${escapeHtml(it.model_no)}` : ''].filter(Boolean).join(' · ');
   const part = m.typeLabel
-    ? `<div style="margin-top:3px;"><span class="ov-chip">${m.typeLabel}</span>${m.parent ? ` <span class="ov-sub">belongs to: <strong style="color:#475569;">${escapeHtml(m.parent)}</strong></span>` : ''}</div>`
+    ? `<div style="margin-top:3px;"><span class="ov-chip">${m.typeLabel}</span>${m.parent ? ` <span class="ov-sub">belongs to: <strong style="color:var(--text-secondary);">${escapeHtml(m.parent)}</strong></span>` : ''}</div>`
     : '';
   return `<strong>${escapeHtml(it.product_name ?? '')}</strong>${sub ? `<div class="ov-sub">${sub}</div>` : ''}${part}`;
 }
@@ -734,35 +734,35 @@ function ensureOrderViewStyles() {
   const st = document.createElement('style');
   st.id = 'ov-style';
   st.textContent = `
-    .ov-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #eef1f6}
+    .ov-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
     .ov-head h3{margin:0 0 4px}
     .ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:18px}
-    .ov-cell{background:#f8fafc;border-radius:10px;padding:10px 12px}
-    .ov-cell small{display:block;color:#64748b;font-size:11px;margin-bottom:2px}
-    .ov-cell p{margin:0;font-size:14px;color:#0f172a;word-break:break-word}
-    .ov-title{font-size:13px;font-weight:600;color:#334155;margin:4px 0 8px}
-    .ov-scroll{overflow-x:auto;margin-bottom:18px;border:1px solid #eef1f6;border-radius:10px}
+    .ov-cell{background:var(--bg-light);border-radius:10px;padding:10px 12px}
+    .ov-cell small{display:block;color:var(--text-muted);font-size:11px;margin-bottom:2px}
+    .ov-cell p{margin:0;font-size:14px;color:var(--text-primary);word-break:break-word}
+    .ov-title{font-size:13px;font-weight:600;color:var(--text-secondary);margin:4px 0 8px}
+    .ov-scroll{overflow-x:auto;margin-bottom:18px;border:1px solid var(--border);border-radius:10px}
     .ov-table{width:100%;border-collapse:collapse;font-size:13px}
-    .ov-table th{background:#f1f5f9;color:#475569;text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
-    .ov-table td{padding:9px 12px;border-bottom:1px solid #eef1f6;vertical-align:top}
+    .ov-table th{background:var(--bg-hover);color:var(--text-secondary);text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
+    .ov-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
     .ov-table tr:last-child td{border-bottom:none}
-    .ov-sub{color:#94a3b8;font-size:12px}
-    .ov-chip{display:inline-block;background:#eef3fb;color:#1665ff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:600}
-    .ov-serial{display:inline-block;background:#f1f5f9;border-radius:6px;padding:1px 7px;margin:2px 4px 0 0;font-size:11px;color:#475569}
+    .ov-sub{color:var(--text-light);font-size:12px}
+    .ov-chip{display:inline-block;background:var(--info-bg);color:var(--primary);border-radius:999px;padding:1px 9px;font-size:11px;font-weight:600}
+    .ov-serial{display:inline-block;background:var(--bg-hover);border-radius:6px;padding:1px 7px;margin:2px 4px 0 0;font-size:11px;color:var(--text-secondary)}
     .ov-bottom{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
     .ov-notes{flex:1;min-width:260px;display:grid;gap:10px}
-    .ov-totals{width:300px;max-width:100%;background:#f8fafc;border-radius:12px;padding:12px 16px;margin-left:auto}
-    .ov-totals div{display:flex;justify-content:space-between;padding:5px 0;font-size:14px;color:#475569}
-    .ov-totals .ov-grand{border-top:1px solid #e2e8f0;margin-top:4px;padding-top:9px;font-weight:700;font-size:16px;color:#0f172a}
+    .ov-totals{width:300px;max-width:100%;background:var(--bg-light);border-radius:12px;padding:12px 16px;margin-left:auto}
+    .ov-totals div{display:flex;justify-content:space-between;padding:5px 0;font-size:14px;color:var(--text-secondary)}
+    .ov-totals .ov-grand{border-top:1px solid var(--border);margin-top:4px;padding-top:9px;font-weight:700;font-size:16px;color:var(--text-primary)}
     .ov-row{cursor:pointer}
-    .ov-row:hover td{background:#f8fafc}
-    .ov-hint{font-size:12px;color:#94a3b8;margin:-8px 0 12px}`;
+    .ov-row:hover td{background:var(--bg-light)}
+    .ov-hint{font-size:12px;color:var(--text-light);margin:-8px 0 12px}`;
   document.head.appendChild(st);
 }
 
 function orderCardRowsHtml(list) {
   ensureOrderViewStyles();
-  if (!list.length) return '<p style="color:#94a3b8;text-align:center;padding:16px;">No orders to show.</p>';
+  if (!list.length) return '<p style="color:var(--text-light);text-align:center;padding:16px;">No orders to show.</p>';
   return `<p class="ov-hint">Click an order to see its full details.</p>
   <div class="ov-scroll"><table class="ov-table">
     <thead><tr><th>Product</th><th>Qty</th><th>Company</th><th>Order Date</th><th>Status</th><th>Amount</th></tr></thead>
@@ -817,7 +817,7 @@ function openOrderCardDetailModal(type) {
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>${title} <small style="color:#94a3b8;font-weight:400;">(${list.length})</small></h3>
+      <h3>${title} <small style="color:var(--text-light);font-weight:400;">(${list.length})</small></h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${orderCardRowsHtml(list)}`;
@@ -910,19 +910,19 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
       </div>
       <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
         ${statusOptions ? `
-        <label style="font-size:13px;color:#64748b;">Status</label>
-        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <label style="font-size:13px;color:var(--text-muted);">Status</label>
+        <select name="status" style="padding:10px;border:1px solid var(--border);border-radius:8px;">
           <option value="">All Statuses</option>
           ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
         </select>` : ''}
         ${dateField ? `
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} From</label>
         <input type="date" name="dateFrom">
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} To</label>
         <input type="date" name="dateTo">` : ''}
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Export</button>
         </div>
       </form>
     </div>`;
@@ -996,7 +996,7 @@ function openViewOrderModal(o) {
           <td><strong>${orderMoney(lineTotal)}</strong></td>
         </tr>`;
       }).join('')
-    : `<tr><td colspan="6" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+    : `<tr><td colspan="6" style="text-align:center;color:var(--text-light);">No items</td></tr>`;
 
   const returnedHtml = (o.returned_items || []).length ? `
     <div class="ov-title">Returned Product(s)</div>
@@ -1214,12 +1214,12 @@ function wizardTitle(t) { document.getElementById('wizardTitle').textContent = t
 function renderCustomerTypeStep() {
   wizardTitle('New Order — Customer');
   wizardBody().innerHTML = `
-    <p style="color:#64748b;margin-bottom:14px;">Is this order for an existing customer or a new one?</p>
+    <p style="color:var(--text-muted);margin-bottom:14px;">Is this order for an existing customer or a new one?</p>
     <div style="display:flex;gap:10px;">
-      <button id="btnExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+      <button id="btnExisting" style="flex:1;padding:16px;border-radius:10px;border:1px solid var(--border);background:var(--bg-light);cursor:pointer;">
         <i class="fa-solid fa-address-book"></i><br>Existing Customer
       </button>
-      <button id="btnNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
+      <button id="btnNew" style="flex:1;padding:16px;border-radius:10px;border:1px solid var(--border);background:var(--bg-light);cursor:pointer;">
         <i class="fa-solid fa-user-plus"></i><br>New Customer
       </button>
     </div>`;
@@ -1231,10 +1231,10 @@ function renderCustomerTypeStep() {
 function renderExistingCustomerStep() {
   wizardTitle('New Order — Select Customer');
   wizardBody().innerHTML = `
-    <input id="custSearch" placeholder="Search company, GST or contact person" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <input id="custSearch" placeholder="Search company, GST or contact person" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
     <div id="custResults" style="max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
     <div style="display:flex;justify-content:flex-start;margin-top:14px;">
-      <button type="button" id="backBtn1" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
+      <button type="button" id="backBtn1" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
     </div>`;
   document.getElementById('backBtn1').addEventListener('click', renderCustomerTypeStep);
 
@@ -1242,18 +1242,18 @@ function renderExistingCustomerStep() {
   const resultsBox = document.getElementById('custResults');
 
   const runSearch = async () => {
-    resultsBox.innerHTML = '<small style="color:#94a3b8;">Searching...</small>';
+    resultsBox.innerHTML = '<small style="color:var(--text-light);">Searching...</small>';
     try {
       const term = searchInput.value.trim();
       const res = await apiFetch(`/customer/search?term=${encodeURIComponent(term)}`);
       const data = await res.json();
       const list = data.dataset || [];
-      if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No customers found.</small>'; return; }
+      if (!list.length) { resultsBox.innerHTML = '<small style="color:var(--text-light);">No customers found.</small>'; return; }
       resultsBox.innerHTML = list.map(c => `
-        <div class="cust-row" data-id="${c.customer_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+        <div class="cust-row" data-id="${c.customer_id}" style="border:1px solid var(--border);border-radius:8px;padding:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <div>
             <strong>${c.company_name ?? ''}</strong><br>
-            <small style="color:#64748b;">${c.gst_number ?? ''} • ${c.contractor_person ?? ''} • ${c.contractor_number ?? ''}</small>
+            <small style="color:var(--text-muted);">${c.gst_number ?? ''} • ${c.contractor_person ?? ''} • ${c.contractor_number ?? ''}</small>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;">
             <button type="button" class="cust-edit icon-btn" data-id="${c.customer_id}" title="Edit"><i class="fa-solid fa-pen"></i></button>
@@ -1284,7 +1284,7 @@ function renderExistingCustomerStep() {
         }
       }));
     } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') resultsBox.innerHTML = '<small style="color:#d62828;">Search failed.</small>';
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') resultsBox.innerHTML = '<small style="color:var(--danger);">Search failed.</small>';
     }
   };
 
@@ -1305,8 +1305,8 @@ function renderEditCustomerForm(c) {
       <input name="contractor_number" placeholder="Contractor Number" value="${c.contractor_number ?? ''}" required>
       <input name="contractor_email" type="email" placeholder="Contractor Email" value="${c.contractor_email ?? ''}" required>
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="cancelEditCust" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Save</button>
+        <button type="button" id="cancelEditCust" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:var(--primary);color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>`;
   document.getElementById('cancelEditCust').addEventListener('click', renderExistingCustomerStep);
@@ -1350,8 +1350,8 @@ function renderNewCustomerStep() {
       <div style = padding-left:5px;><small><p>Credit Limit</p></small></div>
       <input name="credit_limit" type="number" min="0" step="0.01" placeholder="Credit Limit (₹)" value="0">
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="backBtn2" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Next</button>
+        <button type="button" id="backBtn2" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:var(--primary);color:#fff;cursor:pointer;">Next</button>
       </div>
     </form>`;
   document.getElementById('backBtn2').addEventListener('click', renderCustomerTypeStep);
@@ -1411,7 +1411,7 @@ function renderProductsStep() {
 
   wizardBody().innerHTML = `
     <div id="prodCatTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
-    <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
     <div style="margin-top:14px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         <thead><tr style="text-align:left;color:#fff;">
@@ -1421,8 +1421,8 @@ function renderProductsStep() {
       </table>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
-      <button type="button" id="backBtn3" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-      <button type="button" id="toPaymentBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;">Create Order</button>
+      <button type="button" id="backBtn3" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
+      <button type="button" id="toPaymentBtn" style="padding:10px 16px;border-radius:8px;border:none;background:var(--primary);color:#fff;cursor:pointer;">Create Order</button>
     </div>`;
 
   document.getElementById('backBtn3').addEventListener('click', () => wiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
@@ -1440,9 +1440,9 @@ function renderProductsStep() {
   let activeCategory = 'product';
 
   function paintCatTab(btn, active) {
-    btn.style.border = active ? '1px solid #1665ff' : '1px solid #e2e8f0';
-    btn.style.background = active ? '#eaf1ff' : '#f8fafc';
-    btn.style.color = active ? '#1665ff' : '#334155';
+    btn.style.border = active ? '1px solid var(--primary)' : '1px solid var(--border)';
+    btn.style.background = active ? 'var(--info-bg)' : 'var(--bg-light)';
+    btn.style.color = active ? 'var(--primary)' : 'var(--text-secondary)';
     btn.style.borderRadius = '8px';
     btn.style.padding = '8px 14px';
     btn.style.cursor = 'pointer';
@@ -1489,12 +1489,12 @@ function renderProductsStep() {
     const qtyInCart = wiz.cart[key]?.quantity ?? '';
     return `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style=\"color:#94a3b8;\">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + (p.parent_product_name || '—') : p.product_id + (p.model_no ? ' · ' + p.model_no : '')}</small></td>
+        <td>${p.product_name ?? ''}<br><small style=\"color:var(--text-light);\">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + (p.parent_product_name || '—') : p.product_id + (p.model_no ? ' · ' + p.model_no : '')}</small></td>
         <td>${stockFor(p)}</td>
         <td>₹${p.price ?? 0}</td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
               placeholder="0" data-row-key="${key}" class="qtyInput"
-              style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+              style="width:60px;padding:6px;border:1px solid var(--border);border-radius:6px;"></td>
       </tr>`;
   }
 
@@ -1597,8 +1597,8 @@ function renderProductsStep() {
 
   applyFilters();
   if (!products.length) {
-    rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:#94a3b8;">
-      No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
+    rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-light);">
+      No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:var(--info-bg);color:var(--primary);padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
     </td></tr>`;
     document.getElementById('retryInvBtn')?.addEventListener('click', async () => {
       await loadInventoryForOrders();
@@ -1623,55 +1623,55 @@ function renderPaymentStep() {
   if (wiz.warrantyCharge === undefined) wiz.warrantyCharge = 0;
 
   wizardBody().innerHTML = `
-    <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
+    <div style="background:var(--bg-light);border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
       ${cartItems.map((i, idx) => `
-        <div style="padding:6px 0;border-bottom:1px solid #e2e8f0;">
+        <div style="padding:6px 0;border-bottom:1px solid var(--border);">
           <div style="font-weight:600;">${i.product_name} × ${i.quantity}</div>
           <div style="display:flex;gap:8px;margin-top:4px;">
-            <label style="flex:1;font-size:11px;color:#64748b;">Price / pc (₹)
-              <input type="number" min="0" step="any" class="wizPrice" data-idx="${idx}" value="${i.price}" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            <label style="flex:1;font-size:11px;color:var(--text-muted);">Price / pc (₹)
+              <input type="number" min="0" step="any" class="wizPrice" data-idx="${idx}" value="${i.price}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
             </label>
-            <label style="flex:1;font-size:11px;color:#64748b;">Tax % / pc
-              <input type="number" min="0" step="any" class="wizTax" data-idx="${idx}" value="${i.tax_rate}" style="width:100%;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            <label style="flex:1;font-size:11px;color:var(--text-muted);">Tax % / pc
+              <input type="number" min="0" step="any" class="wizTax" data-idx="${idx}" value="${i.tax_rate}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
             </label>
-            <div style="flex:1;font-size:11px;color:#64748b;">Line (excl. tax)
-              <div class="wizLine" data-idx="${idx}" style="padding:6px 0;font-size:13px;color:#0f172a;">₹${(i.price * i.quantity).toFixed(2)}</div>
+            <div style="flex:1;font-size:11px;color:var(--text-muted);">Line (excl. tax)
+              <div class="wizLine" data-idx="${idx}" style="padding:6px 0;font-size:13px;color:var(--text-primary);">₹${(i.price * i.quantity).toFixed(2)}</div>
             </div>
           </div>
         </div>`).join('')}
       <div id="wizSubtotal" style="margin-top:8px;">Subtotal: ₹${subtotal.toFixed(2)}</div>
     </div>
-    <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:12px;">
-      <label style="font-size:13px;font-weight:600;color:#334155;">Warranty</label>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px;">
+      <label style="font-size:13px;font-weight:600;color:var(--text-secondary);">Warranty</label>
       <div style="display:flex;gap:14px;margin:8px 0;font-size:13px;">
         <label><input type="radio" name="warrantyChoice" value="standard" ${wiz.warrantyYears <= 1 ? 'checked' : ''}> Standard (1 Year)</label>
         <label><input type="radio" name="warrantyChoice" value="extend" ${wiz.warrantyYears > 1 ? 'checked' : ''}> Extend Warranty</label>
       </div>
       <div id="extendWarrantyBox" style="display:${wiz.warrantyYears > 1 ? 'flex' : 'none'};gap:10px;">
-        <select id="warrantyYearsSelect" style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+        <select id="warrantyYearsSelect" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">
           <option value="2" ${wiz.warrantyYears === 2 ? 'selected' : ''}>2 Years</option>
           <option value="3" ${wiz.warrantyYears === 3 ? 'selected' : ''}>3 Years</option>
           <option value="4" ${wiz.warrantyYears === 4 ? 'selected' : ''}>4 Years</option>
           <option value="5" ${wiz.warrantyYears === 5 ? 'selected' : ''}>5 Years</option>
         </select>
-        <input id="warrantyChargeInput" type="number" min="0" placeholder="Additional Charge (₹)" value="${wiz.warrantyCharge || ''}" style="flex:1;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+        <input id="warrantyChargeInput" type="number" min="0" placeholder="Additional Charge (₹)" value="${wiz.warrantyCharge || ''}" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:8px;">
       </div>
     </div>
-    <select id="paymentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <select id="paymentMode" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
       <option value="">Select Payment Mode</option>
       ${PAYMENT_MODES.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
     </select>
     <div id="paymentExtra"></div>
-    <label style="font-size:13px;color:#64748b;">Reference <span style="color:#94a3b8;">(optional)</span></label>
-    <select id="orderReference" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:4px 0 10px;">
+    <label style="font-size:13px;color:var(--text-muted);">Reference <span style="color:var(--text-light);">(optional)</span></label>
+    <select id="orderReference" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:4px 0 10px;">
       <option value="">No reference</option>
     </select>
     <div style = "padding-left:8px" ><small><p>Discount<p><small></div>
-    <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
-    <div id="grandTotalBox" style="font-size:13px;color:#334155;margin-bottom:10px;"></div>
+    <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:10px 0;">
+    <div id="grandTotalBox" style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;"></div>
     <div style="display:flex;justify-content:space-between;margin-top:10px;">
-      <button type="button" id="backBtn4" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-      <button type="button" id="placeOrderBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Place Order</button>
+      <button type="button" id="backBtn4" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
+      <button type="button" id="placeOrderBtn" style="padding:10px 16px;border-radius:8px;border:none;background:var(--success-dark);color:#fff;cursor:pointer;">Place Order</button>
     </div>`;
 
   document.getElementById('backBtn4').addEventListener('click', renderProductsStep);
@@ -1771,7 +1771,7 @@ function proceedToSerialReview(modeSelect, extraBox) {
 async function renderSerialReviewStep() {
   wizardTitle('New Order — Review Serial Numbers');
   const body = wizardBody();
-  body.innerHTML = `<p style="color:#94a3b8;">Loading available serial numbers...</p>`;
+  body.innerHTML = `<p style="color:var(--text-light);">Loading available serial numbers...</p>`;
 
   const cartItems = Object.values(wiz.cart);
   const rowKeyOf = (i) => `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
@@ -1791,7 +1791,7 @@ async function renderSerialReviewStep() {
     }
   }));
 
-  let html = `<p style="color:#64748b;margin-bottom:12px;font-size:13px;">
+  let html = `<p style="color:var(--text-muted);margin-bottom:12px;font-size:13px;">
     Each unit is auto-assigned the oldest available serial number. Pick a different one below if needed — search by typing in the box.
   </p>`;
 
@@ -1802,15 +1802,15 @@ async function renderSerialReviewStep() {
     const needed = item.quantity;
     const slots = Math.min(needed, available.length);
 
-    html += `<div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+    html += `<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:8px;padding:10px;">
       <strong>${item.product_name}${item.model_no ? ' · ' + item.model_no : ''}</strong> × ${needed}`;
 
     if (!available.length) {
-      html += `<p style="font-size:12px;color:#94a3b8;margin-top:4px;">No serial numbers on file for this item — will ship unserialized.</p></div>`;
+      html += `<p style="font-size:12px;color:var(--text-light);margin-top:4px;">No serial numbers on file for this item — will ship unserialized.</p></div>`;
       return;
     }
     if (needed > available.length) {
-      html += `<p style="font-size:12px;color:#d62828;margin-top:4px;">Only ${available.length} serial number(s) on file — the remaining ${needed - available.length} unit(s) will ship unserialized.</p>`;
+      html += `<p style="font-size:12px;color:var(--danger);margin-top:4px;">Only ${available.length} serial number(s) on file — the remaining ${needed - available.length} unit(s) will ship unserialized.</p>`;
     }
 
     const existingChoices = wiz.serialChoices[rowKey] || [];
@@ -1819,10 +1819,10 @@ async function renderSerialReviewStep() {
       const chosen = existingChoices[slot] || defaultSerial;
       html += `
         <div style="margin-top:8px;">
-          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <label style="font-size:12px;color:var(--text-muted);">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
           <input list="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="serialPickInput"
                  data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
-                 style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;">
           <datalist id="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}">
             ${available.map(sn => `<option value="${sn}">`).join('')}
           </datalist>
@@ -1833,8 +1833,8 @@ async function renderSerialReviewStep() {
 
   html += `
     <div style="display:flex;justify-content:space-between;margin-top:14px;">
-      <button type="button" id="backBtn5" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-      <button type="button" id="confirmSerialsBtn" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Confirm &amp; Place Order</button>
+      <button type="button" id="backBtn5" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
+      <button type="button" id="confirmSerialsBtn" style="padding:10px 16px;border-radius:8px;border:none;background:var(--success-dark);color:#fff;cursor:pointer;">Confirm &amp; Place Order</button>
     </div>`;
 
   body.innerHTML = html;
@@ -1918,39 +1918,39 @@ async function finalizeSubmitOrder() {
 function renderPaymentExtra(mode, extraBox) {
   if (mode === 'Credit') {
     extraBox.innerHTML = `
-      <label style="font-size:13px;color:#64748b;">Credit Period</label>
-      <select id="creditDaysSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <label style="font-size:13px;color:var(--text-muted);">Credit Period</label>
+      <select id="creditDaysSelect" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
         <option value="15">15 days</option>
         <option value="30">30 days</option>
         <option value="45">45 days</option>
         <option value="60">60 days</option>
         <option value="manual">Other (enter days)</option>
       </select>
-      <input id="creditDaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+      <input id="creditDaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">`;
     const sel = document.getElementById('creditDaysSelect');
     const manual = document.getElementById('creditDaysManual');
     sel.addEventListener('change', () => manual.style.display = sel.value === 'manual' ? 'block' : 'none');
   } else if (mode === 'Cheque') {
     extraBox.innerHTML = `
-      <input id="chequeNumber" placeholder="Cheque Number" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
-      <input id="chequeDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
-      <input id="chequeBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+      <input id="chequeNumber" placeholder="Cheque Number" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <input id="chequeDate" type="date" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <input id="chequeBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">`;
   } else if (mode === 'DemandDraft') {
     extraBox.innerHTML = `
-      <input id="ddNumber" placeholder="Demand Draft Number" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
-      <input id="ddDate" type="date" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
-      <input id="ddBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+      <input id="ddNumber" placeholder="Demand Draft Number" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <input id="ddDate" type="date" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <input id="ddBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">`;
   } else if (mode === 'UPI') {
     extraBox.innerHTML = `
-      <input id="upiId" placeholder="UPI ID (e.g. name@bank)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">`;
+      <input id="upiId" placeholder="UPI ID (e.g. name@bank)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">`;
   } else if (mode === 'NetBanking') {
     extraBox.innerHTML = `
-      <input id="nbBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
-      <input id="nbAccount" placeholder="Account Number" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
-      <input id="nbIfsc" placeholder="IFSC Code" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">`;
+      <input id="nbBank" placeholder="Bank Name" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <input id="nbAccount" placeholder="Account Number" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <input id="nbIfsc" placeholder="IFSC Code" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">`;
   } else if (mode === 'Cash') {
     extraBox.innerHTML = `
-      <input id="cashReceivedBy" placeholder="Received By (Person Name)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">`;
+      <input id="cashReceivedBy" placeholder="Received By (Person Name)" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">`;
   } else {
     extraBox.innerHTML = '';
   }
@@ -2035,11 +2035,11 @@ function renderOrderRequests(requests) {
           </div>
         </div>
         <div style="display:flex;gap:8px;">
-          <button class="icon-btn oreq-approve" data-id="${r.request_id}" title="Approve"><i class="fa-solid fa-check" style="color:#16a34a;"></i></button>
-          <button class="icon-btn oreq-reject" data-id="${r.request_id}" title="Reject"><i class="fa-solid fa-xmark" style="color:#d62828;"></i></button>
+          <button class="icon-btn oreq-approve" data-id="${r.request_id}" title="Approve"><i class="fa-solid fa-check" style="color:var(--success-dark);"></i></button>
+          <button class="icon-btn oreq-reject" data-id="${r.request_id}" title="Reject"><i class="fa-solid fa-xmark" style="color:var(--danger);"></i></button>
         </div>
       </div>`;
-  }).join('') : '<p style="color:#94a3b8;padding:10px;">No pending order requests.</p>';
+  }).join('') : '<p style="color:var(--text-light);padding:10px;">No pending order requests.</p>';
 
   box.querySelectorAll('.oreq-approve').forEach(btn => btn.addEventListener('click', () => approveOrderRequest(btn.dataset.id)));
   box.querySelectorAll('.oreq-reject').forEach(btn => btn.addEventListener('click', () => rejectOrderRequest(btn.dataset.id)));
