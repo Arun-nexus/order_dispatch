@@ -187,65 +187,217 @@ function renderCards() {
   document.getElementById('cardFY').textContent = fy;
 }
 
-function shipmentCardRowsHtml(list) {
-  if (!list.length) return '<p style="color:#94a3b8;text-align:center;padding:16px;">No shipments to show.</p>';
-  return `<table style="width:100%;font-size:13px;border-collapse:collapse;">
-    <thead><tr style="text-align:left;">
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Company</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Products</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Order Date</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Received Date</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Status</th>
-    </tr></thead>
-    <tbody>${list.map(s => `<tr>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${s.companyName ?? ''}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${productSummary(s.products)}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${s.dispatchDate ? new Date(s.dispatchDate).toLocaleDateString('en-GB') : '-'}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${s.receivedDate ? new Date(s.receivedDate).toLocaleDateString('en-GB') : '-'}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${shipmentStatus(s)}</td>
-    </tr>`).join('')}</tbody>
-  </table>`;
+// =========================================================
+// CARD POPUPS — filters + export + click-through to full details
+// =========================================================
+const shipCV = { title: '', base: [], f: {} };
+
+function shipEnsureStyles() {
+  if (document.getElementById('shipCvStyles')) return;
+  const st = document.createElement('style');
+  st.id = 'shipCvStyles';
+  st.textContent = `
+    #shipmentCardDetailModal{z-index:999}
+    #viewShipmentModal{z-index:1100 !important}
+    .sh-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .sh-head h3{margin:0}
+    .sh-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .sh-bar select,.sh-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px;background:#fff;min-width:0}
+    .sh-bar input[type=text]{flex:1;min-width:150px}
+    .sh-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+    .sh-btn.exp{background:#1665ff;color:#fff}
+    .sh-btn.rst{background:#eef1f6;color:#334155}
+    .sh-count{font-size:12px;color:#64748b;margin:0 0 8px}
+    .sh-wrap{overflow:auto;max-height:58vh;border:1px solid #eef1f6;border-radius:10px}
+    .sh-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:900px}
+    .sh-tbl th{position:sticky;top:0;background:#f1f5f9 !important;color:#334155 !important;text-align:left;padding:8px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+    .sh-tbl td{color:#1e293b;padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+    .sh-tbl tbody tr{cursor:pointer}
+    .sh-tbl tbody tr:hover{background:#f8fbff}
+    .sh-sub{display:block;font-size:11px;color:#64748b;margin-top:1px}
+    .sh-line{margin-bottom:6px}
+    .sh-line:last-child{margin-bottom:0}
+    .sh-chip{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:#eef2ff;color:#3730a3;margin-left:4px}
+    .sh-chip.purchase{background:#fff7ed;color:#9a3412}
+    .sh-chip.warranty{background:#ecfdf5;color:#065f46}
+    .sh-pill{padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600}
+    .sh-pill.received{background:#dcfce7;color:#166534}
+    .sh-pill.pending{background:#fef3c7;color:#92400e}
+  `;
+  document.head.appendChild(st);
+}
+
+function shipFmtDate(d) {
+  if (!d) return '-';
+  const x = new Date(d);
+  return isNaN(x) ? String(d) : x.toLocaleDateString('en-GB');
+}
+function shipTotalInr(s) {
+  return Number(s.totalInr) || Math.round(draftTotal(s) * (Number(s.exchangeRate) || 1) * 100) / 100;
+}
+function shipPaymentText(s) {
+  const m = s.paymentMode || 'paid';
+  if (m === 'paid') return 'Paid';
+  if (m === 'partial') return 'Partial';
+  return 'Credit';
+}
+function shipPartsOf(s) {
+  const out = [];
+  (s.products || []).forEach(p => (p.parts || []).forEach(pt =>
+    out.push({ product: p.name, name: pt.name, qty: pt.quantity, status: pt.status || 'assembly' })));
+  return out;
+}
+
+function shipFiltered() {
+  const f = shipCV.f;
+  const q = (f.q || '').toLowerCase();
+  return shipCV.base.filter(s => {
+    if (f.status && shipmentStatus(s) !== f.status) return false;
+    if (f.payment && (s.paymentMode || 'paid') !== f.payment) return false;
+    if (f.currency && (s.currency || 'INR') !== f.currency) return false;
+    if (f.company && s.companyName !== f.company) return false;
+    if (f.partStatus && !shipPartsOf(s).some(p => p.status === f.partStatus)) return false;
+    if (f.from && (s.dispatchDate || '') < f.from) return false;
+    if (f.to && (s.dispatchDate || '') > f.to) return false;
+    if (q) {
+      const hay = [s.id, s.companyName, s.companyAddress,
+        ...(s.products || []).map(p => p.name),
+        ...shipPartsOf(s).map(p => p.name)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function shipRowsHtml(list) {
+  if (!list.length) return '<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:20px;">No shipments match these filters.</td></tr>';
+  return list.map(s => {
+    const st = shipmentStatus(s);
+    const prods = (s.products || []).map(p => `
+      <div class="sh-line"><b>${esc(p.name)}</b> × ${esc(p.quantity)}
+        <span class="sh-sub">${curMoney(p.price, s.currency)} each${p.warranty ? ' · Warranty: ' + esc(p.warranty) : ''}</span></div>`).join('') || '—';
+    const parts = shipPartsOf(s).map(pt => `
+      <div class="sh-line">${esc(pt.name)} × ${esc(pt.qty)}<span class="sh-chip ${esc(pt.status)}">${esc(partStatusLabel(pt.status))}</span>
+        <span class="sh-sub">Belongs to: ${esc(pt.product)}</span></div>`).join('') || '<span style="color:#94a3b8;">—</span>';
+    const total = draftTotal(s);
+    return `<tr data-id="${esc(s.id)}">
+      <td>${esc(s.id)}</td>
+      <td><b>${esc(s.companyName)}</b><span class="sh-sub">${esc((s.companyAddress || '').slice(0, 50))}</span></td>
+      <td>${prods}</td>
+      <td>${parts}</td>
+      <td>${shipFmtDate(s.dispatchDate)}</td>
+      <td>${shipFmtDate(s.receivedDate)}</td>
+      <td>${shipPaymentText(s)}</td>
+      <td>${curMoney(total, s.currency)}${s.currency !== 'INR' ? `<span class="sh-sub">≈ ${money(shipTotalInr(s))}</span>` : ''}</td>
+      <td><span class="sh-pill ${st}">${st === 'received' ? 'Received' : 'Pending'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function shipPaintCard() {
+  const list = shipFiltered();
+  const body = document.getElementById('shCvBody');
+  if (!body) return;
+  body.innerHTML = shipRowsHtml(list);
+  document.getElementById('shCvCount').textContent = `${list.length} of ${shipCV.base.length} shipment(s)`;
+  body.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => openViewModal(tr.dataset.id)));
+}
+
+function shipCsvCell(v) {
+  const t = String(v ?? '');
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function shipExportCsv(list, fileBase) {
+  const head = ['Shipment ID', 'Company', 'Address', 'Products (name x qty @ price)', 'Warranty',
+    'Parts (name x qty - type - belongs to)', 'Dispatch Date', 'Received Date', 'Status',
+    'Payment', 'Currency', 'Total', 'Total (INR)', 'Paid Amount', 'Credit Days', 'Due Date'];
+  const rows = list.map(s => [
+    s.id, s.companyName, s.companyAddress || '',
+    (s.products || []).map(p => `${p.name} x ${p.quantity} @ ${p.price}`).join(' | '),
+    (s.products || []).filter(p => p.warranty).map(p => `${p.name}: ${p.warranty}`).join(' | '),
+    shipPartsOf(s).map(p => `${p.name} x ${p.qty} - ${partStatusLabel(p.status)} - belongs to ${p.product}`).join(' | '),
+    s.dispatchDate || '', s.receivedDate || '', shipmentStatus(s),
+    shipPaymentText(s), s.currency || 'INR', draftTotal(s), shipTotalInr(s),
+    s.paymentMode === 'partial' ? (s.paidAmount || 0) : (s.paymentMode === 'paid' ? draftTotal(s) : 0),
+    s.paymentMode === 'paid' ? '' : (s.creditDays || ''),
+    s.paymentMode === 'paid' ? '' : (s.dueDate || addDays(s.dispatchDate, s.creditDays))
+  ]);
+  const csv = '﻿' + [head, ...rows].map(r => r.map(shipCsvCell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `${fileBase}_${todayStr()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function shipCardBase(type) {
+  const now = new Date();
+  const fy = currentFYRange();
+  const inFY = s => { const d = new Date(s.createdAt || s.dispatchDate); return d >= fy.start && d <= fy.end; };
+  switch (type) {
+    case 'thisMonth': return ['This Month Shipment', shipments.filter(s => {
+      const d = new Date(s.createdAt || s.dispatchDate);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    })];
+    case 'today': return ['Today Shipment', shipments.filter(s => (s.createdAt || '').slice(0, 10) === todayStr())];
+    case 'received': return ['Received Shipment', shipments.filter(s => shipmentStatus(s) === 'received')];
+    case 'pending': return ['Pending Shipment', shipments.filter(s => shipmentStatus(s) === 'pending')];
+    case 'fy': return ['Financial Year Shipment', shipments.filter(inFY)];
+    default: return ['Shipments', shipments];
+  }
 }
 
 function openShipmentCardDetailModal(type) {
   const modal = document.getElementById('shipmentCardDetailModal');
   if (!modal) return;
+  shipEnsureStyles();
+  const [title, base] = shipCardBase(type);
+  shipCV.title = title;
+  shipCV.base = base;
+  shipCV.f = { status: '', payment: '', currency: '', company: '', partStatus: '', from: '', to: '', q: '' };
+  const companies = [...new Set(base.map(s => s.companyName).filter(Boolean))].sort();
+  const currencies = [...new Set(base.map(s => s.currency || 'INR'))].sort();
+  const opt = (arr) => arr.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+
   const content = modal.querySelector('.modal-content');
-  const now = new Date();
-  const fyRange = currentFYRange();
-
-  let title = '';
-  let list = shipments;
-  if (type === 'thisMonth') {
-    title = 'This Month Shipment';
-    list = shipments.filter(s => {
-      const d = new Date(s.createdAt || s.dispatchDate);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    });
-  } else if (type === 'today') {
-    title = 'Today Shipment';
-    list = shipments.filter(s => (s.createdAt || '').slice(0, 10) === todayStr());
-  } else if (type === 'received') {
-    title = 'Received Shipment';
-    list = shipments.filter(s => shipmentStatus(s) === 'received');
-  } else if (type === 'pending') {
-    title = 'Pending Shipment';
-    list = shipments.filter(s => shipmentStatus(s) === 'pending');
-  } else if (type === 'fy') {
-    title = 'Financial Year Shipment';
-    list = shipments.filter(s => {
-      const d = new Date(s.createdAt || s.dispatchDate);
-      return d >= fyRange.start && d <= fyRange.end;
-    });
-  }
-
+  content.style.width = 'min(1100px,95vw)';
   content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>${title}</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    <div class="sh-head"><h3>${esc(title)}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="sh-bar">
+      <input type="text" id="shF_q" placeholder="Search company, product, part, ID...">
+      ${currencies.length > 1 ? '' : ''}
+      <select id="shF_status"><option value="">All Status</option><option value="pending">Pending</option><option value="received">Received</option></select>
+      <select id="shF_payment"><option value="">All Payment</option><option value="paid">Paid</option><option value="partial">Partial</option><option value="credit">Credit</option></select>
+      <select id="shF_currency"><option value="">All Currency</option>${opt(currencies)}</select>
+      <select id="shF_company"><option value="">All Companies</option>${opt(companies)}</select>
+      <select id="shF_partStatus"><option value="">All Part Types</option><option value="assembly">Assembly</option><option value="purchase">Purchase</option><option value="warranty">Warranty</option></select>
+      <label style="font-size:12px;color:#64748b;">Dispatch</label>
+      <input type="date" id="shF_from" title="From"><input type="date" id="shF_to" title="To">
+      <button class="sh-btn rst" id="shF_reset">Reset</button>
+      <button class="sh-btn exp" id="shF_export"><i class="fa-solid fa-download"></i> Export CSV</button>
     </div>
-    ${shipmentCardRowsHtml(list)}`;
+    <p class="sh-count" id="shCvCount"></p>
+    <div class="sh-wrap"><table class="sh-tbl">
+      <thead><tr><th>Shipment ID</th><th>Company</th><th>Products</th><th>Parts</th><th>Dispatch</th><th>Received</th><th>Payment</th><th>Total</th><th>Status</th></tr></thead>
+      <tbody id="shCvBody"></tbody></table></div>
+    <p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Click a row to see full shipment details.</p>`;
+
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  ['status', 'payment', 'currency', 'company', 'partStatus', 'from', 'to'].forEach(k => {
+    content.querySelector('#shF_' + k).addEventListener('change', e => { shipCV.f[k] = e.target.value; shipPaintCard(); });
+  });
+  content.querySelector('#shF_q').addEventListener('input', e => { shipCV.f.q = e.target.value; shipPaintCard(); });
+  content.querySelector('#shF_reset').addEventListener('click', () => {
+    shipCV.f = { status: '', payment: '', currency: '', company: '', partStatus: '', from: '', to: '', q: '' };
+    content.querySelectorAll('.sh-bar select,.sh-bar input').forEach(el => el.value = '');
+    shipPaintCard();
+  });
+  content.querySelector('#shF_export').addEventListener('click', () => {
+    shipExportCsv(shipFiltered(), shipCV.title.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  });
+  shipPaintCard();
   modal.style.display = 'flex';
 }
 
@@ -262,13 +414,11 @@ function productSummary(products) {
   return `${first.name} x${first.quantity}${extra}`;
 }
 
-function renderTable() {
-  const tbody = document.getElementById('shipmentTbody');
+function shipTableRows() {
   const statusFilter = document.getElementById('statusFilter').value;
   const dateFilter = document.getElementById('dispatchDateFilter').value;
   const search = (document.getElementById('shipmentSearch').value || '').toLowerCase();
-
-  const rows = shipments.filter(s => {
+  return shipments.filter(s => {
     if (statusFilter && shipmentStatus(s) !== statusFilter) return false;
     if (dateFilter && s.dispatchDate !== dateFilter) return false;
     if (search) {
@@ -277,6 +427,11 @@ function renderTable() {
     }
     return true;
   });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('shipmentTbody');
+  const rows = shipTableRows();
 
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px;">No shipments yet</td></tr>`;
@@ -319,11 +474,13 @@ function openViewModal(id) {
   const s = shipments.find(x => x.id === id);
   if (!s) return;
   const box = document.querySelector('#viewShipmentModal .modal-content');
+  box.style.width = 'min(780px,94vw)';
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h3>Shipment Details</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
+    <div class="detail"><small>Shipment ID</small><p>${s.id}</p></div>
     <div class="detail"><small>Company Name</small><p>${s.companyName}</p></div>
     <div class="detail"><small>Company Address</small><p>${s.companyAddress || '—'}</p></div>
     ${paymentSummaryHtml(s)}
@@ -336,7 +493,7 @@ function openViewModal(id) {
       <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;font-weight:600;">
           <span>${p.name}</span>
-          <span>${curMoney(p.price, s.currency)} x ${p.quantity}</span>
+          <span>${curMoney(p.price, s.currency)} x ${p.quantity} = ${curMoney((Number(p.price)||0)*(Number(p.quantity)||0), s.currency)}</span>
         </div>
         ${p.warranty ? `<p style="font-size:12px;color:#64748b;margin-top:4px;">Warranty: ${p.warranty}</p>` : ''}
         ${(p.parts && p.parts.length) ? `
@@ -951,6 +1108,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addShipmentBtn').addEventListener('click', openAddShipmentModal);
   document.getElementById('applyShipmentFilter').addEventListener('click', renderTable);
   document.getElementById('shipmentSearch').addEventListener('input', renderTable);
+  document.querySelector('.top-actions .export')?.addEventListener('click', () => {
+    shipExportCsv(shipTableRows(), 'shipments');
+  });
   wireShipmentCardClicks();
   loadShipments();
 });

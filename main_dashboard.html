@@ -292,7 +292,7 @@
     document.addEventListener("DOMContentLoaded", () => {
       const role = getRole() || "admin";
       const uname = getUsername() || "Admin User";
-      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      const label = role === "distributor" ? "Sales" : role.charAt(0).toUpperCase() + role.slice(1);
       ["sidebarUserName", "headerUserName"].forEach(
         (id) => (document.getElementById(id).textContent = uname),
       );

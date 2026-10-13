@@ -170,130 +170,234 @@ function exportLowStockToExcel(lowItems) {
   XLSX.writeFile(wb, `low_stock_${Date.now()}.xlsx`);
 }
 
-// ---------- Cards -> click to see details ----------
+// ---------- Cards -> click to see details (filters + export + row click) ----------
 function wireCardClicks() {
   document.querySelectorAll('.card-clickable').forEach(card => {
     card.addEventListener('click', () => openCardDetailModal(card.dataset.card));
   });
 }
 
-function openCardDetailModal(cardType) {
+const ivMoney = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const ivQty = p => Number(p.quantity) || 0;
+const ivType = p => p.product_type || 'product';
+const ivIsPart = p => p.product_type === 'spare_parts' || p.product_type === 'service_parts';
+const ivStockState = p => (ivQty(p) === 0 ? 'out' : ivQty(p) <= 10 ? 'low' : 'ok');
+const IV_STOCK_LABELS = { ok: 'In Stock', low: 'Low Stock (≤ 10)', out: 'Out of Stock' };
+const ivUniq = arr => [...new Set(arr.filter(v => v !== undefined && v !== null && v !== ''))];
+
+// Product / accessory / damaged -> name + "ID · Model". Spare / service part -> part name + "Belongs to".
+function itemIdentityHtml(p) {
+  const name = `<strong>${escapeHtmlInv(p.product_name ?? '')}</strong>`;
+  if (ivIsPart(p)) {
+    return `${name}<div class="iv-sub">Belongs to: <b style="color:#475569;">${escapeHtmlInv(p.parent_product_name || '—')}</b></div>`;
+  }
+  const sub = [p.product_id ? `ID: ${escapeHtmlInv(p.product_id)}` : '', p.model_no ? `Model: ${escapeHtmlInv(p.model_no)}` : ''].filter(Boolean).join(' · ');
+  return `${name}${sub ? `<div class="iv-sub">${sub}</div>` : ''}`;
+}
+const ITEM_CSV_HEADS = ['Name', 'Product ID', 'Model No', 'Belongs To'];
+const itemIdentityCsv = p => ivIsPart(p)
+  ? [p.product_name, '', '', p.parent_product_name || '']
+  : [p.product_name, p.product_id, p.model_no, ''];
+
+function ensureInvStyles() {
+  if (document.getElementById('iv-style')) return;
+  const st = document.createElement('style');
+  st.id = 'iv-style';
+  st.textContent = `
+    .iv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #eef1f6}
+    .iv-head h3{margin:0 0 4px}
+    .iv-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin-bottom:12px}
+    .iv-filter{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#64748b}
+    .iv-filter select{padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;background:#fff;color:#0f172a;min-width:130px}
+    .iv-count{margin-left:auto;font-size:12px;color:#64748b;padding-bottom:9px}
+    .iv-export{border:none;border-radius:8px;padding:8px 14px;background:#1665ff;color:#fff;font-weight:600;font-size:13px;cursor:pointer}
+    .iv-summary{font-size:13px;color:#475569;margin-bottom:10px}
+    .iv-scroll{overflow-x:auto;border:1px solid #eef1f6;border-radius:10px}
+    .iv-table{width:100%;border-collapse:collapse;font-size:13px}
+    .iv-table th{background:#f1f5f9;color:#475569;text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
+    .iv-table td{padding:9px 12px;border-bottom:1px solid #eef1f6;vertical-align:top}
+    .iv-table tr:last-child td{border-bottom:none}
+    .iv-table tr.iv-row{cursor:pointer}
+    .iv-table tr.iv-row:hover td{background:#f8fafc}
+    .iv-sub{color:#94a3b8;font-size:12px;margin-top:1px}
+    .iv-empty{color:#94a3b8;text-align:center;padding:18px}
+    .iv-hint{font-size:12px;color:#94a3b8;margin:-4px 0 10px}
+    .iv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:18px}
+    .iv-cell{background:#f8fafc;border-radius:10px;padding:10px 12px}
+    .iv-cell small{display:block;color:#64748b;font-size:11px;margin-bottom:2px}
+    .iv-cell p{margin:0;font-size:14px;color:#0f172a;word-break:break-word}
+    .iv-title{font-size:13px;font-weight:600;color:#334155;margin:4px 0 8px}
+    .iv-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:170px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;padding:10px;margin-bottom:16px}
+    .iv-chip{background:#f1f5f9;border-radius:6px;padding:2px 9px;font-size:12px;color:#475569}
+    .iv-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}`;
+  document.head.appendChild(st);
+}
+
+// cfg = { title, source, filters:[{key,label,options:[[v,l]],test(p,v)}], columns:[{label,cell}],
+//         csvHeads, csvRow(row), aggregate?(list), summary?(rows), open?:true, file }
+function invCardView(cfg) {
   const modal = document.getElementById('cardDetailModal');
   if (!modal) return;
+  ensureInvStyles();
   const content = modal.querySelector('.modal-content');
+  content.style.cssText = 'background:#fff;border-radius:16px;padding:26px;width:min(980px,95vw);max-height:88vh;overflow-y:auto;';
+  const sel = {};
+  let shown = [];
+
+  content.innerHTML = `
+    <div class="iv-head">
+      <h3>${cfg.title}</h3>
+      <button class="close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+    </div>
+    <div class="iv-toolbar">
+      ${cfg.filters.map(f => `
+        <label class="iv-filter"><span>${f.label}</span>
+          <select data-key="${f.key}"><option value="">All</option>
+            ${f.options.map(([v, l]) => `<option value="${escapeHtmlInv(v)}">${escapeHtmlInv(l)}</option>`).join('')}
+          </select></label>`).join('')}
+      <span class="iv-count"></span>
+      <button type="button" class="iv-export"><i class="fa-solid fa-file-export"></i> Export</button>
+    </div>
+    <div class="iv-summary"></div>
+    ${cfg.open ? '<p class="iv-hint">Click a row to see its full details.</p>' : ''}
+    <div class="iv-results"></div>`;
+
+  const paint = () => {
+    const list = cfg.source.filter(p => cfg.filters.every(f => !sel[f.key] || f.test(p, sel[f.key])));
+    shown = cfg.aggregate ? cfg.aggregate(list) : list;
+    content.querySelector('.iv-results').innerHTML = shown.length
+      ? `<div class="iv-scroll"><table class="iv-table"><thead><tr>${cfg.columns.map(c => `<th>${c.label}</th>`).join('')}</tr></thead>
+         <tbody>${shown.map((r, i) => `<tr class="${cfg.open ? 'iv-row' : ''}" data-i="${i}">${cfg.columns.map(c => `<td>${c.cell(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+      : '<p class="iv-empty">No items to show.</p>';
+    content.querySelector('.iv-count').textContent = `${shown.length} item${shown.length === 1 ? '' : 's'}`;
+    content.querySelector('.iv-summary').innerHTML = cfg.summary ? cfg.summary(shown) : '';
+    if (cfg.open) content.querySelectorAll('tr.iv-row').forEach(tr =>
+      tr.addEventListener('click', async () => openViewModal(await fetchProductDetail(shown[Number(tr.dataset.i)]))));
+  };
+
+  content.querySelectorAll('.iv-filter select').forEach(s => s.addEventListener('change', () => { sel[s.dataset.key] = s.value; paint(); }));
+  content.querySelector('.iv-export').addEventListener('click', () => {
+    if (!shown.length) { alert('Nothing to export for the selected filters.'); return; }
+    const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = [cfg.csvHeads, ...shown.map(cfg.csvRow)].map(r => r.map(q).join(','));
+    const tag = Object.values(sel).filter(Boolean).join('_');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' }));
+    a.download = `${cfg.file}${tag ? '_' + tag.replace(/[^\w-]+/g, '_') : ''}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.onclick = e => { if (e.target === modal) modal.style.display = 'none'; };
+  paint();
+  modal.style.display = 'flex';
+}
+
+function openCardDetailModal(cardType) {
   const products = invState.products;
-
-  const rowsHtml = (list, cols) => list.length
-    ? `<table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;">${cols.map(c => `<th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">${c.label}</th>`).join('')}</tr></thead>
-        <tbody>${list.map(p => `<tr>${cols.map(c => `<td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${c.cell(p)}</td>`).join('')}</tr>`).join('')}</tbody>
-      </table>`
-    : '<p style="color:#94a3b8;text-align:center;padding:16px;">No items to show.</p>';
-
-  let title = '';
-  let bodyHtml = '';
+  const catFilter = {
+    key: 'cat', label: 'Category',
+    options: Object.entries(PRODUCT_TYPE_LABELS).filter(([k]) => products.some(p => ivType(p) === k)),
+    test: (p, v) => ivType(p) === v
+  };
+  const stockFilter = (keys) => ({ key: 'stock', label: 'Stock', options: keys.map(k => [k, IV_STOCK_LABELS[k]]), test: (p, v) => ivStockState(p) === v });
+  const supFilter = {
+    key: 'sup', label: 'Supplier', options: ivUniq(products.map(p => p.supplier)).sort().map(s => [s, s]),
+    test: (p, v) => p.supplier === v
+  };
+  const catCell = p => `<span class="stock ${productTypeBadgeClass(p.product_type)}">${productTypeLabel(p.product_type)}</span>${partCategoryBadgeHtml(p)}`;
+  const qtyCell = p => `<span class="stock ${stockClass(ivQty(p))}">${ivQty(p)}</span>`;
+  const itemCol = { label: 'Item', cell: itemIdentityHtml };
+  const baseCsvHeads = [...ITEM_CSV_HEADS, 'Category', 'Supplier', 'Qty', 'Price', 'Tax %'];
+  const baseCsvRow = p => [...itemIdentityCsv(p), productTypeLabel(p.product_type), p.supplier, ivQty(p), p.price, p.tax_rate];
 
   if (cardType === 'total_products') {
-    title = 'All Products';
-    bodyHtml = rowsHtml(products, [
-      { label: 'Product Name', cell: p => p.product_name ?? '' },
-      { label: 'Product ID', cell: p => p.product_id ?? '' },
-      { label: 'Quantity', cell: p => p.quantity ?? 0 }
-    ]);
-  } else if (cardType === 'total_stock') {
-    title = 'Stock by Product';
-    const sorted = [...products].sort((a, b) => (Number(b.quantity) || 0) - (Number(a.quantity) || 0));
-    bodyHtml = rowsHtml(sorted, [
-      { label: 'Product Name', cell: p => p.product_name ?? '' },
-      { label: 'Quantity', cell: p => `<span class="stock ${stockClass(Number(p.quantity) || 0)}">${p.quantity ?? 0}</span>` }
-    ]);
-  } else if (cardType === 'low_stock') {
-    title = 'Low Stock Items (≤ 10 units)';
-    const lowItems = products.filter(p => (Number(p.quantity) || 0) <= 10);
-    bodyHtml = `
-      <div id="lowStockCategoryFilter" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px;padding:10px 12px;background:#f8fafc;border-radius:10px;font-size:13px;">
-        ${Object.entries(PRODUCT_TYPE_LABELS).map(([val, label]) => `
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" class="lowStockTypeChk" value="${val}" checked> ${label}
-          </label>`).join('')}
-      </div>
-      <div id="lowStockRowsWrap"></div>`;
-  } else if (cardType === 'suppliers') {
-    title = 'Suppliers';
-    const bySupplier = {};
-    products.forEach(p => {
-      const s = p.supplier || 'Unknown';
-      bySupplier[s] = (bySupplier[s] || 0) + 1;
+    invCardView({
+      title: 'All Products', source: products, file: 'inventory_products', open: true,
+      filters: [catFilter, stockFilter(['ok', 'low', 'out']), supFilter],
+      columns: [itemCol, { label: 'Category', cell: catCell }, { label: 'Supplier', cell: p => escapeHtmlInv(p.supplier ?? '') }, { label: 'Qty', cell: qtyCell }],
+      csvHeads: baseCsvHeads, csvRow: baseCsvRow
     });
-    const list = Object.keys(bySupplier).sort().map(s => ({ supplier: s, count: bySupplier[s] }));
-    bodyHtml = rowsHtml(list, [
-      { label: 'Supplier', cell: p => p.supplier },
-      { label: 'Products Supplied', cell: p => p.count }
-    ]);
+  } else if (cardType === 'total_stock') {
+    invCardView({
+      title: 'Stock by Product', file: 'inventory_stock', open: true,
+      source: [...products].sort((a, b) => ivQty(b) - ivQty(a)),
+      filters: [catFilter, stockFilter(['ok', 'low', 'out'])],
+      columns: [itemCol, { label: 'Category', cell: catCell }, { label: 'Qty', cell: qtyCell }],
+      summary: rows => `Total units: <strong>${rows.reduce((s, p) => s + ivQty(p), 0)}</strong>`,
+      csvHeads: baseCsvHeads, csvRow: baseCsvRow
+    });
+  } else if (cardType === 'low_stock') {
+    invCardView({
+      title: 'Low Stock Items (≤ 10 units)', file: 'inventory_low_stock', open: true,
+      source: products.filter(p => ivQty(p) <= 10),
+      filters: [catFilter, stockFilter(['low', 'out'])],
+      columns: [itemCol, { label: 'Category', cell: catCell }, { label: 'Qty', cell: p => `<span class="stock low">${ivQty(p)}</span>` }],
+      csvHeads: baseCsvHeads, csvRow: baseCsvRow
+    });
+  } else if (cardType === 'suppliers') {
+    invCardView({
+      title: 'Suppliers', file: 'inventory_suppliers', source: products,
+      filters: [catFilter],
+      aggregate: list => {
+        const by = {};
+        list.forEach(p => {
+          const s = p.supplier || 'Unknown';
+          const r = by[s] || (by[s] = { supplier: s, count: 0, units: 0, value: 0 });
+          r.count++; r.units += ivQty(p); r.value += (Number(p.price) || 0) * ivQty(p);
+        });
+        return Object.values(by).sort((a, b) => a.supplier.localeCompare(b.supplier));
+      },
+      columns: [
+        { label: 'Supplier', cell: r => `<strong>${escapeHtmlInv(r.supplier)}</strong>` },
+        { label: 'Products Supplied', cell: r => r.count },
+        { label: 'Units', cell: r => r.units },
+        { label: 'Value', cell: r => ivMoney(r.value) }
+      ],
+      csvHeads: ['Supplier', 'Products Supplied', 'Units', 'Value (INR)'],
+      csvRow: r => [r.supplier, r.count, r.units, r.value]
+    });
   } else if (cardType === 'service_parts_status' || cardType === 'spare_parts_status') {
     const partType = cardType === 'service_parts_status' ? 'service_parts' : 'spare_parts';
-    title = cardType === 'service_parts_status' ? 'Service Parts — Active / Pending' : 'Spare Parts — Active / Pending';
     const parts = products.filter(p => p.product_type === partType);
-    const statusBadge = p => {
+    const filters = [
+      { key: 'status', label: 'Status', options: [['active', 'Active'], ['pending', 'Pending']],
+        test: (p, v) => (statusFromHologram(p) === 'Active') === (v === 'active') },
+      { key: 'parent', label: 'Belongs To', options: ivUniq(parts.map(p => p.parent_product_name)).sort().map(s => [s, s]),
+        test: (p, v) => p.parent_product_name === v },
+      { key: 'warranty', label: 'Warranty', options: [['under warranty', 'Under Warranty'], ['over warranty', 'Over Warranty']],
+        test: (p, v) => p.warranty_status === v }
+    ];
+    if (partType === 'service_parts') filters.push({ key: 'pc', label: 'Type', options: [['purchase', 'Purchase'], ['warranty', 'Warranty']], test: (p, v) => p.part_category === v });
+    const holo = p => (typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length);
+    const stBadge = p => {
       const st = statusFromHologram(p);
       const color = st === 'Active' ? '#16a34a' : (st === 'Partial' ? '#b45309' : '#64748b');
       return `<span style="color:${color};font-weight:600;">${st === 'Active' ? 'Active' : 'Pending'}${st === 'Partial' ? ' (partial)' : ''}</span>`;
     };
-    const activeCount = parts.filter(p => statusFromHologram(p) === 'Active').length;
-    bodyHtml = `<p style="font-size:13px;color:#64748b;margin-bottom:10px;">Active: <strong>${activeCount}</strong> · Pending: <strong>${parts.length - activeCount}</strong></p>` +
-      rowsHtml(parts, [
-        { label: 'Part Name', cell: p => p.product_name ?? '' },
-        { label: 'Product ID', cell: p => p.product_id ?? '' },
-        { label: 'Qty', cell: p => p.quantity ?? 0 },
-        { label: 'Holograms', cell: p => (typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length) },
-        { label: 'Status', cell: statusBadge }
-      ]);
+    const warr = p => p.warranty_status ? `<span class="stock ${p.warranty_status === 'over warranty' ? 'low' : 'high'}">${p.warranty_status === 'over warranty' ? 'Over' : 'Under'} Warranty</span>` : '—';
+    invCardView({
+      title: partType === 'service_parts' ? 'Service Parts — Active / Pending' : 'Spare Parts — Active / Pending',
+      file: partType, source: parts, filters, open: true,
+      summary: rows => { const a = rows.filter(p => statusFromHologram(p) === 'Active').length; return `Active: <strong>${a}</strong> · Pending: <strong>${rows.length - a}</strong>`; },
+      columns: [
+        { label: 'Part', cell: itemIdentityHtml }, { label: 'Qty', cell: qtyCell },
+        { label: 'Holograms', cell: p => `${holo(p)} / ${ivQty(p)}` }, { label: 'Warranty', cell: warr }, { label: 'Status', cell: stBadge }
+      ],
+      csvHeads: ['Part Name', 'Belongs To', 'Qty', 'Holograms', 'Status', 'Warranty', 'Warranty Until', 'Supplier', 'Type'],
+      csvRow: p => [p.product_name, p.parent_product_name, ivQty(p), holo(p), statusFromHologram(p), p.warranty_status, p.warranty_until, p.supplier, p.part_category]
+    });
   } else if (cardType === 'inventory_value') {
-    title = 'Inventory Value by Product';
-    const withValue = products.map(p => ({ ...p, __value: (Number(p.price) || 0) * (Number(p.quantity) || 0) }))
-      .sort((a, b) => b.__value - a.__value);
-    bodyHtml = rowsHtml(withValue, [
-      { label: 'Product Name', cell: p => p.product_name ?? '' },
-      { label: 'Quantity', cell: p => p.quantity ?? 0 },
-      { label: 'Price', cell: p => `₹${p.price ?? 0}` },
-      { label: 'Value', cell: p => `₹${p.__value}` }
-    ]);
+    invCardView({
+      title: 'Inventory Value by Product', file: 'inventory_value', open: true,
+      source: products.map(p => ({ ...p, __value: (Number(p.price) || 0) * ivQty(p) })).sort((a, b) => b.__value - a.__value),
+      filters: [catFilter, supFilter],
+      summary: rows => `Total value: <strong>${ivMoney(rows.reduce((s, p) => s + p.__value, 0))}</strong>`,
+      columns: [itemCol, { label: 'Category', cell: catCell }, { label: 'Qty', cell: qtyCell }, { label: 'Price', cell: p => ivMoney(p.price) }, { label: 'Value', cell: p => `<strong>${ivMoney(p.__value)}</strong>` }],
+      csvHeads: [...ITEM_CSV_HEADS, 'Category', 'Qty', 'Price', 'Value (INR)'],
+      csvRow: p => [...itemIdentityCsv(p), productTypeLabel(p.product_type), ivQty(p), p.price, p.__value]
+    });
   }
-
-  content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>${title}</h3>
-      <div>
-        ${cardType === 'low_stock' ? '<button id="lowStockExportBtn" style="margin-right:10px;padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;"><i class="fa-solid fa-download"></i> Export</button>' : ''}
-        <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-      </div>
-    </div>
-    ${bodyHtml}`;
-
-  if (cardType === 'low_stock') {
-    const lowItems = products.filter(p => (Number(p.quantity) || 0) <= 10);
-    const wrap = content.querySelector('#lowStockRowsWrap');
-    const cols = [
-      { label: 'Product Name', cell: p => p.product_name ?? '' },
-      { label: 'Product ID', cell: p => p.product_id ?? '' },
-      { label: 'Model No.', cell: p => p.model_no ?? '' },
-      { label: 'Type', cell: p => productTypeLabel(p.product_type || 'product') },
-      { label: 'Quantity', cell: p => `<span class="stock low">${p.quantity ?? 0}</span>` }
-    ];
-    const getChecked = () => Array.from(content.querySelectorAll('.lowStockTypeChk:checked')).map(c => c.value);
-    const filteredItems = () => {
-      const allowed = getChecked();
-      return lowItems.filter(p => allowed.includes(p.product_type || 'product'));
-    };
-    const rerender = () => { wrap.innerHTML = rowsHtml(filteredItems(), cols); };
-    rerender();
-    content.querySelectorAll('.lowStockTypeChk').forEach(chk => chk.addEventListener('change', rerender));
-    content.querySelector('#lowStockExportBtn').addEventListener('click', () => exportLowStockToExcel(filteredItems()));
-  }
-
-  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
-  modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
-  modal.style.display = 'flex';
 }
 
 // ---------- Product type (Product / Spare Parts / Damaged Product) helpers ----------
@@ -754,7 +858,8 @@ function renderInventoryTable(products) {
 
   pageRows.forEach(p => {
     const tr = document.createElement('tr');
-    tr.dataset.productId = p.product_id;
+    tr.dataset.productId = p.product_id ?? '';
+    tr._product = p;
     tr.dataset.modelNo = p.model_no || '';
     tr.dataset.productType = p.product_type || 'product';
     const isDamaged = p.product_type === 'damaged';
@@ -794,7 +899,8 @@ async function fetchProductDetail(p) {
     const params = new URLSearchParams({
       product_id: p.product_id || '',
       model_no: p.model_no || '',
-      product_type: p.product_type || ''
+      product_type: p.product_type || '',
+      lot_id: p._id || ''
     });
     const res = await apiFetch(`/inventory/detail?${params}`);
     if (!res.ok) {
@@ -805,6 +911,9 @@ async function fetchProductDetail(p) {
       return p;
     }
     const data = await res.json();
+    // parts have no product_id, so an older backend (without lot_id support) can hand back a
+    // different lot — never merge another lot's data into this row
+    if (p._id && data.product && data.product._id && data.product._id !== p._id) return p;
     return { ...p, ...data.product };
   } catch (err) {
     console.error(err);
@@ -814,6 +923,7 @@ async function fetchProductDetail(p) {
 
 function rowProduct(e) {
   const tr = e.target.closest('tr');
+  if (tr && tr._product) return tr._product;
   return invState.products.find(p =>
     p.product_id === tr.dataset.productId &&
     (p.model_no || '') === tr.dataset.modelNo &&
@@ -1188,49 +1298,76 @@ function wireFilter() {
 
 function openViewModal(p) {
   if (!p) return;
+  ensureInvStyles();
   const modal = document.getElementById('viewModal');
-  const values = modal.querySelectorAll('.detail p');
-  const fields = [p.product_name, p.product_id, productTypeLabel(p.product_type), p.lot_no, p.supplier, p.purchase_date, p.quantity, `₹${p.price}`, `${p.tax_rate}%`];
-  values.forEach((el, i) => el.textContent = fields[i] ?? '');
-  const serialBox = document.getElementById('viewSerialNumbers');
-  if (serialBox) serialBox.textContent = (p.serial_numbers || []).length ? p.serial_numbers.join(', ') : 'None on file';
+  if (!modal) return;
+  modal.style.zIndex = 1100;           // above the card popup if opened from there
+  const content = modal.querySelector('.modal-content');
+  content.style.cssText = 'background:#fff;border-radius:16px;padding:26px;width:min(960px,95vw);max-height:90vh;overflow-y:auto;';
+  const e = escapeHtmlInv;
+  const part = ivIsPart(p);
+  const qty = ivQty(p);
+  const cell = (label, val) => `<div class="iv-cell"><small>${label}</small><p>${val === undefined || val === null || val === '' ? '—' : val}</p></div>`;
+  const dateTxt = d => { if (!d) return ''; const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleDateString('en-GB'); };
 
-  const hologramRow = document.getElementById('viewHologramRow');
-  const hologramStatusEl = document.getElementById('viewHologramStatus');
-  const hologramListEl = document.getElementById('viewHologramList');
-  if (hologramRow && hologramStatusEl && hologramListEl) {
-    if (p.product_type === 'spare_parts' || p.product_type === 'service_parts') {
-      const holograms = hologramNumbersOf(p);
-      const qty = Number(p.quantity) || 0;
-      const status = statusFromHologram(p);
-      hologramStatusEl.textContent = `${status} — ${holograms.length} of ${qty} unit(s) have a hologram number on file`;
-      hologramListEl.textContent = holograms.length ? holograms.join(', ') : 'None on file';
-      hologramRow.style.display = '';
-    } else {
-      hologramRow.style.display = 'none';
-    }
-  }
+  const serials = p.serial_numbers || [];
+  const holograms = hologramNumbersOf(p);
+  const stockState = ivStockState(p);
+  const stockBadge = `<span class="stock ${stockState === 'ok' ? stockClass(qty) : 'low'}">${qty}</span> <span class="iv-sub">${IV_STOCK_LABELS[stockState]}</span>`;
 
-  const warrantyRow = document.getElementById('viewWarrantyRow');
-  const warrantyStatus = document.getElementById('viewWarrantyStatus');
-  if (warrantyRow && warrantyStatus) {
-    if (p.product_type === 'spare_parts' && p.warranty_until) {
-      const label = p.warranty_status === 'over warranty' ? 'Over Warranty' : 'Under Warranty';
-      warrantyStatus.textContent = `${label} (until ${p.warranty_until})`;
-      warrantyRow.style.display = '';
-    } else if (p.product_type === 'service_parts' && p.part_category) {
-      if (p.warranty_until) {
-        const label = p.warranty_status === 'over warranty' ? 'Over Warranty' : 'Under Warranty';
-        const prefix = p.part_category === 'warranty' ? 'Warranty' : 'Purchase';
-        warrantyStatus.textContent = `${prefix} — ${label} (until ${p.warranty_until})`;
-      } else {
-        warrantyStatus.textContent = 'Purchase';
-      }
-      warrantyRow.style.display = '';
-    } else {
-      warrantyRow.style.display = 'none';
-    }
+  let warranty = '';
+  if (p.warranty_until) {
+    const over = p.warranty_status === 'over warranty';
+    const left = typeof p.warranty_days_left === 'number' && !over ? ` · ${p.warranty_days_left} day(s) left` : '';
+    warranty = `<span class="stock ${over ? 'low' : 'high'}">${over ? 'Over Warranty' : 'Under Warranty'}</span> <span class="iv-sub">until ${e(dateTxt(p.warranty_until))}${left}</span>`;
   }
+  const holoStatus = part ? `${statusFromHologram(p)} — ${holograms.length} of ${qty} unit(s) tagged` : '';
+
+  const identityCells = part
+    ? cell('Part Name', e(p.product_name ?? '')) + cell('Belongs To (Product)', e(p.parent_product_name || ''))
+    : cell('Product Name', e(p.product_name ?? '')) + cell('Product ID', e(p.product_id || '')) + cell('Model No.', e(p.model_no || ''));
+
+  const SHOW = 300;
+  const chips = (arr) => arr.slice(0, SHOW).map(s => `<span class="iv-chip">${e(s)}</span>`).join('') + (arr.length > SHOW ? `<span class="iv-sub">+${arr.length - SHOW} more</span>` : '');
+
+  content.innerHTML = `
+    <div class="iv-head">
+      <div>
+        <h3>${e(p.product_name ?? 'Product Details')}</h3>
+        <div class="iv-tags">
+          <span class="stock ${productTypeBadgeClass(p.product_type)}">${productTypeLabel(p.product_type)}</span>${partCategoryBadgeHtml(p)}
+        </div>
+      </div>
+      <button class="close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+    </div>
+
+    <div class="iv-grid">
+      ${identityCells}
+      ${cell('Quantity in Stock', stockBadge)}
+      ${cell('Lot No.', e(p.lot_no || ''))}
+      ${cell(part ? 'Shipment Received Date' : 'Purchase / Receiving Date', e(dateTxt(p.purchase_date)))}
+      ${cell('Supplier', e(p.supplier || ''))}
+      ${p.supplier_address ? cell('Supplier Address', e(p.supplier_address)) : ''}
+      ${cell('Price (per unit)', ivMoney(p.price))}
+      ${cell('Tax', `${p.tax_rate ?? 0}%`)}
+      ${cell('Stock Value', ivMoney((Number(p.price) || 0) * qty))}
+      ${warranty ? cell('Warranty', warranty) : ''}
+      ${part ? cell('Hologram Status', e(holoStatus)) : ''}
+      ${p.product_type === 'damaged' ? cell('Reason of Damage', e(p.reason_of_damage ?? p.reason ?? '')) : ''}
+      ${p.product_type === 'damaged' ? cell('Damage Status', e(p.damage_status ?? 'Damaged')) : ''}
+      ${cell('Added By', e(p.created_by || ''))}
+      ${p.updated_by ? cell('Last Updated By', e(p.updated_by)) : ''}
+    </div>
+
+    ${part ? `
+      <div class="iv-title">Hologram Numbers (${holograms.length})</div>
+      <div class="iv-chips">${holograms.length ? chips(holograms) : '<span class="iv-sub">None on file</span>'}</div>` : ''}
+
+    <div class="iv-title">Serial Numbers (${serials.length})</div>
+    <div class="iv-chips">${serials.length ? chips(serials) : '<span class="iv-sub">None on file</span>'}</div>`;
+
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.onclick = ev => { if (ev.target === modal) modal.style.display = 'none'; };
   modal.style.display = 'flex';
 }
 

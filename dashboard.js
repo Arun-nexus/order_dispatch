@@ -144,7 +144,7 @@ function renderServiceRequests(services) {
       <div class="dd-meta">
         <h4>${ddEsc(p.name)}</h4>
         <p class="dd-sub">ID: ${ddEsc(p.id)} &nbsp;|&nbsp; Model: ${ddEsc(p.model)}</p>
-        <p class="dd-sub"><i class="fa-solid fa-user-gear"></i> ${ddEsc(assigneeName(s))}</p>
+        <p class="dd-sub"><i class="fa-solid fa-user-gear"></i> ${ddEsc(assigneeName(s))} &nbsp;|&nbsp; ${ddEsc(svcModeLabel(s))}</p>
       </div>
       <span class="status ${SERVICE_STATUS_CLASS[s.status] || 'pending'}">${ddEsc(ddPretty(s.status))}</span>`;
     div.addEventListener('click', () => openServiceDetail(s));
@@ -169,13 +169,13 @@ function renderTeamPanel() {
     const div = document.createElement('div');
     div.className = 'service-item';
     div.style.cursor = 'pointer';
-    const roleLabel = member.role === 'distributor' ? 'Sales' : 'Technician';
+    const memberRole = roleLabel(member.role);
     div.innerHTML = `
       <div>
         <h4>${member.name ?? member.username}</h4>
-        <p>${member.username} • ${roleLabel}</p>
+        <p>${member.username} • ${memberRole}</p>
       </div>
-      <span class="status ${member.role === 'distributor' ? 'processing' : 'pending'}">${roleLabel}</span>`;
+      <span class="status ${member.role === 'distributor' ? 'processing' : 'pending'}">${memberRole}</span>`;
     div.addEventListener('click', () => openTeamReportModal(member));
     container.appendChild(div);
   });
@@ -221,7 +221,7 @@ function openTeamReportModal(member) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div>
         <h3 style="margin:0;">${member.name ?? member.username}</h3>
-        <p style="margin:2px 0 0;color:#64748b;font-size:13px;">${member.username} • ${member.role === 'distributor' ? 'Sales' : 'Technician'}</p>
+        <p style="margin:2px 0 0;color:#64748b;font-size:13px;">${member.username} • ${roleLabel(member.role)}</p>
       </div>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
@@ -295,12 +295,12 @@ function assigneeName(s) {
 
 const dd = { modal: null, body: null, title: null, stack: [] };
 function ddShow(title, html, push) {
-  if (push) { dd.stack.push({ t: dd.title.textContent, h: dd.body.innerHTML, fn: dd.rowFn }); dd.rowFn = null; }
+  if (push) { dd.stack.push({ t: dd.title.textContent, h: dd.body.innerHTML, fn: dd.rowFn, v: dd.view }); dd.rowFn = null; }
   dd.title.textContent = title;
   dd.body.innerHTML = html;
   dd.modal.classList.add('open');
 }
-function ddClose() { dd.modal.classList.remove('open'); dd.stack = []; }
+function ddClose() { dd.modal.classList.remove('open'); dd.stack = []; dd.view = null; }
 
 const ddKV = pairs => `<div class="dd-grid">${pairs.map(([k, v]) => `<div><b>${ddEsc(k)}</b>${v}</div>`).join('')}</div>`;
 function ddTable(heads, rows, clickable) {
@@ -328,7 +328,7 @@ function inventoryBlock(lot, name) {
   const serials = lot.serial_numbers || [];
   return ddKV([
     ['Product', ddDash(lot.product_name)], ['Product ID', ddDash(lot.product_id)],
-    ['Model No', ddDash(lot.model_no)], ['Category', ddPretty(lot.product_type || 'product')],
+    ['Model No', ddDash(lot.model_no)], ['Category', ddEsc(catLabel(catKey(lot)))],
     ['Quantity in stock', ddDash(lot.quantity)], ['Lot No', ddDash(lot.lot_no)],
     ['Supplier', ddDash(lot.supplier)], ['Purchase date', ddDate(lot.purchase_date)],
     ['Price', ddDash(lot.price)], ['Tax rate', lot.tax_rate !== undefined ? ddEsc(lot.tax_rate) + '%' : '—'],
@@ -368,41 +368,164 @@ function openServiceDetail(s) {
   ddShow('Service details', '<button class="dd-back">← Back</button>' + ddKV([
     ['Product', ddEsc(p.name)], ['Product ID', ddEsc(p.id)], ['Model No', ddEsc(p.model)], ['Serial No', ddDash(s.serial_no)],
     ['Assigned to', ddEsc(assigneeName(s))], ['Status', ddBadge(s.status, SERVICE_STATUS_CLASS[s.status] || 'pending')],
-    ['Issue', ddDash(s.issue)], ['Location', ddDash(s.location)],
+    ['Issue', ddDash(s.issue)], ['Type', ddEsc(svcModeLabel(s))], ['Location', ddDash(s.location)],
     ['Purchase date', ddDate(s.purchase_date)], ['Raised on', ddDate(s.created_at)],
     ['Service charges', ddMoney(s.service_charges)], ['Spare parts', ddDash(s.spare_parts)],
     ['Created by', ddDash(s.created_by)], ['Reason / remarks', ddDash(s.reason)]
   ]), true);
 }
 
+// ---------- labels / helpers shared by the popups ----------
+const CAT_ORDER = ['product', 'spare_parts', 'service_parts', 'accessories', 'damaged'];
+const CAT_LABELS = { product: 'Product', spare_parts: 'Spare Parts', service_parts: 'Service Parts', accessories: 'Accessories', damaged: 'Damaged' };
+const catKey = i => i.product_type || 'product';
+const catLabel = k => CAT_LABELS[k] || ddPretty(k);
+// distributor role is shown as "Sales" everywhere
+const roleLabel = r => (!r ? '—' : r === 'distributor' ? 'Sales' : ddPretty(r));
+const ddDateTxt = d => { if (!d) return ''; const x = new Date(d); return isNaN(x) ? String(d) : x.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); };
+
+// service type: indoor = Inhouse, outdoor = Field
+function svcMode(s) {
+  const l = String(s.location || '').toLowerCase();
+  if (/out|field/.test(l)) return 'field';
+  if (/in/.test(l)) return 'inhouse';
+  return '';
+}
+const SVC_MODE_LABEL = { inhouse: 'Inhouse', field: 'Field' };
+const svcModeLabel = s => SVC_MODE_LABEL[svcMode(s)] || '—';
+
+const uniq = arr => [...new Set(arr.filter(v => v !== undefined && v !== null && v !== ''))];
+function categoryFilter() {
+  const present = new Set(dashState.inventory.map(catKey));
+  const keys = CAT_ORDER.filter(k => k !== 'damaged' || present.has(k));
+  return { key: 'cat', label: 'Category', options: keys.map(k => [k, catLabel(k)]) };
+}
+
+// ---------- generic list view: filters + table + CSV export ----------
+// cfg = { heads, csvHeads?, items: [{ cells, csv, f:{filterKey:value}, open? }], filters: [{ key, label, options:[[value,label]] }], file }
+function ddView(title, cfg) {
+  dd.view = { cfg, sel: {}, shown: [] };
+  dd.rowFn = null;
+  const tools = cfg.filters.map(f => `
+    <label class="dd-filter"><span>${ddEsc(f.label)}</span>
+      <select class="dd-filter-sel" data-key="${ddEsc(f.key)}">
+        <option value="">All</option>
+        ${f.options.map(([v, l]) => `<option value="${ddEsc(v)}">${ddEsc(l)}</option>`).join('')}
+      </select>
+    </label>`).join('');
+  ddShow(title, `<div class="dd-toolbar">${tools}<span class="dd-count"></span>
+      <button type="button" class="dd-export"><i class="fa-solid fa-file-export"></i> Export</button></div>
+    <div class="dd-results"></div>`);
+  ddPaint();
+}
+
+function ddPaint() {
+  const v = dd.view;
+  if (!v) return;
+  const { cfg } = v;
+  v.shown = cfg.items.filter(it => cfg.filters.every(f => !v.sel[f.key] || it.f[f.key] === v.sel[f.key]));
+  dd.rowFn = i => { const it = v.shown[i]; if (it && it.open) it.open(); };
+  dd.body.querySelector('.dd-results').innerHTML = ddTable(cfg.heads, v.shown.map(it => it.cells), v.shown.some(it => it.open));
+  dd.body.querySelector('.dd-count').textContent = `${v.shown.length} of ${cfg.items.length}`;
+}
+
+function ddExport() {
+  const v = dd.view;
+  if (!v) return;
+  if (!v.shown.length) { alert('Nothing to export for the selected filters.'); return; }
+  const { cfg } = v;
+  const q = x => `"${String(x ?? '').replace(/"/g, '""')}"`;
+  const lines = [cfg.csvHeads || cfg.heads, ...v.shown.map(it => it.csv)].map(r => r.map(q).join(','));
+  const tag = Object.values(v.sel).filter(Boolean).join('_');
+  const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${cfg.file}${tag ? '_' + tag : ''}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------- row builders ----------
 const orderRow = o => { const it = (o.items || [])[0] || {};
   return [ddDash(it.product_name), ddDash(it.product_id), ddDash(it.model_no), ddDate(o.order_date), ddBadge(o.status, statusBadgeClass(o.status)), ddMoney(o.total_mrp ?? o.price)]; };
-const invRow = i => [ddDash(i.product_name), ddDash(i.product_id), ddDash(i.model_no), ddPretty(i.product_type || 'product'), ddDash(stockQty(i))];
 const ORDER_HEADS = ['Product', 'Product ID', 'Model No', 'Date', 'Status', 'Total'];
-const INV_HEADS = ['Product', 'Product ID', 'Model No', 'Category', 'Qty'];
+const ORDER_CSV_HEADS = ['Order ID', 'Date', 'Products', 'Model No', 'Customer', 'Payment Mode', 'Status', 'Total (INR)'];
+const orderItem = o => ({
+  f: { status: o.status || '' },
+  cells: orderRow(o),
+  csv: [o.order_id, ddDateTxt(o.order_date), (o.items || []).map(i => `${i.product_name} x${i.quantity}`).join('; '),
+    (o.items || []).map(i => i.model_no).filter(Boolean).join('; '), (o.customer || {}).company_name, o.payment_mode, o.status, o.total_mrp ?? o.price],
+  open: () => openOrderDetail(o)
+});
+const orderStatusFilter = list => ({ key: 'status', label: 'Status', options: uniq(list.map(o => o.status)).map(s => [s, ddPretty(s)]) });
 
+const invRow = i => [ddDash(i.product_name), ddDash(i.product_id), ddDash(i.model_no), ddEsc(catLabel(catKey(i))), ddDash(stockQty(i))];
+const INV_HEADS = ['Product', 'Product ID', 'Model No', 'Category', 'Qty'];
+const INV_CSV_HEADS = ['Product', 'Product ID', 'Model No', 'Category', 'Qty', 'Lot No', 'Supplier', 'Price', 'Warranty Status'];
+const invItem = i => ({
+  f: { cat: catKey(i) },
+  cells: invRow(i),
+  csv: [i.product_name, i.product_id, i.model_no, catLabel(catKey(i)), stockQty(i), i.lot_no, i.supplier, i.price, i.warranty_status],
+  open: () => openInventoryItem(i)
+});
+
+const SVC_HEADS = ['Product', 'Product ID', 'Model No', 'Type', 'Assigned to', 'Status'];
+const SVC_CSV_HEADS = ['Service ID', 'Product', 'Product ID', 'Model No', 'Serial No', 'Type', 'Location', 'Assigned to', 'Status', 'Issue', 'Raised on'];
+const svcItem = s => {
+  const p = serviceProduct(s);
+  return {
+    f: { mode: svcMode(s), status: s.status || '' },
+    cells: [ddEsc(p.name), ddEsc(p.id), ddEsc(p.model), ddEsc(svcModeLabel(s)), ddEsc(assigneeName(s)), ddBadge(s.status, SERVICE_STATUS_CLASS[s.status] || 'pending')],
+    csv: [s.service_id, p.name, p.id, p.model, s.serial_no, svcModeLabel(s), s.location, assigneeName(s), ddPretty(s.status), s.issue, ddDateTxt(s.created_at)],
+    open: () => openServiceDetail(s)
+  };
+};
+
+const EMP_HEADS = ['Name', 'Username', 'Role', 'Phone', 'Email'];
+const EMP_CSV_HEADS = ['Name', 'Username', 'Role', 'Phone', 'Email', 'Company'];
+const empPhone = a => a.phone || a.mobile_no || a.contact_number || '';
+const empEmail = a => a.email || a.email_id || '';
+const empItem = a => ({
+  f: { role: a.role || '' },
+  cells: [ddDash(a.name || a.username), ddDash(a.username), ddEsc(roleLabel(a.role)), ddDash(empPhone(a)), ddDash(empEmail(a))],
+  csv: [a.name || a.username, a.username, roleLabel(a.role), empPhone(a), empEmail(a), a.company_name]
+});
+
+// ---------- cards ----------
 function openCard(key) {
   const { orders, inventory, accounts, services } = dashState;
-  if (key === 'orders') ddList('All orders', ORDER_HEADS, orders.map(orderRow), i => openOrderDetail(orders[i]));
-  else if (key === 'pending') {
+  if (key === 'orders') {
+    ddView('All orders', { heads: ORDER_HEADS, csvHeads: ORDER_CSV_HEADS, items: orders.map(orderItem), filters: [orderStatusFilter(orders)], file: 'orders' });
+  } else if (key === 'pending') {
     const list = orders.filter(o => o.status === 'placed');
-    ddList('Pending orders', ORDER_HEADS, list.map(orderRow), i => openOrderDetail(list[i]));
-  } else if (key === 'inventory') ddList('Inventory items', INV_HEADS, inventory.map(invRow), i => openInventoryItem(inventory[i]));
-  else if (key === 'employees') {
-    ddList('Employees', ['Name', 'Username', 'Role', 'Phone', 'Email'],
-      accounts.map(a => [ddDash(a.name), ddDash(a.username), ddDash(ddPretty(a.role)), ddDash(a.phone), ddDash(a.email)]));
+    ddView('Pending orders', { heads: ORDER_HEADS, csvHeads: ORDER_CSV_HEADS, items: list.map(orderItem), filters: [], file: 'pending_orders' });
+  } else if (key === 'inventory') {
+    ddView('Inventory items', { heads: INV_HEADS, csvHeads: INV_CSV_HEADS, items: inventory.map(invItem), filters: [categoryFilter()], file: 'inventory' });
+  } else if (key === 'employees') {
+    ddView('Employees', {
+      heads: EMP_HEADS, csvHeads: EMP_CSV_HEADS, items: accounts.map(empItem), file: 'employees',
+      filters: [{ key: 'role', label: 'Role', options: uniq(accounts.map(a => a.role)).map(r => [r, roleLabel(r)]) }]
+    });
   } else if (key === 'services') {
     const list = services.filter(s => s.status !== 'completed' && s.status !== 'rejected');
-    ddList('Active services', ['Product', 'Product ID', 'Model No', 'Assigned to', 'Status'],
-      list.map(s => { const p = serviceProduct(s); return [ddEsc(p.name), ddEsc(p.id), ddEsc(p.model), ddEsc(assigneeName(s)), ddBadge(s.status, SERVICE_STATUS_CLASS[s.status] || 'pending')]; }),
-      i => openServiceDetail(list[i]));
+    ddView('Active services', {
+      heads: SVC_HEADS, csvHeads: SVC_CSV_HEADS, items: list.map(svcItem), file: 'active_services',
+      filters: [
+        { key: 'mode', label: 'Type', options: [['inhouse', 'Inhouse'], ['field', 'Field']] },
+        { key: 'status', label: 'Status', options: uniq(list.map(s => s.status)).map(s => [s, ddPretty(s)]) }
+      ]
+    });
   }
 }
 
 function openStock(kind) {
   const f = { available: i => stockQty(i) > LOW_STOCK_LIMIT, low: i => stockQty(i) > 0 && stockQty(i) <= LOW_STOCK_LIMIT, out: i => stockQty(i) === 0 }[kind];
   const list = dashState.inventory.filter(f);
-  ddList({ available: 'Stock available', low: 'Low stock items', out: 'Out of stock' }[kind], INV_HEADS, list.map(invRow), i => openInventoryItem(list[i]));
+  ddView({ available: 'Stock available', low: 'Low stock items', out: 'Out of stock' }[kind], {
+    heads: INV_HEADS, csvHeads: INV_CSV_HEADS, items: list.map(invItem), filters: [categoryFilter()], file: `stock_${kind}`
+  });
 }
 
 let detailsReady = false;
@@ -421,12 +544,32 @@ function initDetails() {
   dd.body.addEventListener('click', e => {
     if (e.target.closest('.dd-back')) {
       const p = dd.stack.pop();
-      if (p) { dd.title.textContent = p.t; dd.body.innerHTML = p.h; dd.rowFn = p.fn; }
+      if (p) {
+        dd.title.textContent = p.t; dd.body.innerHTML = p.h; dd.rowFn = p.fn; dd.view = p.v || null;
+        if (dd.view) {
+          dd.body.querySelectorAll('.dd-filter-sel').forEach(s => { s.value = dd.view.sel[s.dataset.key] || ''; });
+          ddPaint();
+        }
+      }
       return;
     }
+    if (e.target.closest('.dd-export')) { ddExport(); return; }
     const tr = e.target.closest('tr.dd-row');
     if (tr && dd.rowFn) dd.rowFn(Number(tr.dataset.i));
   });
+
+  dd.body.addEventListener('change', e => {
+    const s = e.target.closest('.dd-filter-sel');
+    if (s && dd.view) { dd.view.sel[s.dataset.key] = s.value; ddPaint(); }
+  });
+  const st = document.createElement('style');
+  st.textContent = `
+    .dd-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin-bottom:12px}
+    .dd-filter{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#64748b}
+    .dd-filter select{padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;background:#fff;color:#0f172a}
+    .dd-count{margin-left:auto;font-size:12px;color:#64748b;padding-bottom:9px}
+    .dd-export{border:none;border-radius:8px;padding:8px 14px;background:#1665ff;color:#fff;font-weight:600;font-size:13px;cursor:pointer}`;
+  document.head.appendChild(st);
 
   const activate = (el, fn) => {
     el.addEventListener('click', fn);

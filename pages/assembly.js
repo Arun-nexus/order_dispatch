@@ -123,41 +123,221 @@ function renderCards() {
   document.getElementById('cardAvailableShipment').textContent = availableParts.length;
 }
 
-function openAssemblyCardDetailModal(type) {
-  const titles = {
-    month: 'Assemblies Built This Month',
-    today: 'Assemblies Built Today',
-    parts: 'Hologram-tagged Parts',
-    pending: 'Pending Assemblies',
-    awaiting: 'Assemblies Awaiting Approval',
-  };
-  const th = 'style="text-align:left;padding:8px;"';
-  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
-  let head;
-  let rows;
-  if (type === 'parts') {
-    head = ['Part', 'Belongs To', 'Hologram-tagged in Stock', 'Total Qty'];
-    rows = availableParts.map(p => [p.part_name, partBelongs(p) || '—', p.hologram_available ?? 0, p.quantity ?? 0]);
-  } else {
-    head = ['Product', 'Product ID', 'Model No.', 'Qty', 'Status', 'Created'];
-    rows = assemblyCardList(type).map(a => [a.productName, a.productId || '—', a.modelNumber || '—', a.quantity, statusPill(a), (a.createdAt || '').slice(0, 10)]);
-  }
-  const box = document.querySelector('#assemblyCardDetailModal .modal-content');
-  box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${rows.length})</span></h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-    </div>
-    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
-      <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
-        <tbody>
-          ${rows.map(r => `<tr>${r.map(c => `<td ${td}>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
-        </tbody>
-      </table>
-    </div>
+// =========================================================
+// CARD POPUPS — filters + export + click-through to full details
+// =========================================================
+const asmCV = { type: '', title: '', base: [], f: {} };
+
+const ASM_STATUS_LABEL = {
+  pending: 'Pending', pending_approval: 'Awaiting Approval',
+  partially_approved: 'Partially Approved', completed: 'Fully Approved',
+};
+
+function aesc(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function asmEnsureStyles() {
+  if (document.getElementById('asmCvStyles')) return;
+  const st = document.createElement('style');
+  st.id = 'asmCvStyles';
+  st.textContent = `
+    #viewAssemblyModal{z-index:1100 !important}
+    .as-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .as-head h3{margin:0}
+    .as-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .as-bar select,.as-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px;background:#fff;color:#1e293b;min-width:0}
+    .as-bar input[type=text]{flex:1;min-width:150px}
+    .as-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+    .as-btn.exp{background:#1665ff;color:#fff}
+    .as-btn.rst{background:#eef1f6;color:#334155}
+    .as-count{font-size:12px;color:#64748b;margin:0 0 8px}
+    .as-wrap{overflow:auto;max-height:58vh;border:1px solid #eef1f6;border-radius:10px}
+    .as-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:820px;color:#1e293b}
+    .as-tbl th{position:sticky;top:0;background:#f1f5f9 !important;color:#334155 !important;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+    .as-tbl td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top;color:#1e293b}
+    .as-tbl tbody tr.clk{cursor:pointer}
+    .as-tbl tbody tr.clk:hover{background:#f8fbff}
+    .as-sub{display:block;font-size:11px;color:#64748b;margin-top:1px}
+    .as-line{margin-bottom:6px}
+    .as-line:last-child{margin-bottom:0}
+    .as-chip{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:#eef2ff;color:#3730a3;margin-left:4px}
+    .as-chip.local{background:#f1f5f9;color:#475569}
+    /* table headings were white-on-light-grey in the detail modals */
+    #viewAssemblyModal th,#assemblyModal th,#assemblyCardDetailModal th{color:#334155 !important}
+    #viewAssemblyModal thead,#assemblyModal thead{background:#f1f5f9 !important}
   `;
-  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyCardDetailModal'));
+  document.head.appendChild(st);
+}
+
+function asmDate(d) { return (d || '').slice(0, 10) || '-'; }
+function asmSerialText(a) {
+  return (a.serials || []).map(s => s.hologram ? `${s.serial} (${s.hologram})` : s.serial).join(' | ');
+}
+function asmSource(a) {
+  const inv = (a.partsUsed || []).some(p => p.source !== 'local');
+  const loc = (a.partsUsed || []).some(p => p.source === 'local');
+  return inv && loc ? 'both' : inv ? 'inventory' : loc ? 'local' : 'none';
+}
+const ASM_SOURCE_LABEL = { both: 'Inventory + Local', inventory: 'Inventory', local: 'Local', none: '-' };
+
+function asmBase(type) {
+  const titles = {
+    month: 'Assemblies Built This Month', today: 'Assemblies Built Today',
+    parts: 'Hologram-tagged Parts', pending: 'Pending Assemblies', awaiting: 'Assemblies Awaiting Approval',
+  };
+  return [titles[type] || 'Assemblies', type === 'parts' ? availableParts.slice() : assemblyCardList(type)];
+}
+
+function asmFiltered() {
+  const f = asmCV.f;
+  const q = (f.q || '').toLowerCase();
+  if (asmCV.type === 'parts') {
+    return asmCV.base.filter(p => {
+      if (f.belongs && (partBelongs(p) || '') !== f.belongs) return false;
+      if (f.stock === 'tagged' && !(Number(p.hologram_available) > 0)) return false;
+      if (f.stock === 'none' && Number(p.hologram_available) > 0) return false;
+      if (q && !`${p.part_name} ${partBelongs(p)}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }
+  return asmCV.base.filter(a => {
+    if (f.status && a.status !== f.status) return false;
+    if (f.source && asmSource(a) !== f.source) return false;
+    if (f.product && a.productName !== f.product) return false;
+    if (f.from && (a.createdAt || '').slice(0, 10) < f.from) return false;
+    if (f.to && (a.createdAt || '').slice(0, 10) > f.to) return false;
+    if (q) {
+      const hay = [a.id, a.productName, a.productId, a.modelNumber,
+        ...(a.partsUsed || []).map(p => `${p.name} ${p.belongsTo || ''}`),
+        ...(a.serials || []).map(s => `${s.serial} ${s.hologram || ''}`)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function asmRowsHtml(list) {
+  if (asmCV.type === 'parts') {
+    if (!list.length) return '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px;">No parts match these filters.</td></tr>';
+    return list.map(p => `<tr>
+      <td><b>${aesc(p.part_name)}</b></td>
+      <td>${aesc(partBelongs(p) || '—')}</td>
+      <td>${aesc(p.hologram_available ?? 0)}</td>
+      <td>${aesc(p.quantity ?? 0)}</td></tr>`).join('');
+  }
+  if (!list.length) return '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">No assemblies match these filters.</td></tr>';
+  return list.map(a => {
+    const parts = (a.partsUsed || []).map(p => `
+      <div class="as-line">${aesc(p.name)} × ${aesc(p.quantity)}<span class="as-chip ${p.source === 'local' ? 'local' : ''}">${p.source === 'local' ? 'Local' : 'Inventory'}</span>
+        ${p.belongsTo ? `<span class="as-sub">Belongs to: ${aesc(p.belongsTo)}</span>` : ''}</div>`).join('') || '<span style="color:#94a3b8;">—</span>';
+    return `<tr class="clk" data-id="${aesc(a.id)}">
+      <td><b>${aesc(a.productName)}</b><span class="as-sub">${aesc(a.productId || '—')} · ${aesc(a.modelNumber || '—')}</span></td>
+      <td>${aesc(a.quantity)}</td>
+      <td>${parts}</td>
+      <td>${(a.serials || []).length}${a.hologramPart ? `<span class="as-sub">Hologram from: ${aesc(a.hologramPart)}${a.hologramPartBelongs ? ' (' + aesc(a.hologramPartBelongs) + ')' : ''}</span>` : ''}</td>
+      <td>${statusPill(a)}</td>
+      <td>${(a.approvedSerials || []).length}/${(a.serials || []).length}</td>
+      <td>${aesc(asmDate(a.createdAt))}</td>
+      <td>${aesc(a.id)}</td></tr>`;
+  }).join('');
+}
+
+function asmPaint() {
+  const list = asmFiltered();
+  const body = document.getElementById('asCvBody');
+  if (!body) return;
+  body.innerHTML = asmRowsHtml(list);
+  document.getElementById('asCvCount').textContent = `${list.length} of ${asmCV.base.length} ${asmCV.type === 'parts' ? 'part(s)' : 'assembly(ies)'}`;
+  body.querySelectorAll('tr.clk').forEach(tr => tr.addEventListener('click', () => openViewAssemblyModal(tr.dataset.id)));
+}
+
+function asmCsvCell(v) {
+  const t = String(v ?? '');
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function asmDownloadCsv(head, rows, fileBase) {
+  const csv = '﻿' + [head, ...rows].map(r => r.map(asmCsvCell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `${fileBase}_${todayStr()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function asmExportAssemblies(list, fileBase) {
+  const head = ['Assembly ID', 'Product Name', 'Product ID', 'Model No.', 'Quantity',
+    'Parts Used (name x qty - source - belongs to)', 'Parts Source', 'Hologram Part', 'Hologram Part Belongs To',
+    'Status', 'Serials Approved', 'Total Serials', 'Created', 'Serial (Hologram) Numbers'];
+  const rows = list.map(a => [
+    a.id, a.productName, a.productId || '', a.modelNumber || '', a.quantity,
+    (a.partsUsed || []).map(p => `${p.name} x ${p.quantity} - ${p.source === 'local' ? 'Local' : 'Inventory'}${p.belongsTo ? ' - belongs to ' + p.belongsTo : ''}`).join(' | '),
+    ASM_SOURCE_LABEL[asmSource(a)], a.hologramPart || '', a.hologramPartBelongs || '',
+    ASM_STATUS_LABEL[a.status] || a.status, (a.approvedSerials || []).length, (a.serials || []).length,
+    asmDate(a.createdAt), asmSerialText(a)]);
+  asmDownloadCsv(head, rows, fileBase);
+}
+function asmExportParts(list, fileBase) {
+  asmDownloadCsv(['Part', 'Belongs To', 'Hologram-tagged in Stock', 'Total Qty'],
+    list.map(p => [p.part_name, partBelongs(p) || '', p.hologram_available ?? 0, p.quantity ?? 0]), fileBase);
+}
+
+function openAssemblyCardDetailModal(type) {
+  const modal = document.getElementById('assemblyCardDetailModal');
+  if (!modal) return;
+  asmEnsureStyles();
+  const [title, base] = asmBase(type);
+  asmCV.type = type; asmCV.title = title; asmCV.base = base; asmCV.f = {};
+  const uniq = arr => [...new Set(arr.filter(Boolean))].sort();
+  const opt = arr => arr.map(v => `<option value="${aesc(v)}">${aesc(v)}</option>`).join('');
+  const isParts = type === 'parts';
+
+  const filters = isParts ? `
+      <input type="text" id="asF_q" placeholder="Search part or belongs-to...">
+      <select id="asF_belongs"><option value="">All Belongs To</option>${opt(uniq(base.map(p => partBelongs(p))))}</select>
+      <select id="asF_stock"><option value="">All Stock</option><option value="tagged">Hologram-tagged in stock</option><option value="none">No tagged stock</option></select>`
+    : `
+      <input type="text" id="asF_q" placeholder="Search product, ID, part, serial...">
+      <select id="asF_status"><option value="">All Status</option>${Object.entries(ASM_STATUS_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+      <select id="asF_source"><option value="">All Part Sources</option><option value="inventory">Inventory</option><option value="local">Local</option><option value="both">Inventory + Local</option></select>
+      <select id="asF_product"><option value="">All Products</option>${opt(uniq(base.map(a => a.productName)))}</select>
+      <label style="font-size:12px;color:#64748b;">Created</label>
+      <input type="date" id="asF_from" title="From"><input type="date" id="asF_to" title="To">`;
+
+  const head = isParts
+    ? ['Part', 'Belongs To', 'Hologram-tagged in Stock', 'Total Qty']
+    : ['Product', 'Qty', 'Parts Used', 'Serials', 'Status', 'Approved', 'Created', 'Assembly ID'];
+
+  const content = modal.querySelector('.modal-content');
+  content.style.width = 'min(1100px,96vw)';
+  content.innerHTML = `
+    <div class="as-head"><h3>${aesc(title)}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="as-bar">${filters}
+      <button class="as-btn rst" id="asF_reset">Reset</button>
+      <button class="as-btn exp" id="asF_export"><i class="fa-solid fa-download"></i> Export CSV</button>
+    </div>
+    <p class="as-count" id="asCvCount"></p>
+    <div class="as-wrap"><table class="as-tbl">
+      <thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody id="asCvBody"></tbody></table></div>
+    ${isParts ? '' : '<p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Click a row to see full assembly details.</p>'}`;
+
+  content.querySelector('.close').addEventListener('click', () => closeModal('assemblyCardDetailModal'));
+  content.querySelectorAll('.as-bar select,.as-bar input').forEach(el => {
+    const key = el.id.replace('asF_', '');
+    el.addEventListener(el.type === 'text' ? 'input' : 'change', () => { asmCV.f[key] = el.value; asmPaint(); });
+  });
+  content.querySelector('#asF_reset').addEventListener('click', () => {
+    asmCV.f = {};
+    content.querySelectorAll('.as-bar select,.as-bar input').forEach(el => el.value = '');
+    asmPaint();
+  });
+  content.querySelector('#asF_export').addEventListener('click', () => {
+    const name = title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    (isParts ? asmExportParts : asmExportAssemblies)(asmFiltered(), name);
+  });
+  asmPaint();
   openModal('assemblyCardDetailModal');
 }
 
@@ -193,12 +373,10 @@ function statusPill(a) {
   return '<span class="status pending">Pending</span>';
 }
 
-function renderTable() {
-  const tbody = document.getElementById('assemblyTbody');
+function asmTableRows() {
   const statusFilter = document.getElementById('statusFilter').value;
   const search = (document.getElementById('assemblySearch').value || '').toLowerCase();
-
-  const rows = assemblies.filter(a => {
+  return assemblies.filter(a => {
     if (statusFilter && a.status !== statusFilter) return false;
     if (search) {
       const hay = (a.productName + ' ' + a.productId + ' ' + (a.serials || []).map(s => s.serial).join(' ')).toLowerCase();
@@ -206,6 +384,11 @@ function renderTable() {
     }
     return true;
   });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('assemblyTbody');
+  const rows = asmTableRows();
 
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No assemblies yet</td></tr>`;
@@ -1039,6 +1222,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addAssemblyBtn').addEventListener('click', openAddAssemblyModal);
   document.getElementById('applyAssemblyFilter').addEventListener('click', renderTable);
   document.getElementById('assemblySearch').addEventListener('input', renderTable);
+  asmEnsureStyles();
+  document.querySelector('.top-actions .export')?.addEventListener('click', () => asmExportAssemblies(asmTableRows(), 'assemblies'));
   wireAssemblyCardClicks();
   loadAvailableParts();
   loadAssemblies();

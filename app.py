@@ -3089,7 +3089,7 @@ def inventory(user: dict = Depends(get_current_user)):
 
 
 @app.get("/inventory/detail")
-def inventory_detail(product_id: str = "", model_no: str = "", product_type: str = "",
+def inventory_detail(product_id: str = "", model_no: str = "", product_type: str = "", lot_id: str = "",
                       user: dict = Depends(get_current_user)):
     """
     Fresh, full copy of one lot — including serial_numbers/hologram_numbers,
@@ -3113,6 +3113,13 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
             query["product_type"] = {"$in": ["product", None]}
         elif product_type:
             query["product_type"] = product_type
+        # parts (spare/service) have no product_id, so product_id+model_no+type is not unique —
+        # when the caller knows the exact lot, fetch that one
+        if lot_id:
+            try:
+                query = {"_id": ObjectId(lot_id)}
+            except Exception:
+                raise HTTPException(status_code=400, detail="invalid lot id")
         db = inventory_manager()
         docs = db.get_data(collection_name=INVENTORY_COLLECTION, query=query)
         if not docs:

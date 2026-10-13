@@ -700,26 +700,88 @@ function wireCardFilters() {
   });
 }
 
+// ---------- Shared product helpers (cards + view modal) ----------
+const ITEM_TYPE_LABELS = { spare_parts: 'Spare Part', service_parts: 'Service Part', accessories: 'Accessory' };
+const orderMoney = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const orderDate = d => d ? new Date(d).toLocaleDateString('en-GB') : '-';
+
+// Order items only store id/name/model, so for parts we look the lot up in
+// inventory to find out what kind of item it is and which product it belongs to.
+function itemMeta(it) {
+  const list = invLookup.products || [];
+  const id = (it.product_id || '').trim();
+  const model = it.model_no || '';
+  const inv = list.find(p => id && p.product_id === id && (p.model_no || '') === model)
+    || (id && list.find(p => p.product_id === id))
+    || list.find(p => p.product_name === it.product_name && p.product_type && p.product_type !== 'product');
+  const type = it.product_type || inv?.product_type || 'product';
+  const parent = it.parent_product_name || it.belongs_to || inv?.parent_product_name || '';
+  return { type, typeLabel: ITEM_TYPE_LABELS[type] || '', parent };
+}
+
+// Product name, then "ID · Model", then (for parts) the part type + which product it belongs to
+function productCellHtml(it) {
+  const m = itemMeta(it);
+  const sub = [it.product_id ? `ID: ${escapeHtml(it.product_id)}` : '', it.model_no ? `Model: ${escapeHtml(it.model_no)}` : ''].filter(Boolean).join(' · ');
+  const part = m.typeLabel
+    ? `<div style="margin-top:3px;"><span class="ov-chip">${m.typeLabel}</span>${m.parent ? ` <span class="ov-sub">belongs to: <strong style="color:#475569;">${escapeHtml(m.parent)}</strong></span>` : ''}</div>`
+    : '';
+  return `<strong>${escapeHtml(it.product_name ?? '')}</strong>${sub ? `<div class="ov-sub">${sub}</div>` : ''}${part}`;
+}
+
+function ensureOrderViewStyles() {
+  if (document.getElementById('ov-style')) return;
+  const st = document.createElement('style');
+  st.id = 'ov-style';
+  st.textContent = `
+    .ov-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #eef1f6}
+    .ov-head h3{margin:0 0 4px}
+    .ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:18px}
+    .ov-cell{background:#f8fafc;border-radius:10px;padding:10px 12px}
+    .ov-cell small{display:block;color:#64748b;font-size:11px;margin-bottom:2px}
+    .ov-cell p{margin:0;font-size:14px;color:#0f172a;word-break:break-word}
+    .ov-title{font-size:13px;font-weight:600;color:#334155;margin:4px 0 8px}
+    .ov-scroll{overflow-x:auto;margin-bottom:18px;border:1px solid #eef1f6;border-radius:10px}
+    .ov-table{width:100%;border-collapse:collapse;font-size:13px}
+    .ov-table th{background:#f1f5f9;color:#475569;text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
+    .ov-table td{padding:9px 12px;border-bottom:1px solid #eef1f6;vertical-align:top}
+    .ov-table tr:last-child td{border-bottom:none}
+    .ov-sub{color:#94a3b8;font-size:12px}
+    .ov-chip{display:inline-block;background:#eef3fb;color:#1665ff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:600}
+    .ov-serial{display:inline-block;background:#f1f5f9;border-radius:6px;padding:1px 7px;margin:2px 4px 0 0;font-size:11px;color:#475569}
+    .ov-bottom{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+    .ov-notes{flex:1;min-width:260px;display:grid;gap:10px}
+    .ov-totals{width:300px;max-width:100%;background:#f8fafc;border-radius:12px;padding:12px 16px;margin-left:auto}
+    .ov-totals div{display:flex;justify-content:space-between;padding:5px 0;font-size:14px;color:#475569}
+    .ov-totals .ov-grand{border-top:1px solid #e2e8f0;margin-top:4px;padding-top:9px;font-weight:700;font-size:16px;color:#0f172a}
+    .ov-row{cursor:pointer}
+    .ov-row:hover td{background:#f8fafc}
+    .ov-hint{font-size:12px;color:#94a3b8;margin:-8px 0 12px}`;
+  document.head.appendChild(st);
+}
+
 function orderCardRowsHtml(list) {
+  ensureOrderViewStyles();
   if (!list.length) return '<p style="color:#94a3b8;text-align:center;padding:16px;">No orders to show.</p>';
-  return `<table style="width:100%;font-size:13px;border-collapse:collapse;">
-    <thead><tr style="text-align:left;">
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Order ID</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Product</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Company</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Order Date</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Status</th>
-      <th style="padding:6px 4px;border-bottom:1px solid #eef1f6;">Amount</th>
-    </tr></thead>
-    <tbody>${list.map(o => `<tr>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${(o.order_id || '').slice(0, 8)}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${escapeHtml(o.product_name ?? '')}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${escapeHtml(o.customer?.company_name ?? o.company_name ?? '')}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">${statusLabel(o.status)}</td>
-      <td style="padding:6px 4px;border-bottom:1px solid #f5f7fa;">₹${o.total_mrp ?? o.price ?? 0}</td>
-    </tr>`).join('')}</tbody>
-  </table>`;
+  return `<p class="ov-hint">Click an order to see its full details.</p>
+  <div class="ov-scroll"><table class="ov-table">
+    <thead><tr><th>Product</th><th>Qty</th><th>Company</th><th>Order Date</th><th>Status</th><th>Amount</th></tr></thead>
+    <tbody>${list.map((o, i) => {
+      const items = o.items || [];
+      const qty = items.length ? items.reduce((s, it) => s + (Number(it.quantity) || 0), 0) : (o.quantity ?? '-');
+      const prod = items.length
+        ? items.map(it => `<div style="margin-bottom:6px;">${productCellHtml(it)}</div>`).join('')
+        : `<strong>${escapeHtml(o.product_name ?? '')}</strong>`;
+      return `<tr class="ov-row" data-i="${i}">
+        <td>${prod}</td>
+        <td>${qty}</td>
+        <td>${escapeHtml(o.customer?.company_name ?? o.company_name ?? '')}</td>
+        <td>${orderDate(o.order_date)}</td>
+        <td><span class="${statusClass(o.status)}">${statusLabel(o.status)}</span></td>
+        <td>${orderMoney(o.total_mrp ?? o.price)}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
 }
 
 function ensureOrderCardDetailModal() {
@@ -738,6 +800,7 @@ function ensureOrderCardDetailModal() {
 function openOrderCardDetailModal(type) {
   const modal = ensureOrderCardDetailModal();
   const content = modal.querySelector('.modal-content');
+  content.style.width = 'min(900px, 95vw)';
   const orders = orderState.orders;
   const statusMap = { Pending: 'placed', Delivered: 'delivered', Cancelled: 'cancelled' };
 
@@ -754,11 +817,13 @@ function openOrderCardDetailModal(type) {
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>${title}</h3>
+      <h3>${title} <small style="color:#94a3b8;font-weight:400;">(${list.length})</small></h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${orderCardRowsHtml(list)}`;
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('tr.ov-row').forEach(tr =>
+    tr.addEventListener('click', () => openViewOrderModal(list[Number(tr.dataset.i)])));
   modal.style.display = 'flex';
 }
 
@@ -908,72 +973,102 @@ function openViewOrderModal(o) {
   if (!o) return;
   const modal = document.getElementById('viewOrderModal');
   if (!modal) return;
+  ensureOrderViewStyles();
+  modal.style.zIndex = 1100;           // always above the card list popup
   const content = modal.querySelector('.modal-content');
+  content.style.cssText = 'background:#fff;border-radius:16px;padding:26px;width:min(1000px,95vw);max-height:90vh;overflow-y:auto;';
   const items = o.items || [];
   const customer = o.customer || {};
+  const d = o.dispatch || null;
+  const cell = (label, val) => `<div class="ov-cell"><small>${label}</small><p>${val || '-'}</p></div>`;
+  const e = escapeHtml;
 
   const itemsRows = items.length
     ? items.map(it => {
-        const idModel = [it.product_id, it.model_no].filter(Boolean).join(' · ');
+        const lineTotal = it.line_total ?? ((it.price || 0) * (it.quantity || 0));
+        const serials = (it.serial_numbers || []).map(s => `<span class="ov-serial">${e(s)}</span>`).join('');
         return `<tr>
-        <td>${it.product_name ?? ''}${idModel ? `<br><small style="color:#94a3b8;">${idModel}</small>` : ''}${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
-        <td>${it.quantity ?? 0}</td>
-        <td>₹${it.price ?? 0}</td>
-        <td>${it.tax_rate ?? 0}%</td>
-        <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
-      </tr>`;
+          <td>${productCellHtml(it)}</td>
+          <td>${serials || '<span class="ov-sub">—</span>'}</td>
+          <td>${it.quantity ?? 0}</td>
+          <td>${orderMoney(it.price)}</td>
+          <td>${it.tax_rate ?? 0}%</td>
+          <td><strong>${orderMoney(lineTotal)}</strong></td>
+        </tr>`;
       }).join('')
-    : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+    : `<tr><td colspan="6" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
 
-  content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3>Order Details</h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
-    </div>
-    <div class="detail"><small>Order ID</small><p>${o.order_id ?? ''}</p></div>
-    <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
-    <div class="detail"><small>GST Number</small><p>${customer.gst_number ?? '-'}</p></div>
-    <div class="detail"><small>Contact name and number </small><p>${customer.contractor_person ?? '-'} (${customer.contractor_number ?? '-'})</p></div>
-    <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
-      <thead><tr style="text-align:left;color:#fff;">
-        <th>Product</th><th>Qty</th><th>Price</th><th>Tax</th><th>Line Total</th>
-      </tr></thead>
-      <tbody>${itemsRows}</tbody>
-    </table>
-    ${(o.spare_parts || []).length ? `
-    <div class="detail"><small>Spare Parts</small></div>
-    <table style="width:100%;font-size:13px;margin:0 0 10px;border-collapse:collapse;">
-      <thead><tr style="text-align:left;color:#fff;">
-        <th>Name</th><th>Qty</th><th>Price</th>
-      </tr></thead>
-      <tbody>${o.spare_parts.map(sp => `<tr>
-        <td>${sp.name ?? ''}</td><td>${sp.quantity ?? 0}</td><td>₹${sp.price ?? 0}</td>
-      </tr>`).join('')}</tbody>
-    </table>` : ''}
-    <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
-    <div class="detail"><small>Reference</small><p>${o.reference || o.creator?.raised_by || '-'}</p></div>
-    <div class="detail"><small>Status</small><p>${statusLabel(o.status)}</p></div>
-    <div class="detail"><small>Cancellation Reason</small><p>${o.status === 'cancelled' ? (o.cancel_reason || '-') : '-'}</p></div>
-    <div class="detail"><small>Return Reason</small><p>${o.status === 'returned' ? (o.return_reason || '-') : '-'}</p></div>
-    ${(o.returned_items || []).length ? `
-    <div class="detail"><small>Returned Product(s)</small></div>
-    <table style="width:100%;font-size:13px;margin:0 0 10px;border-collapse:collapse;">
-      <thead><tr style="text-align:left;color:#fff;">
-        <th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Condition</th>
-      </tr></thead>
+  const returnedHtml = (o.returned_items || []).length ? `
+    <div class="ov-title">Returned Product(s)</div>
+    <div class="ov-scroll"><table class="ov-table">
+      <thead><tr><th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Condition</th></tr></thead>
       <tbody>${o.returned_items.map(r => `<tr>
-        <td>${r.product_name ?? ''}${r.model_no ? `<br><small style="color:#94a3b8;">${r.model_no}</small>` : ''}</td>
-        <td>${(r.serial_numbers && r.serial_numbers.length) ? r.serial_numbers.join(', ') : '—'}</td>
+        <td>${productCellHtml(r)}</td>
+        <td>${(r.serial_numbers && r.serial_numbers.length) ? r.serial_numbers.map(s => `<span class="ov-serial">${e(s)}</span>`).join('') : '—'}</td>
         <td>${r.quantity ?? 0}</td>
         <td><span class="${r.condition === 'faulty' ? 'cancel' : 'delivered'}">${r.condition === 'faulty' ? 'Faulty' : 'OK'}</span></td>
       </tr>`).join('')}</tbody>
-    </table>` : ''}
-    <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
-    <div class="detail"><small>Warranty</small><p>${(o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +₹${o.warranty_charge ?? 0})` : 'Standard (1 Year)'}</p></div>
-    <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
-    <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
+    </table></div>` : '';
+
+  const sparePartsHtml = (o.spare_parts || []).length ? `
+    <div class="ov-title">Spare Parts</div>
+    <div class="ov-scroll"><table class="ov-table">
+      <thead><tr><th>Name</th><th>Qty</th><th>Price</th></tr></thead>
+      <tbody>${o.spare_parts.map(sp => `<tr><td>${e(sp.name ?? '')}${sp.belongs_to ? `<div class="ov-sub">belongs to: ${e(sp.belongs_to)}</div>` : ''}</td><td>${sp.quantity ?? 0}</td><td>${orderMoney(sp.price)}</td></tr>`).join('')}</tbody>
+    </table></div>` : '';
+
+  const notes = [
+    o.status === 'cancelled' ? cell('Cancellation Reason', e(o.cancel_reason || '')) : '',
+    o.status === 'returned' ? cell('Return Reason', e(o.return_reason || '')) : '',
+    o.status === 'placed' && o.remark ? cell('Remark', e(o.remark)) : ''
+  ].join('');
+
+  content.innerHTML = `
+    <div class="ov-head">
+      <div>
+        <h3>Order Details</h3>
+        <span class="ov-sub">Order ID: ${e(o.order_id ?? '')}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="${statusClass(o.status)}">${statusLabel(o.status)}</span>
+        <button class="close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+      </div>
+    </div>
+
+    <div class="ov-grid">
+      ${cell('Company', e(customer.company_name ?? ''))}
+      ${cell('GST Number', e(customer.gst_number ?? ''))}
+      ${cell('Contact', e([customer.contractor_person, customer.contractor_number].filter(Boolean).join(' · ')))}
+      ${cell('Order Date', orderDate(o.order_date))}
+      ${cell('Payment', e(paymentDetailsLabel(o)))}
+      ${cell('Reference', e(o.reference || o.creator?.raised_by || ''))}
+      ${cell('Created By', e(orderCreatorLabel(o)))}
+      ${cell('Warranty', (o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +${orderMoney(o.warranty_charge)})` : 'Standard (1 Year)')}
+      ${d ? cell('Invoice', e([d.invoice_no, d.invoice_date].filter(Boolean).join(' · '))) : ''}
+      ${d ? cell('Docket / Delivery', e([d.docket_no, d.mode_of_delivery].filter(Boolean).join(' · '))) : ''}
+    </div>
+
+    <div class="ov-title">Products</div>
+    <div class="ov-scroll"><table class="ov-table">
+      <thead><tr><th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Price</th><th>Tax</th><th>Line Total</th></tr></thead>
+      <tbody>${itemsRows}</tbody>
+    </table></div>
+
+    ${sparePartsHtml}
+    ${returnedHtml}
+
+    <div class="ov-bottom">
+      <div class="ov-notes">${notes}</div>
+      <div class="ov-totals">
+        <div><span>Subtotal</span><span>${orderMoney(o.subtotal)}</span></div>
+        <div><span>Tax</span><span>${orderMoney(o.tax_total)}</span></div>
+        <div><span>Discount</span><span>- ${orderMoney(o.discount)}</span></div>
+        <div class="ov-grand"><span>Total Amount</span><span>${orderMoney(o.total_mrp)}</span></div>
+      </div>
+    </div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  modal.onclick = ev => { if (ev.target === modal) modal.style.display = 'none'; };
   modal.style.display = 'flex';
 }
 
