@@ -1,3 +1,9 @@
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
 // =========================================================
 // shipment.js
 // Powers pages/shipment.html — cards, table/filtering, and the
@@ -322,6 +328,7 @@ function shipExportCsv(list, fileBase) {
     s.paymentMode === 'paid' ? '' : (s.creditDays || ''),
     s.paymentMode === 'paid' ? '' : (s.dueDate || addDays(s.dispatchDate, s.creditDays))
   ]);
+  if (a4Intercept(head, rows, fileBase)) return;
   const csv = '﻿' + [head, ...rows].map(r => r.map(shipCsvCell).join(',')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -394,6 +401,7 @@ function openShipmentCardDetailModal(type) {
     content.querySelectorAll('.sh-bar select,.sh-bar input').forEach(el => el.value = '');
     shipPaintCard();
   });
+  a4Twin(content.querySelector('#shF_export'), shipCV.title);
   content.querySelector('#shF_export').addEventListener('click', () => {
     shipExportCsv(shipFiltered(), shipCV.title.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
   });
@@ -1111,6 +1119,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('.top-actions .export')?.addEventListener('click', () => {
     shipExportCsv(shipTableRows(), 'shipments');
   });
+  a4Twin(document.querySelector('.top-actions .export'), 'Shipments');
   wireShipmentCardClicks();
   loadShipments();
 });

@@ -1,3 +1,9 @@
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
 const invState = { products: [], activeProductId: null, activeModelNo: '', activeProductType: 'product', activeCategory: null, searchQuery: '', activeFilters: null, editSerials: [], editRemovedSerials: [], editFaultySerials: [], editHolograms: [], editHologramQuantity: 0 };
 let invPage = 1;
 const INV_PAGE_SIZE = 20;
@@ -57,10 +63,10 @@ function wireSerialRecordModal() {
         <h3>Record — Serial Number History</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <p style="color:#64748b;font-size:13px;margin-bottom:10px;">Search a serial number to see its full lifetime record — when it was added to inventory, assembled, sold/demoed, returned, and every service raised against it.</p>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:10px;">Search a serial number to see its full lifetime record — when it was added to inventory, assembled, sold/demoed, returned, and every service raised against it.</p>
       <div style="display:flex;gap:8px;">
-        <input id="serialRecordInput" placeholder="Enter serial number" value="${prefill ? escapeHtmlInv(prefill) : ''}" style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-        <button type="button" id="serialRecordSearchBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Search</button>
+        <input id="serialRecordInput" placeholder="Enter serial number" value="${prefill ? escapeHtmlInv(prefill) : ''}" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <button type="button" id="serialRecordSearchBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Search</button>
       </div>
       <div id="serialRecordResults" style="margin-top:16px;"></div>`;
 
@@ -75,8 +81,8 @@ function wireSerialRecordModal() {
 
   async function runSerialSearch(serial) {
     const resultsBox = modal.querySelector('#serialRecordResults');
-    if (!serial) { resultsBox.innerHTML = '<p style="color:#d62828;font-size:13px;">Enter a serial number to search.</p>'; return; }
-    resultsBox.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Searching...</p>';
+    if (!serial) { resultsBox.innerHTML = '<p style="color:var(--danger);font-size:13px;">Enter a serial number to search.</p>'; return; }
+    resultsBox.innerHTML = '<p style="color:var(--text-light);font-size:13px;">Searching...</p>';
     // serials are stored lowercase (see wireEditSerialFileUpload / the add-product
     // wizard) — lowercase here too so a serial typed in a different case still matches.
     const normalizedSerial = serial.toLowerCase();
@@ -87,7 +93,7 @@ function wireSerialRecordModal() {
       resultsBox.innerHTML = renderSerialTimeline(data.events || [], serial);
     } catch (err) {
       if (err.message === 'unauthorized' || err.message === 'forbidden') return;
-      resultsBox.innerHTML = `<p style="color:#d62828;font-size:13px;">${escapeHtmlInv(err.message)}</p>`;
+      resultsBox.innerHTML = `<p style="color:var(--danger);font-size:13px;">${escapeHtmlInv(err.message)}</p>`;
     }
   }
 
@@ -141,18 +147,18 @@ function serialEventDetailLine(ev) {
 
 function renderSerialTimeline(events, serial) {
   if (!events.length) {
-    return `<p style="color:#94a3b8;font-size:13px;text-align:center;padding:16px;">No record found for serial number <strong>${escapeHtmlInv(serial)}</strong>.</p>`;
+    return `<p style="color:var(--text-light);font-size:13px;text-align:center;padding:16px;">No record found for serial number <strong>${escapeHtmlInv(serial)}</strong>.</p>`;
   }
   return `
-    <div style="font-size:13px;color:#334155;margin-bottom:10px;">Lifetime record for <strong>${escapeHtmlInv(serial)}</strong> (${events.length} event${events.length > 1 ? 's' : ''})</div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">Lifetime record for <strong>${escapeHtmlInv(serial)}</strong> (${events.length} event${events.length > 1 ? 's' : ''})</div>
     <div style="display:flex;flex-direction:column;gap:12px;">
       ${events.map(ev => `
-        <div style="border-left:3px solid #1665ff;padding-left:12px;">
+        <div style="border-left:3px solid var(--primary);padding-left:12px;">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
-            <strong style="font-size:13px;"><i class="fa-solid ${SERIAL_EVENT_ICONS[ev.type] || 'fa-circle-dot'}" style="margin-right:6px;color:#1665ff;"></i>${escapeHtmlInv(ev.label)}</strong>
-            <small style="color:#94a3b8;">${ev.date ? new Date(ev.date).toLocaleDateString('en-GB') : '-'}</small>
+            <strong style="font-size:13px;"><i class="fa-solid ${SERIAL_EVENT_ICONS[ev.type] || 'fa-circle-dot'}" style="margin-right:6px;color:var(--primary);"></i>${escapeHtmlInv(ev.label)}</strong>
+            <small style="color:var(--text-light);">${ev.date ? new Date(ev.date).toLocaleDateString('en-GB') : '-'}</small>
           </div>
-          <p style="font-size:12px;color:#64748b;margin-top:4px;">${escapeHtmlInv(serialEventDetailLine(ev))}</p>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtmlInv(serialEventDetailLine(ev))}</p>
         </div>`).join('')}
     </div>`;
 }
@@ -189,7 +195,7 @@ const ivUniq = arr => [...new Set(arr.filter(v => v !== undefined && v !== null 
 function itemIdentityHtml(p) {
   const name = `<strong>${escapeHtmlInv(p.product_name ?? '')}</strong>`;
   if (ivIsPart(p)) {
-    return `${name}<div class="iv-sub">Belongs to: <b style="color:#475569;">${escapeHtmlInv(p.parent_product_name || '—')}</b></div>`;
+    return `${name}<div class="iv-sub">Belongs to: <b style="color:var(--text-secondary);">${escapeHtmlInv(p.parent_product_name || '—')}</b></div>`;
   }
   const sub = [p.product_id ? `ID: ${escapeHtmlInv(p.product_id)}` : '', p.model_no ? `Model: ${escapeHtmlInv(p.model_no)}` : ''].filter(Boolean).join(' · ');
   return `${name}${sub ? `<div class="iv-sub">${sub}</div>` : ''}`;
@@ -204,31 +210,31 @@ function ensureInvStyles() {
   const st = document.createElement('style');
   st.id = 'iv-style';
   st.textContent = `
-    .iv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #eef1f6}
+    .iv-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)}
     .iv-head h3{margin:0 0 4px}
     .iv-toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin-bottom:12px}
-    .iv-filter{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#64748b}
-    .iv-filter select{padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;background:#fff;color:#0f172a;min-width:130px}
-    .iv-count{margin-left:auto;font-size:12px;color:#64748b;padding-bottom:9px}
-    .iv-export{border:none;border-radius:8px;padding:8px 14px;background:#1665ff;color:#fff;font-weight:600;font-size:13px;cursor:pointer}
-    .iv-summary{font-size:13px;color:#475569;margin-bottom:10px}
-    .iv-scroll{overflow-x:auto;border:1px solid #eef1f6;border-radius:10px}
+    .iv-filter{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--text-muted)}
+    .iv-filter select{padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:#fff;color:var(--text-primary);min-width:130px}
+    .iv-count{margin-left:auto;font-size:12px;color:var(--text-muted);padding-bottom:9px}
+    .iv-export{border:none;border-radius:8px;padding:8px 14px;background:var(--primary);color:#fff;font-weight:600;font-size:13px;cursor:pointer}
+    .iv-summary{font-size:13px;color:var(--text-secondary);margin-bottom:10px}
+    .iv-scroll{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
     .iv-table{width:100%;border-collapse:collapse;font-size:13px}
-    .iv-table th{background:#f1f5f9;color:#475569;text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
-    .iv-table td{padding:9px 12px;border-bottom:1px solid #eef1f6;vertical-align:top}
+    .iv-table th{background:var(--bg-hover);color:var(--text-secondary);text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
+    .iv-table td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
     .iv-table tr:last-child td{border-bottom:none}
     .iv-table tr.iv-row{cursor:pointer}
-    .iv-table tr.iv-row:hover td{background:#f8fafc}
-    .iv-sub{color:#94a3b8;font-size:12px;margin-top:1px}
-    .iv-empty{color:#94a3b8;text-align:center;padding:18px}
-    .iv-hint{font-size:12px;color:#94a3b8;margin:-4px 0 10px}
+    .iv-table tr.iv-row:hover td{background:var(--bg-light)}
+    .iv-sub{color:var(--text-light);font-size:12px;margin-top:1px}
+    .iv-empty{color:var(--text-light);text-align:center;padding:18px}
+    .iv-hint{font-size:12px;color:var(--text-light);margin:-4px 0 10px}
     .iv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:18px}
-    .iv-cell{background:#f8fafc;border-radius:10px;padding:10px 12px}
-    .iv-cell small{display:block;color:#64748b;font-size:11px;margin-bottom:2px}
-    .iv-cell p{margin:0;font-size:14px;color:#0f172a;word-break:break-word}
-    .iv-title{font-size:13px;font-weight:600;color:#334155;margin:4px 0 8px}
-    .iv-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:170px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;padding:10px;margin-bottom:16px}
-    .iv-chip{background:#f1f5f9;border-radius:6px;padding:2px 9px;font-size:12px;color:#475569}
+    .iv-cell{background:var(--bg-light);border-radius:10px;padding:10px 12px}
+    .iv-cell small{display:block;color:var(--text-muted);font-size:11px;margin-bottom:2px}
+    .iv-cell p{margin:0;font-size:14px;color:var(--text-primary);word-break:break-word}
+    .iv-title{font-size:13px;font-weight:600;color:var(--text-secondary);margin:4px 0 8px}
+    .iv-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:170px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:16px}
+    .iv-chip{background:var(--bg-hover);border-radius:6px;padding:2px 9px;font-size:12px;color:var(--text-secondary)}
     .iv-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}`;
   document.head.appendChild(st);
 }
@@ -276,8 +282,10 @@ function invCardView(cfg) {
   };
 
   content.querySelectorAll('.iv-filter select').forEach(s => s.addEventListener('change', () => { sel[s.dataset.key] = s.value; paint(); }));
+  a4Twin(content.querySelector('.iv-export'), cfg.title || cfg.file);
   content.querySelector('.iv-export').addEventListener('click', () => {
     if (!shown.length) { alert('Nothing to export for the selected filters.'); return; }
+    if (a4Intercept(cfg.csvHeads, shown.map(cfg.csvRow), cfg.file)) return;
     const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = [cfg.csvHeads, ...shown.map(cfg.csvRow)].map(r => r.map(q).join(','));
     const tag = Object.values(sel).filter(Boolean).join('_');
@@ -372,7 +380,7 @@ function openCardDetailModal(cardType) {
     const holo = p => (typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length);
     const stBadge = p => {
       const st = statusFromHologram(p);
-      const color = st === 'Active' ? '#16a34a' : (st === 'Partial' ? '#b45309' : '#64748b');
+      const color = st === 'Active' ? 'var(--success-dark)' : (st === 'Partial' ? 'var(--warning-dark)' : 'var(--text-muted)');
       return `<span style="color:${color};font-weight:600;">${st === 'Active' ? 'Active' : 'Pending'}${st === 'Partial' ? ' (partial)' : ''}</span>`;
     };
     const warr = p => p.warranty_status ? `<span class="stock ${p.warranty_status === 'over warranty' ? 'low' : 'high'}">${p.warranty_status === 'over warranty' ? 'Over' : 'Under'} Warranty</span>` : '—';
@@ -490,9 +498,9 @@ function wireCategoryFilter() {
   if (!buttons.length) return;
 
   const paint = (btn, active) => {
-    btn.style.border = active ? '1px solid #1665ff' : '1px solid #e2e8f0';
-    btn.style.background = active ? '#eaf1ff' : '#f8fafc';
-    btn.style.color = active ? '#1665ff' : '#334155';
+    btn.style.border = active ? '1px solid var(--primary)' : '1px solid var(--border)';
+    btn.style.background = active ? 'var(--info-bg)' : 'var(--bg-light)';
+    btn.style.color = active ? 'var(--primary)' : 'var(--text-secondary)';
     btn.style.borderRadius = '8px';
     btn.style.padding = '8px 14px';
     btn.style.cursor = 'pointer';
@@ -558,13 +566,13 @@ function renderSearchSuggestions(input, suggestBox) {
 
   suggestBox.innerHTML = matches.map(m => `
     <div class="search-suggestion-item" data-value="${(m.name || m.id).replace(/"/g, '&quot;')}"
-      style="padding:9px 12px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #f1f5f9;">
+      style="padding:9px 12px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--bg-hover);">
       <span>${m.name || '(no name)'}</span>
-      <span style="color:#94a3b8;">${m.id || ''}</span>
+      <span style="color:var(--text-light);">${m.id || ''}</span>
     </div>`).join('');
 
   suggestBox.querySelectorAll('.search-suggestion-item').forEach(item => {
-    item.addEventListener('mouseenter', () => item.style.background = '#f8fafc');
+    item.addEventListener('mouseenter', () => item.style.background = 'var(--bg-light)');
     item.addEventListener('mouseleave', () => item.style.background = '');
     item.addEventListener('click', () => {
       input.value = item.dataset.value;
@@ -584,8 +592,8 @@ function renderSearchSuggestions(input, suggestBox) {
 // action which re-fetches data (delete, edit save, add, etc.) re-renders the
 // SAME filtered view the user was looking at instead of silently snapping
 // back to the full unfiltered product list.
-function getFilteredInventory() {
-  let list = invState.activeCategory
+function getFilteredInventory(ignoreCategory) {
+  let list = invState.activeCategory && !ignoreCategory
     ? invState.products.filter(p => (p.product_type || 'product') === invState.activeCategory)
     : invState.products;
 
@@ -733,12 +741,12 @@ function columnsForCategory(category) {
     const isPart = p.product_type === 'spare_parts' || p.product_type === 'service_parts';
     if (isPart) {
       const belongs = p.parent_product_name
-        ? `<br><small style="color:#94a3b8;">Belongs to: ${escapeHtmlInv(p.parent_product_name)}</small>`
+        ? `<br><small style="color:var(--text-light);">Belongs to: ${escapeHtmlInv(p.parent_product_name)}</small>`
         : '';
       return `${escapeHtmlInv(p.product_name ?? '')}${belongs}`;
     }
     const meta = [p.product_id, p.model_no].filter(Boolean).join(' · ');
-    return `${escapeHtmlInv(p.product_name ?? '')}${meta ? `<br><small style="color:#94a3b8;">${meta}</small>` : ''}`;
+    return `${escapeHtmlInv(p.product_name ?? '')}${meta ? `<br><small style="color:var(--text-light);">${meta}</small>` : ''}`;
   };
   // shipment stores warranty length in months (e.g. "12 months"); the backend
   // adds that to the received_date and stores it as warranty_until. Here we
@@ -768,7 +776,7 @@ function columnsForCategory(category) {
   const addedByCell = p => {
     const addedBy = p.created_by ? escapeHtmlInv(p.created_by) : '—';
     const updatedBy = p.updated_by && p.updated_by !== p.created_by ? escapeHtmlInv(p.updated_by) : '';
-    return `${addedBy}${updatedBy ? `<br><small style="color:#94a3b8;">Updated by ${updatedBy}</small>` : ''}`;
+    return `${addedBy}${updatedBy ? `<br><small style="color:var(--text-light);">Updated by ${updatedBy}</small>` : ''}`;
   };
 
   switch (category) {
@@ -982,8 +990,9 @@ const EXPORT_CATEGORIES = [
 let exportCategory = 'all';
 
 function exportRowsForCategory() {
-  if (exportCategory === 'all') return invState.products;
-  return invState.products.filter(p => (p.product_type || 'product') === exportCategory);
+  const base = getFilteredInventory(true);
+  if (exportCategory === 'all') return base;
+  return base.filter(p => (p.product_type || 'product') === exportCategory);
 }
 
 function exportCategoryLabel() {
@@ -1000,19 +1009,19 @@ function openExportCategoryMenu(anchorBtn) {
 
   const menu = document.createElement('div');
   menu.id = 'exportCategoryMenu';
-  menu.style.cssText = 'position:absolute;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1300;min-width:220px;';
+  menu.style.cssText = 'position:absolute;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1300;min-width:220px;';
   const rect = anchorBtn.getBoundingClientRect();
   menu.style.top = `${rect.bottom + window.scrollY + 6}px`;
   menu.style.left = `${rect.left + window.scrollX}px`;
-  menu.innerHTML = `<div style="padding:6px 12px;font-size:12px;color:#64748b;">Export which category?</div>` +
+  menu.innerHTML = `<div style="padding:6px 12px;font-size:12px;color:var(--text-muted);">Export which category?</div><div style="padding:0 12px 6px;font-size:11px;color:var(--text-light);">Search and filters applied on this page are included.</div>` +
     EXPORT_CATEGORIES.map(c => `
-    <button type="button" class="export-cat-opt" data-cat="${c.value}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
-      <i class="fa-solid ${c.icon}" style="width:16px;"></i>&nbsp; ${c.label}
+    <button type="button" class="export-cat-opt" data-cat="${c.value}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:var(--text-primary);">
+      <i class="fa-solid ${c.icon}" style="width:16px;"></i>&nbsp; ${c.label}${c.value === invState.activeCategory ? ' (current view)' : ''}
     </button>`).join('');
   document.body.appendChild(menu);
 
   menu.querySelectorAll('.export-cat-opt').forEach(btn => {
-    btn.addEventListener('mouseenter', () => btn.style.background = '#f1f5f9');
+    btn.addEventListener('mouseenter', () => btn.style.background = 'var(--bg-hover)');
     btn.addEventListener('mouseleave', () => btn.style.background = 'none');
     btn.addEventListener('click', () => {
       exportCategory = btn.dataset.cat;
@@ -1041,24 +1050,24 @@ function openExportTypeMenu(anchorBtn) {
 
   menu = document.createElement('div');
   menu.id = 'exportTypeMenu';
-  menu.style.cssText = 'position:absolute;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1300;min-width:240px;';
+  menu.style.cssText = 'position:absolute;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1300;min-width:240px;';
   const rect = anchorBtn.getBoundingClientRect();
   menu.style.top = `${rect.bottom + window.scrollY + 6}px`;
   menu.style.left = `${rect.left + window.scrollX}px`;
   menu.innerHTML = `
-    <button type="button" class="export-type-opt" data-mode="detailed" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
+    <button type="button" class="export-type-opt" data-mode="detailed" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:var(--text-primary);">
       <i class="fa-solid fa-list" style="width:16px;"></i>&nbsp; Detailed (serial number wise)
     </button>
-    <button type="button" class="export-type-opt" data-mode="summary" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
+    <button type="button" class="export-type-opt" data-mode="summary" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:var(--text-primary);">
       <i class="fa-solid fa-layer-group" style="width:16px;"></i>&nbsp; Summary (product + quantity)
     </button>
-    <button type="button" class="export-type-opt" data-mode="single" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:#1e293b;">
+    <button type="button" class="export-type-opt" data-mode="single" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:6px;font-size:13px;color:var(--text-primary);">
       <i class="fa-solid fa-magnifying-glass" style="width:16px;"></i>&nbsp; Specific Product (choose one)
     </button>`;
   document.body.appendChild(menu);
 
   menu.querySelectorAll('.export-type-opt').forEach(btn => {
-    btn.addEventListener('mouseenter', () => btn.style.background = '#f1f5f9');
+    btn.addEventListener('mouseenter', () => btn.style.background = 'var(--bg-hover)');
     btn.addEventListener('mouseleave', () => btn.style.background = 'none');
     btn.addEventListener('click', () => {
       menu.remove();
@@ -1142,7 +1151,7 @@ function openSpecificProductPicker() {
         <h3>Export Specific Product</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <input id="singleProductSearch" placeholder="Search by product name, ID or model no." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+      <input id="singleProductSearch" placeholder="Search by product name, ID or model no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;">
       <div id="singleProductList" style="margin-top:10px;max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
     </div>`;
   document.body.appendChild(modal);
@@ -1161,19 +1170,19 @@ function openSpecificProductPicker() {
       (p.model_no || '').toLowerCase().includes(q));
 
     if (!rows.length) {
-      listBox.innerHTML = '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:10px;">No matching product.</p>';
+      listBox.innerHTML = '<p style="color:var(--text-light);font-size:13px;text-align:center;padding:10px;">No matching product.</p>';
       return;
     }
 
     listBox.innerHTML = rows.map((p, i) => `
-      <button type="button" class="single-product-opt" data-idx="${i}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:#f8fafc;cursor:pointer;border-radius:8px;font-size:13px;color:#1e293b;">
+      <button type="button" class="single-product-opt" data-idx="${i}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:var(--bg-light);cursor:pointer;border-radius:8px;font-size:13px;color:var(--text-primary);">
         <strong>${escapeHtmlInv(p.product_name || '')}</strong><br>
-        <small style="color:#64748b;">ID: ${escapeHtmlInv(p.product_id || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}</small>
+        <small style="color:var(--text-muted);">ID: ${escapeHtmlInv(p.product_id || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}</small>
       </button>`).join('');
 
     listBox.querySelectorAll('.single-product-opt').forEach(btn => {
-      btn.addEventListener('mouseenter', () => btn.style.background = '#eef2ff');
-      btn.addEventListener('mouseleave', () => btn.style.background = '#f8fafc');
+      btn.addEventListener('mouseenter', () => btn.style.background = 'var(--info-bg)');
+      btn.addEventListener('mouseleave', () => btn.style.background = 'var(--bg-light)');
       btn.addEventListener('click', () => {
         modal.remove();
         exportSingleProductCSV(rows[Number(btn.dataset.idx)]);
@@ -1211,6 +1220,7 @@ function csvEscape(val) {
 }
 
 function downloadCSV(header, rows, filename) {
+  if (a4Intercept(header, rows, filename)) return;
   const csv = [header, ...rows].map(r => r.map(csvEscape).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -1234,25 +1244,27 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
         <h3>${title}</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 12px;">${getRows().length} record(s) match the filters currently applied on this page. The options below narrow it further.</p>
       <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
         ${statusOptions ? `
-        <label style="font-size:13px;color:#64748b;">Status</label>
-        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <label style="font-size:13px;color:var(--text-muted);">Status</label>
+        <select name="status" style="padding:10px;border:1px solid var(--border);border-radius:8px;">
           <option value="">All Statuses</option>
           ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
         </select>` : ''}
         ${dateField ? `
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} From</label>
         <input type="date" name="dateFrom">
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} To</label>
         <input type="date" name="dateTo">` : ''}
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Export</button>
         </div>
       </form>
     </div>`;
 
+  a4WizardPrint(modal, title);
   modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
@@ -1484,18 +1496,18 @@ function renderHologramUI() {
   const count = holograms.length;
 
   list.innerHTML = holograms.map(h => `
-    <span data-hologram="${h}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;background:#eef3fb;color:#005ca9;">
+    <span data-hologram="${h}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;background:var(--info-bg);color:var(--primary-dark);">
       ${h}
       <button type="button" class="hologram-remove-btn" data-hologram="${h}" style="border:none;background:none;cursor:pointer;color:inherit;font-weight:700;">×</button>
-    </span>`).join('') || '<span style="font-size:12px;color:#94a3b8;">No hologram numbers on file.</span>';
+    </span>`).join('') || '<span style="font-size:12px;color:var(--text-light);">No hologram numbers on file.</span>';
 
   list.querySelectorAll('.hologram-remove-btn').forEach(btn => {
     btn.addEventListener('click', () => submitHologramChange({ remove: [btn.dataset.hologram] }));
   });
 
-  let status = 'Pending', color = '#64748b';
-  if (count > 0 && qty && count >= qty) { status = 'Active'; color = '#16a34a'; }
-  else if (count > 0) { status = 'Partial'; color = '#b45309'; }
+  let status = 'Pending', color = 'var(--text-muted)';
+  if (count > 0 && qty && count >= qty) { status = 'Active'; color = 'var(--success-dark)'; }
+  else if (count > 0) { status = 'Partial'; color = 'var(--warning-dark)'; }
   statusMsg.textContent = `${status} — ${count} of ${qty} unit(s) have a hologram number on file${count < qty ? ` (${qty - count} remaining)` : ''}.`;
   statusMsg.style.color = color;
 }
@@ -1582,9 +1594,9 @@ function wireHologramControls() {
     if (!file) return;
     parseSerialsFromFile(file, (holograms) => {
       preview.textContent = `${holograms.length} hologram number(s) read from file — adding...`;
-      preview.style.color = '#0369a1';
+      preview.style.color = 'var(--primary-dark)';
       submitHologramChange({ add: holograms });
-    }, (msg) => { preview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; }, { lowercase: false });
+    }, (msg) => { preview.innerHTML = `<span style="color:var(--danger-dark);">${msg}</span>`; }, { lowercase: false });
   });
 
   const overflowClose = document.getElementById('hologramOverflowCloseBtn');
@@ -1624,7 +1636,7 @@ function wireEditSerialFileUpload() {
       const newInputs = document.querySelectorAll('#newSerialsBox .new-serial-input');
       newInputs.forEach((inp, i) => { inp.value = serials[i] || ''; });
       preview.textContent = `${serials.length} serial number(s) loaded from file.`;
-    }, (msg) => { preview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; });
+    }, (msg) => { preview.innerHTML = `<span style="color:var(--danger-dark);">${msg}</span>`; });
   });
 }
 
@@ -1668,8 +1680,8 @@ function renderEditSerialsUI() {
   currentList.innerHTML = invState.editSerials.map(s => {
     const removed = invState.editRemovedSerials.includes(s);
     const faulty = invState.editFaultySerials.includes(s);
-    const bg = removed ? '#fee2e2' : (faulty ? '#fff4e5' : '#eef3fb');
-    const color = removed ? '#991b1b' : (faulty ? '#b45309' : '#005ca9');
+    const bg = removed ? 'var(--danger-bg)' : (faulty ? 'var(--warning-bg)' : 'var(--info-bg)');
+    const color = removed ? 'var(--danger-dark)' : (faulty ? 'var(--warning-dark)' : 'var(--primary-dark)');
     const icon = removed ? '↺' : (faulty ? '✕' : '×');
     const title = removed
       ? 'Marked for removal — click to restore to normal'
@@ -1681,7 +1693,7 @@ function renderEditSerialsUI() {
         ${icon}
       </button>
     </span>`;
-  }).join('') || '<span style="font-size:12px;color:#94a3b8;">No serial numbers on file.</span>';
+  }).join('') || '<span style="font-size:12px;color:var(--text-light);">No serial numbers on file.</span>';
 
   currentList.querySelectorAll('.serial-toggle-btn').forEach(btn => {
     btn.addEventListener('click', () => cycleEditSerialState(btn.dataset.serial));
@@ -1696,7 +1708,7 @@ function renderEditSerialsUI() {
   // without needing to add/remove serials to match it
   if (serialOptional) {
     msgBox.textContent = 'Serial numbers are optional for this product type.';
-    msgBox.style.color = '#64748b';
+    msgBox.style.color = 'var(--text-muted)';
     newBox.innerHTML = '';
     if (fileBtn) fileBtn.style.display = 'none';
     return;
@@ -1710,7 +1722,7 @@ function renderEditSerialsUI() {
 
   if (diff > 0) {
     msgBox.textContent = `Quantity increased — add ${diff} new serial number(s) below, or upload them from a file.`;
-    msgBox.style.color = '#005ca9';
+    msgBox.style.color = 'var(--primary-dark)';
     const existingInputs = newBox.querySelectorAll('input');
     const existingValues = [...existingInputs].map(i => i.value);
     newBox.innerHTML = '';
@@ -1719,16 +1731,16 @@ function renderEditSerialsUI() {
       input.className = 'new-serial-input';
       input.placeholder = `New serial number #${i + 1}`;
       input.value = existingValues[i] || '';
-      input.style.cssText = 'padding:8px 10px;border:1px solid #dbe5f1;border-radius:8px;';
+      input.style.cssText = 'padding:8px 10px;border:1px solid var(--border);border-radius:8px;';
       newBox.appendChild(input);
     }
   } else if (diff < 0) {
     msgBox.textContent = `Quantity decreased — mark ${-diff} serial number(s) above as faulty or for removal (click a chip to cycle through: faulty → removal → normal).`;
-    msgBox.style.color = '#b45309';
+    msgBox.style.color = 'var(--warning-dark)';
     newBox.innerHTML = '';
   } else {
     msgBox.textContent = 'Quantity matches the serial numbers on file.';
-    msgBox.style.color = '#16a34a';
+    msgBox.style.color = 'var(--success-dark)';
     newBox.innerHTML = '';
   }
 }
@@ -1805,7 +1817,7 @@ async function loadSupplierCompanies() {
 
 // ---------- payment block (Paid / Partial / Credit + credit days) shared by the lot and part forms ----------
 function paymentBlockHTML(selId, hintId, required, emptyLabel) {
-  const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
+  const inp = 'padding:10px;border:1px solid var(--border);border-radius:8px;';
   return `
       <select name="payment_mode" id="${selId}" ${required ? 'required' : ''} style="${inp}">
         <option value="">${emptyLabel}</option>
@@ -1813,13 +1825,13 @@ function paymentBlockHTML(selId, hintId, required, emptyLabel) {
         <option value="partial">Partial (part now, rest later)</option>
         <option value="credit">Credit (pay later)</option>
       </select>
-      <div class="payExtra" style="display:none;flex-direction:column;gap:8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px;">
+      <div class="payExtra" style="display:none;flex-direction:column;gap:8px;background:var(--warning-bg);border:1px solid var(--warning-bg);border-radius:10px;padding:10px;">
         <div class="payPaidWrap" style="display:none;flex-direction:column;gap:4px;">
-          <label style="font-size:12px;color:#9a3412;font-weight:600;">Amount paid now (₹)</label>
+          <label style="font-size:12px;color:var(--warning-dark);font-weight:600;">Amount paid now (₹)</label>
           <input name="paid_amount" type="number" min="0" step="any" placeholder="e.g. half of the total" style="${inp}">
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;">
-          <label class="payDaysLabel" style="font-size:12px;color:#9a3412;font-weight:600;">In how many days will the payment be made?</label>
+          <label class="payDaysLabel" style="font-size:12px;color:var(--warning-dark);font-weight:600;">In how many days will the payment be made?</label>
           <input name="credit_days" type="number" min="1" max="365" step="1" placeholder="Credit time (days)" style="${inp}">
         </div>
       </div>
@@ -1885,17 +1897,17 @@ function wirePaymentBlock(form, selId, hintId) {
     const dueTxt = due ? `, due on ${due}` : '';
     hint.style.display = 'block';
     if (!sup) {
-      hint.style.cssText += 'background:#fef3c7;color:#92400e;';
+      hint.style.cssText += 'background:var(--warning-bg);color:var(--warning-dark);';
       hint.textContent = 'Select a company above so this purchase can be recorded against it.';
     } else if (mode === 'credit') {
-      hint.style.cssText += 'background:#fee2e2;color:#991b1b;';
+      hint.style.cssText += 'background:var(--danger-bg);color:var(--danger-dark);';
       hint.textContent = `Credit: ${fmt(total)} will be added to "${sup}" under Credit (Users → Companies) and shown in its history${dueTxt}.`;
     } else if (mode === 'partial') {
       const paid = Number(form.querySelector('[name="paid_amount"]').value) || 0;
-      hint.style.cssText += 'background:#ffedd5;color:#9a3412;';
+      hint.style.cssText += 'background:var(--warning-bg);color:var(--warning-dark);';
       hint.textContent = `Partial: ${fmt(paid)} paid now, ${fmt(Math.max(total - paid, 0))} of ${fmt(total)} goes on Credit for "${sup}"${dueTxt}.`;
     } else {
-      hint.style.cssText += 'background:#dcfce7;color:#166534;';
+      hint.style.cssText += 'background:var(--success-bg);color:var(--success-dark);';
       hint.textContent = `Paid: ${fmt(total)} is noted in "${sup}" history only — nothing added to Credit.`;
     }
   };
@@ -1909,16 +1921,16 @@ function wirePaymentBlock(form, selId, hintId) {
 }
 
 function supplierBlockHTML(optional) {
-  const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;';
+  const inp = 'padding:10px;border:1px solid var(--border);border-radius:8px;';
   return `
     <div id="supplierBlock" style="display:flex;flex-direction:column;gap:8px;">
-      <label style="font-size:12px;color:#64748b;margin-bottom:-4px;">Supplier / Company${optional ? ' (optional)' : ''}</label>
+      <label style="font-size:12px;color:var(--text-muted);margin-bottom:-4px;">Supplier / Company${optional ? ' (optional)' : ''}</label>
       <select name="supplier_pick" id="supplierPick" ${optional ? '' : 'required'} style="${inp}">
         <option value="">Select company…</option>
         <option value="__manual__">＋ Type company details manually</option>
       </select>
-      <div id="supplierExisting" style="display:none;font-size:12px;color:#475569;background:#f1f5f9;border-radius:8px;padding:8px 10px;line-height:1.6;"></div>
-      <div id="supplierManual" style="display:none;flex-direction:column;gap:8px;border:1px dashed #94a3b8;border-radius:8px;padding:10px;">
+      <div id="supplierExisting" style="display:none;font-size:12px;color:var(--text-secondary);background:var(--bg-hover);border-radius:8px;padding:8px 10px;line-height:1.6;"></div>
+      <div id="supplierManual" style="display:none;flex-direction:column;gap:8px;border:1px dashed var(--text-light);border-radius:8px;padding:10px;">
         <input name="supplier_name" placeholder="Company Name" style="${inp}">
         <input name="supplier_address" placeholder="Company Address" style="${inp}">
         <input name="supplier_gst" placeholder="GST Number" style="${inp}">
@@ -2007,11 +2019,11 @@ function renderAddTypeStep() {
   const body = addModalBody();
   addWizTitle('Add to Inventory');
   body.innerHTML = `
-    <p style="color:#64748b;margin-bottom:14px;">What are you adding?</p>
+    <p style="color:var(--text-muted);margin-bottom:14px;">What are you adding?</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       ${ADD_TYPES.map(t => `
-        <button type="button" class="add-type-btn" data-type="${t.type}" style="padding:16px 10px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;cursor:pointer;">
-          <i class="fa-solid ${t.icon}"></i><br><strong>${t.label}</strong><br><small style="color:#94a3b8;">${t.hint}</small>
+        <button type="button" class="add-type-btn" data-type="${t.type}" style="padding:16px 10px;border-radius:10px;border:1px solid var(--border);background:var(--bg-light);cursor:pointer;">
+          <i class="fa-solid ${t.icon}"></i><br><strong>${t.label}</strong><br><small style="color:var(--text-light);">${t.hint}</small>
         </button>`).join('')}
     </div>`;
   body.querySelectorAll('.add-type-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -2027,7 +2039,7 @@ function renderPartDetailsStep() {
   const body = addModalBody();
   const isService = addWiz.productType === 'service_parts';
   addWizTitle(`Add ${productTypeLabel(addWiz.productType)}`);
-  const lbl = t => `<label style="font-size:12px;color:#64748b;margin-bottom:-6px;">${t}</label>`;
+  const lbl = t => `<label style="font-size:12px;color:var(--text-muted);margin-bottom:-6px;">${t}</label>`;
   body.innerHTML = `
     <form id="partForm" style="display:flex;flex-direction:column;gap:10px;">
       <input name="parent_product_name" placeholder="Product Name (this part belongs to)" required>
@@ -2050,8 +2062,8 @@ function renderPartDetailsStep() {
       ${lbl('Payment — how was this purchase paid?')}
       ${paymentBlockHTML('partPaymentMode', 'partPaymentHint', true, 'Select payment type')}
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="backPart" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save</button>
+        <button type="button" id="backPart" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:var(--success-dark);color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>`;
   document.getElementById('backPart').addEventListener('click', renderAddTypeStep);
@@ -2112,7 +2124,7 @@ function renderLotDetailsStep() {
   addWizTitle(`Add ${productTypeLabel(addWiz.productType)}`);
   const isFaulty = addWiz.productType === 'damaged';
   const req = isFaulty ? '' : 'required';   // supplier / price details are optional for faulty units
-  const lbl = t => `<label style="font-size:12px;color:#64748b;margin-bottom:-6px;">${t}</label>`;
+  const lbl = t => `<label style="font-size:12px;color:var(--text-muted);margin-bottom:-6px;">${t}</label>`;
   body.innerHTML = `
     <form id="lotForm" style="display:flex;flex-direction:column;gap:10px;">
       <input type="hidden" name="product_type" id="lotProductType" value="${addWiz.productType}">
@@ -2122,20 +2134,20 @@ function renderLotDetailsStep() {
       <input name="lot_no" placeholder="Lot No." ${req}>
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
       <input name="first_serial" id="firstSerialInput" placeholder="Serial No. (first unit)">
-      <div id="serialOptionalMsg" style="display:none;font-size:12px;color:#64748b;">Serial numbers are optional for this type — leave blank to skip, or add them below.</div>
-      <div id="fileSerialBox" style="border:1px dashed #94a3b8;border-radius:8px;padding:8px;">
-        <label style="font-size:12px;color:#64748b;">Or add by file — upload an Excel/CSV of serial numbers</label>
+      <div id="serialOptionalMsg" style="display:none;font-size:12px;color:var(--text-muted);">Serial numbers are optional for this type — leave blank to skip, or add them below.</div>
+      <div id="fileSerialBox" style="border:1px dashed var(--text-light);border-radius:8px;padding:8px;">
+        <label style="font-size:12px;color:var(--text-muted);">Or add by file — upload an Excel/CSV of serial numbers</label>
         <input type="file" id="serialFileInput" accept=".xlsx,.xls,.csv" style="width:100%;padding:6px 0;font-size:12px;">
-        <div id="fileSerialPreview" style="font-size:12px;color:#0369a1;margin-top:4px;"></div>
+        <div id="fileSerialPreview" style="font-size:12px;color:var(--primary-dark);margin-top:4px;"></div>
       </div>
       <div id="serialModeBox" style="display:none;">
-        <label style="font-size:13px;color:#64748b;">Remaining serial numbers</label>
+        <label style="font-size:13px;color:var(--text-muted);">Remaining serial numbers</label>
         <div style="display:flex;gap:14px;margin:6px 0;font-size:13px;">
           <label><input type="radio" name="serial_mode" value="auto" checked> Auto-generate</label>
           <label><input type="radio" name="serial_mode" value="manual"> Enter manually</label>
         </div>
         <div id="manualSerialsBox" style="display:none;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
-        <div id="autoPreviewBox" style="font-size:12px;color:#64748b;"></div>
+        <div id="autoPreviewBox" style="font-size:12px;color:var(--text-muted);"></div>
       </div>
       ${supplierBlockHTML(isFaulty)}
       ${lbl(isFaulty ? 'Received Date' : 'Receiving Date')}
@@ -2148,8 +2160,8 @@ function renderLotDetailsStep() {
       <input name="warranty_until" type="date">
       <textarea name="reason" rows="2" placeholder="Reason of damage" required></textarea>` : ''}
       <div style="display:flex;justify-content:space-between;margin-top:10px;">
-        <button type="button" id="backAdd3" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Save Product</button>
+        <button type="button" id="backAdd3" style="padding:10px 16px;border-radius:8px;border:none;background:var(--border);cursor:pointer;">Back</button>
+        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:var(--success-dark);color:#fff;cursor:pointer;">Save Product</button>
       </div>
     </form>`;
 
@@ -2193,7 +2205,7 @@ function renderLotDetailsStep() {
       firstSerialInput.readOnly = true;
       serialModeBox.style.display = 'none';
       fileSerialPreview.innerHTML = `${serials.length} serial number(s) loaded from file. ` +
-        `<button type="button" id="clearFileSerials" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:12px;">Clear</button>`;
+        `<button type="button" id="clearFileSerials" style="border:none;background:none;color:var(--danger-dark);cursor:pointer;font-size:12px;">Clear</button>`;
       document.getElementById('clearFileSerials').addEventListener('click', () => {
         usingFileSerials = false;
         fileSerials = [];
@@ -2204,7 +2216,7 @@ function renderLotDetailsStep() {
         fileSerialPreview.innerHTML = '';
         refreshSerialUI();
       });
-    }, (msg) => { fileSerialPreview.innerHTML = `<span style="color:#b91c1c;">${msg}</span>`; });
+    }, (msg) => { fileSerialPreview.innerHTML = `<span style="color:var(--danger-dark);">${msg}</span>`; });
   });
 
   function generateAutoSerials(firstSerial, quantity) {
@@ -2229,7 +2241,7 @@ function renderLotDetailsStep() {
       const inp = document.createElement('input');
       inp.placeholder = `Serial No. ${i}`;
       inp.className = 'manualSerialInput';
-      inp.style.cssText = 'width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:6px;';
+      inp.style.cssText = 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;';
       manualBox.appendChild(inp);
     }
   }
@@ -2242,7 +2254,7 @@ function renderLotDetailsStep() {
     autoPreviewBox.innerHTML = `<div style="margin-bottom:6px;">Will generate ${remaining.length} unit(s) — click × to drop one:</div>` +
       autoSerials.map(s => {
         const removed = autoRemoved.has(s);
-        return `<span data-s="${s}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px;border-radius:14px;font-size:11px;${removed ? 'background:#fee2e2;color:#b91c1c;text-decoration:line-through;' : 'background:#e0f2fe;color:#0369a1;'}">
+        return `<span data-s="${s}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;margin:2px;border-radius:14px;font-size:11px;${removed ? 'background:var(--danger-bg);color:var(--danger-dark);text-decoration:line-through;' : 'background:var(--info-bg);color:var(--primary-dark);'}">
           ${s}<button type="button" class="auto-serial-toggle" data-s="${s}" style="border:none;background:none;cursor:pointer;font-weight:700;color:inherit;">${removed ? '↺' : '×'}</button></span>`;
       }).join('');
     autoPreviewBox.querySelectorAll('.auto-serial-toggle').forEach(btn => btn.addEventListener('click', () => {

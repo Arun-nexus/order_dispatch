@@ -1,3 +1,9 @@
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
 const reportState = { orders: [], inventory: [], services: [], accounts: [], stockType: 'product' };
 const reportCharts = {};
 
@@ -240,4 +246,30 @@ function wireModalButtons() {
     btn.addEventListener('click', () => {
       alert('Export modal not implemented yet.');
     }));
+  document.querySelectorAll('.export').forEach(btn => a4Ready(() => A4Print.attachNextTo(btn, reportPrintOpts)));
+}
+
+// ---------- Print: summary of whatever KPI cards / monthly figures are currently shown ----------
+function reportPrintOpts() {
+  const rows = [];
+  document.querySelectorAll('.cards .card').forEach(c => {
+    if (c.style.display === 'none') return;
+    rows.push([c.querySelector('span')?.textContent.trim() || '', c.querySelector('h2')?.textContent.trim() || '']);
+  });
+  document.querySelectorAll('.analytics .mini-card').forEach(c => {
+    if (c.style.display === 'none') return;
+    rows.push([c.querySelector('span, p')?.textContent.trim() || '', c.querySelector('h2')?.textContent.trim() || '']);
+  });
+  const inputs = document.querySelectorAll('.filter-section input[type="date"]');
+  const from = inputs[0]?.value || '', to = inputs[1]?.value || '';
+  const orders = reportState.orders.filter(o => inDateRange(o.order_date, from, to));
+  const rev = groupByMonth(orders, 'order_date', o => Number(o.total_mrp) || 0);
+  const cnt = groupByMonth(orders, 'order_date', () => 1);
+  rev.labels.forEach((m, i) => rows.push([`Revenue - ${m}`, `\u20b9${rev.values[i].toLocaleString('en-IN')}`], [`Orders - ${m}`, cnt.values[i]]));
+  return {
+    title: document.querySelector('.filter-section select')?.value || 'Reports Summary',
+    subtitle: from || to ? `${from || '...'} to ${to || '...'}` : 'All dates',
+    head: ['Metric', 'Value'],
+    rows
+  };
 }

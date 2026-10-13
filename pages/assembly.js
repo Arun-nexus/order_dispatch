@@ -1,3 +1,9 @@
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
 // =========================================================
 // assembly.js
 // Powers pages/assembly.html — cards, table/filtering, and the
@@ -257,6 +263,7 @@ function asmCsvCell(v) {
   return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
 }
 function asmDownloadCsv(head, rows, fileBase) {
+  if (a4Intercept(head, rows, fileBase)) return;
   const csv = '﻿' + [head, ...rows].map(r => r.map(asmCsvCell).join(',')).join('\r\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -333,6 +340,7 @@ function openAssemblyCardDetailModal(type) {
     content.querySelectorAll('.as-bar select,.as-bar input').forEach(el => el.value = '');
     asmPaint();
   });
+  a4Twin(content.querySelector('#asF_export'), title);
   content.querySelector('#asF_export').addEventListener('click', () => {
     const name = title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
     (isParts ? asmExportParts : asmExportAssemblies)(asmFiltered(), name);
@@ -1224,6 +1232,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('assemblySearch').addEventListener('input', renderTable);
   asmEnsureStyles();
   document.querySelector('.top-actions .export')?.addEventListener('click', () => asmExportAssemblies(asmTableRows(), 'assemblies'));
+  a4Twin(document.querySelector('.top-actions .export'), 'Assemblies');
   wireAssemblyCardClicks();
   loadAvailableParts();
   loadAssemblies();

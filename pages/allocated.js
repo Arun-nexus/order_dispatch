@@ -1,3 +1,9 @@
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -498,6 +504,7 @@ function cvPlain(html) {
 }
 
 function cvDownloadCsv(head, rows, fileBase) {
+  if (a4Intercept(head, rows, fileBase)) return;
   const cell = v => {
     const t = String(v ?? '');
     return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
@@ -660,6 +667,7 @@ function openAllocCardDetailModal(type) {
     box.querySelectorAll('[data-f]').forEach(el => { el.value = ''; });
     allocCvPaint();
   });
+  a4Twin(box.querySelector('#cvExport'), titles[type]);
   box.querySelector('#cvExport').addEventListener('click', () => {
     const list = allocCvFiltered();
     cvDownloadCsv(allocCvHead(), list.map(x => allocCvCells(x).map(cvPlain)), titles[type].toLowerCase().replace(/[^a-z0-9]+/g, '_'));
@@ -1239,19 +1247,19 @@ function exportAllocationsCSV() {
     personOptions: uniqueSalesPersonNames(),
     personField: 'sales_person.name',
     withTypeFilter: true,
-    getRows: () => allocState.allocations,
+    getRows: getFilteredAllocations,
     onConfirm: (rows) => {
       const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Created By', 'Returned By', 'Returned On', 'Status'];
       const csvRows = rows.map(a => {
         const isSpare = a.allocation_type === 'spare_part';
         return [
           a.allocation_id,
-          isSpare ? 'Spare Part' : 'Product',
+          ALLOC_KIND_LABELS[allocKind(a)],
           isSpare ? `${a.spare_part?.part_name} x${a.spare_part?.quantity}` : (a.items || []).map(i => `${reqItemLabel(i)} x${i.quantity}`).join(' | '),
           isSpare ? a.spare_part?.service_id : a.sales_person?.name,
-          a.serial_numbers,
-          a.allotment_date,
-          a.return_due_date,
+          isSpare ? '' : (a.items || []).map(itemSerials).filter(Boolean).join('; '),
+          a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '',
+          a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '',
           a.created_by || a.allocated_by || '',
           a.returned_by || '',
           returnedOn(a) || '',
@@ -1265,7 +1273,9 @@ function exportAllocationsCSV() {
 
 // ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  if (a4Intercept(header, rows, filename)) return;
+  const q = v => { const t = String(v ?? ''); return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const csv = '\ufeff' + [header, ...rows].map(r => r.map(q).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1289,6 +1299,7 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
         <h3>${title}</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 12px;">${getRows().length} record(s) match the filters currently applied on this page. The options below narrow it further.</p>
       <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
         ${withTypeFilter ? `
         <label style="font-size:13px;color:#64748b;">What to export</label>
@@ -1321,6 +1332,7 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
       </form>
     </div>`;
 
+  a4WizardPrint(modal, title);
   modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });

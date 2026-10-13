@@ -1,4 +1,10 @@
-const svcState = { services: [], orders: [], activeServiceId: null, assignees: [], hologramPool: [] };
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
+const svcState = { services: [], orders: [], activeServiceId: null, assignees: [], hologramPool: [], search: '', filters: null };
 
 function esc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -44,17 +50,32 @@ function wireHeaderSearch() {
   const input = document.querySelector('.search input');
   if (!input) return;
   input.addEventListener('input', () => {
-    const q = input.value.trim().toLowerCase();
-    if (!q) { renderServiceTable(svcState.services); return; }
-    const filtered = svcState.services.filter(s =>
+    svcState.search = input.value.trim().toLowerCase();
+    renderServiceTable(getFilteredServices());
+  });
+}
+
+function getFilteredServices() {
+  let list = svcState.services;
+  const q = svcState.search;
+  if (q) {
+    list = list.filter(s =>
       (s.serial_no || '').toLowerCase().includes(q) ||
       (s.product_id || '').toLowerCase().includes(q) ||
       serviceProductInfo(s).name.toLowerCase().includes(q) ||
       serviceProductInfo(s).model.toLowerCase().includes(q) ||
       (s.service_id || '').toLowerCase().includes(q)
     );
-    renderServiceTable(filtered);
-  });
+  }
+  const f = svcState.filters;
+  if (f) {
+    list = list.filter(s =>
+      (!f.status || s.status === f.status) &&
+      (!f.technician || s.technician_alloted === f.technician) &&
+      (!f.date || s.purchase_date === f.date)
+    );
+  }
+  return list;
 }
 
 // every assignable person (all users except admin) as flat options — no role grouping/labels
@@ -85,7 +106,7 @@ async function loadServices() {
 
     svcState.services = (svcData.dataset || []).slice().reverse();
     svcState.orders = orderData.dataset || [];
-    renderServiceTable(svcState.services);
+    renderServiceTable(getFilteredServices());
     updateCards(svcState.services);
   } catch (err) {
     console.error(err);
@@ -141,17 +162,17 @@ function openServiceCardDetailModal(type) {
   const titles = { all: 'All Services', active: 'Active Services', in_progress: 'In Progress Services', completed: 'Completed Services', rejected: 'Rejected Services' };
   const list = serviceCardList(type);
   const th = 'style="text-align:left;padding:8px;"';
-  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
+  const td = 'style="padding:8px;border-top:1px solid var(--border);"';
   const head = ['Product Name', 'Product ID', 'Model No.', 'Serial No.', 'Technician', 'Status', 'Listed On'];
   const box = document.querySelector('#serviceCardDetailModal .modal-content');
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${list.length})</span></h3>
+      <h3>${titles[type]} <span style="color:var(--text-light);font-weight:400;">(${list.length})</span></h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
+        <thead style="background:var(--bg-light);"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
         <tbody>
           ${list.map(s => {
             const info = serviceProductInfo(s);
@@ -164,7 +185,7 @@ function openServiceCardDetailModal(type) {
               <td ${td}><span class="${statusBadge(s.status)}">${(s.status ?? '').replace('_', ' ')}</span></td>
               <td ${td}>${s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '-'}</td>
             </tr>`;
-          }).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
+          }).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:var(--text-light);padding:24px;">Nothing to show</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -304,7 +325,7 @@ function openActionMenu(s, evt) {
     const btn = document.createElement('button');
     btn.textContent = item.label;
     btn.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border:none;background:none;border-radius:6px;cursor:pointer;font-size:14px;';
-    btn.onmouseenter = () => btn.style.background = '#f1f5f9';
+    btn.onmouseenter = () => btn.style.background = 'var(--bg-hover)';
     btn.onmouseleave = () => btn.style.background = 'none';
     btn.addEventListener('click', () => { closeActionMenu(); item.action(); });
     menu.appendChild(btn);
@@ -424,10 +445,10 @@ function exportServicesCSV() {
     statusOptions: ['active', 'in_progress', 'completed', 'rejected'],
     dateField: 'purchase_date',
     dateLabel: 'Purchase Date',
-    getRows: () => svcState.services,
+    getRows: getFilteredServices,
     onConfirm: (rows) => {
-      const header = ['Service ID', 'Product ID', 'Serial No', 'Technician', 'Issue', 'Location', 'Status', 'Created By', 'Listed On'];
-      const csvRows = rows.map(s => [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.issue, s.location, s.status, s.created_by || '', s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '']);
+      const header = ['Service ID', 'Product', 'Product ID', 'Model', 'Serial No', 'Technician', 'Issue', 'Location', 'Warranty Until', 'Status', 'Created By', 'Listed On'];
+      const csvRows = rows.map(s => [s.service_id, serviceProductInfo(s).name, s.product_id, serviceProductInfo(s).model, s.serial_no, s.technician_alloted, s.issue, s.location, s.warranty_until || '', s.status, s.created_by || '', s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '']);
       downloadCSV(header, csvRows, 'services.csv');
     }
   });
@@ -435,7 +456,9 @@ function exportServicesCSV() {
 
 // ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
-  const csv = [header, ...rows].map(r => r.join(',')).join('\n');
+  if (a4Intercept(header, rows, filename)) return;
+  const q = v => { const t = String(v ?? ''); return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const csv = '\ufeff' + [header, ...rows].map(r => r.map(q).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -458,25 +481,27 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
         <h3>${title}</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 12px;">${getRows().length} record(s) match the filters currently applied on this page. The options below narrow it further.</p>
       <form id="exportWizardForm" style="display:flex;flex-direction:column;gap:10px;">
         ${statusOptions ? `
-        <label style="font-size:13px;color:#64748b;">Status</label>
-        <select name="status" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <label style="font-size:13px;color:var(--text-muted);">Status</label>
+        <select name="status" style="padding:10px;border:1px solid var(--border);border-radius:8px;">
           <option value="">All Statuses</option>
           ${statusOptions.map(s => `<option value="${s}">${s.replace('_', ' ')}</option>`).join('')}
         </select>` : ''}
         ${dateField ? `
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} From</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} From</label>
         <input type="date" name="dateFrom">
-        <label style="font-size:13px;color:#64748b;">${dateLabel || 'Date'} To</label>
+        <label style="font-size:13px;color:var(--text-muted);">${dateLabel || 'Date'} To</label>
         <input type="date" name="dateTo">` : ''}
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Export</button>
+          <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+          <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Export</button>
         </div>
       </form>
     </div>`;
 
+  a4WizardPrint(modal, title);
   modal.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
   modal.addEventListener('click', e => { if (e.target === modal) modal.style.display = 'none'; });
@@ -512,16 +537,13 @@ function wireFilters() {
   filterBtn.addEventListener('click', () => {
     const selects = document.querySelectorAll('.filter-box select');
     const dateInput = document.querySelector('.filter-box input[type="date"]');
-    const status = selects[0]?.value?.toLowerCase().replace('-', '_');
-    const technician = selects[1]?.value;
-    const date = dateInput?.value;
-
-    const filtered = svcState.services.filter(s =>
-      (!status || status === 'status' || s.status === status) &&
-      (!technician || technician === 'Technician' || s.technician_alloted === technician) &&
-      (!date || s.purchase_date === date)
-    );
-    renderServiceTable(filtered);
+    let status = selects[0]?.value?.toLowerCase().replace('-', '_') || '';
+    let technician = selects[1]?.value || '';
+    const date = dateInput?.value || '';
+    if (status === 'status') status = '';
+    if (technician === 'Technician') technician = '';
+    svcState.filters = (status || technician || date) ? { status, technician, date } : null;
+    renderServiceTable(getFilteredServices());
   });
 }
 
@@ -549,14 +571,14 @@ async function openCreateModal() {
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
           <textarea name="spare_parts" placeholder="Spare parts requested (optional)" style="min-height:50px;"></textarea>
-          <label style="font-size:12px;color:#64748b;">Image proof (optional, max 2MB)</label>
+          <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 2MB)</label>
           <input type="file" name="image_file" accept="image/*">
-          <label style="font-size:12px;color:#64748b;">Video proof (optional, max 20MB)</label>
+          <label style="font-size:12px;color:var(--text-muted);">Video proof (optional, max 20MB)</label>
           <input type="file" name="video_file" accept="video/*">
-          <p id="createServiceMediaError" style="color:#d62828;font-size:12px;display:none;"></p>
+          <p id="createServiceMediaError" style="color:var(--danger);font-size:12px;display:none;"></p>
           <div style="display:flex;justify-content:flex-end;gap:10px;">
-            <button type="button" id="cancelCreateService" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
-            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Create</button>
+            <button type="button" id="cancelCreateService" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
+            <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Create</button>
           </div>
         </form>
       </div>`;
@@ -661,7 +683,7 @@ function wireModals() {
         <select class="part-new-hologram-select" style="flex:1;" disabled>
           <option value="">Select part first…</option>
         </select>
-        <button type="button" class="remove-part-btn" style="border:none;background:#eee;border-radius:6px;padding:8px 10px;cursor:pointer;">&times;</button>
+        <button type="button" class="remove-part-btn" style="border:none;background:var(--border);border-radius:6px;padding:8px 10px;cursor:pointer;">&times;</button>
       </div>`;
 
     const addPartRow = () => {
@@ -686,8 +708,8 @@ function wireModals() {
     const renderSpareUsed = () => {
       spareBtns.forEach(b => {
         const active = (b.dataset.used === 'true') === spareUsed;
-        b.style.background = active ? '#1665ff' : '#fff';
-        b.style.color = active ? '#fff' : '#1665ff';
+        b.style.background = active ? 'var(--primary)' : '#fff';
+        b.style.color = active ? '#fff' : 'var(--primary)';
       });
       partsList.style.display = spareUsed ? 'flex' : 'none';
       addPartBtn.style.display = spareUsed ? 'block' : 'none';

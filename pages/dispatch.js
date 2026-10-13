@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   wireFilter();
   wireHeaderSearch();
   wireDispatchCardClicks();
+  wireDispatchExport();
   setInterval(loadDispatchQueue, 60 * 1000);
 });
 
@@ -185,6 +186,7 @@ function openDispatchCardDetailModal(cardType) {
       <input type="date" data-f="from" title="From"><input type="date" data-f="to" title="To">
       <button class="cv-btn rst" id="cvReset">Reset</button>
       <button class="cv-btn exp" id="cvExport"><i class="fa-solid fa-download"></i> Export CSV</button>
+      <button class="cv-btn exp" id="cvPrint"><i class="fa-solid fa-print"></i> Print</button>
     </div>
     <p class="cv-count" id="cvCount"></p>
     <div class="cv-wrap"><table class="cv-tbl">
@@ -206,8 +208,32 @@ function openDispatchCardDetailModal(cardType) {
     cvDownloadCsv(DISP_CV_HEAD, dispCvFiltered().map(row => dispCvCells(row).map(cvPlain)),
       (DISPATCH_CARD_TITLES[cardType] || 'dispatch').toLowerCase().replace(/[^a-z0-9]+/g, '_'));
   });
+  content.querySelector('#cvPrint').addEventListener('click', () => {
+    if (typeof A4Print === 'undefined') { alert('print_a4.js is not loaded.'); return; }
+    A4Print.table(dispatchPrintOpts(DISPATCH_CARD_TITLES[cardType] || 'Dispatch', dispCvFiltered()));
+  });
   dispCvPaint();
   modal.style.display = 'flex';
+}
+
+function dispatchPrintOpts(title, rows) {
+  return {
+    title: title + ' - Dispatch',
+    subtitle: 'Dispatch queue',
+    head: DISP_CV_HEAD,
+    rows: rows.map(row => dispCvCells(row).map(cvPlain))
+  };
+}
+
+function wireDispatchExport() {
+  const btn = document.querySelector('.top-actions .export');
+  if (!btn) return;
+  if (typeof A4Print !== 'undefined') A4Print.attachNextTo(btn, () => dispatchPrintOpts('Dispatch', getFilteredRows()));
+  btn.addEventListener('click', () => {
+    const rows = getFilteredRows();
+    if (!rows.length) { alert('Nothing to export for the current filters.'); return; }
+    cvDownloadCsv(DISP_CV_HEAD, rows.map(row => dispCvCells(row).map(cvPlain)), 'dispatch');
+  });
 }
 
 function wireDispatchCardClicks() {
@@ -392,6 +418,7 @@ function renderTable(rows) {
       <td>${statusHtml}</td>
       <td>
         <button class="icon-btn view-dispatch-btn" title="View Details"><i class="fa-solid fa-eye"></i></button>
+        <button class="icon-btn print-form-btn" title="Order Dispatch Form (View / Edit / Print)"><i class="fa-solid fa-print"></i></button>
         ${actionHtml}
       </td>`;
     tbody.appendChild(tr);
@@ -403,6 +430,14 @@ function renderTable(rows) {
     const id = tr.dataset.id;
     const row = combinedRows().find(r => (kind === 'order' ? r.data.order_id : r.data.allocation_id) === id && r.kind === kind);
     if (row) openViewDispatchModal(row);
+  }));
+
+  tbody.querySelectorAll('.print-form-btn').forEach(btn => btn.addEventListener('click', e => {
+    const tr = e.target.closest('tr');
+    const kind = tr.dataset.kind;
+    const id = tr.dataset.id;
+    const row = combinedRows().find(r => (kind === 'order' ? r.data.order_id : r.data.allocation_id) === id && r.kind === kind);
+    if (row) openDispatchForm(row);
   }));
 
   tbody.querySelectorAll('.confirm-dispatch-btn').forEach(btn => btn.addEventListener('click', e => {
@@ -513,6 +548,7 @@ function openViewDispatchModal(row) {
           <small style="color:#64748b;">By</small>
           <p style="margin:2px 0 0;font-weight:600;">${disp?.dispatched_through ?? '-'}</p>
         </div>
+        <button class="cv-btn exp" id="viewPrintForm" title="Order Dispatch Form"><i class="fa-solid fa-print"></i> Dispatch Form</button>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
     </div>
@@ -521,8 +557,79 @@ function openViewDispatchModal(row) {
     ${dispatchHtml}`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('#viewPrintForm').addEventListener('click', () => openDispatchForm(row));
   modal.style.display = 'flex';
 }
+
+// ---------- Order Dispatch Form (Excel form -> editable A4 print) ----------
+// Fills only what the system already has; every other box is left blank and
+// stays editable inside the form before printing.
+function odfDateTime(v) {
+  if (!v) return '';
+  const dt = new Date(v);
+  if (isNaN(dt)) return '';
+  const day = dt.toLocaleDateString('en-GB');
+  const hasTime = typeof v === 'string' && v.includes('T') && !/T00:00:00(\.0+)?(Z|[+-]00:?00)?$/.test(v);
+  return hasTime ? `${day} ${dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : day;
+}
+
+function odfDefaults(row) {
+  const d = row.data, disp = d.dispatch || {};
+  let company = '', address = '', ref = '', lines = [], serials = [];
+
+  if (row.kind === 'order' || row.kind === 'product_allocation') {
+    const items = d.items || [];
+    lines = items.map((it, i) => `${i + 1}. ${it.product_name ?? ''}${it.model_no ? ' (' + it.model_no + ')' : ''}  -  Qty: ${it.quantity ?? 0}`);
+    serials = items.filter(it => (it.serial_numbers || []).length).map(it => `${it.product_name ?? ''}: ${it.serial_numbers.join(', ')}`);
+  }
+  if (row.kind === 'order') {
+    const c = d.customer || {};
+    company = c.company_name || '';
+    address = c.company_address || '';
+    ref = d.order_id || '';
+  } else if (row.kind === 'product_allocation') {
+    company = d.sales_person?.name || d.company_name || '';
+    address = d.address || '';
+    ref = d.allocation_id || '';
+    lines.unshift('ALLOCATED / DEMO PRODUCT');
+  } else {
+    company = `Service #${(d.spare_part?.service_id || '').slice(0, 8)} (Spare Part)`;
+    ref = d.allocation_id || '';
+    lines = ['SPARE PART FOR SERVICE', `1. ${d.spare_part?.part_name ?? ''}  -  Qty: ${d.spare_part?.quantity ?? '-'}`];
+  }
+
+  const extra = [];
+  if (disp.invoice_no) extra.push(`Invoice No.: ${String(disp.invoice_no).toUpperCase()}${disp.invoice_date ? '   Invoice Date: ' + new Date(disp.invoice_date).toLocaleDateString('en-GB') : ''}`);
+  if (disp.docket_no) extra.push(`Docket No.: ${String(disp.docket_no).toUpperCase()}`);
+  if (disp.ship_to_different) extra.push(`SHIP TO: ${disp.ship_to_address?.company_name ?? ''}${disp.ship_to_address?.address ? ', ' + disp.ship_to_address.address : ''}`);
+
+  // mode of dispatch -> tick the matching box of the form
+  const mode = disp.mode_of_delivery || '';
+  const through = disp.dispatched_through || '';
+  const out = { hand: '', porter: '', courier: '', others: '' };
+  if (mode === 'self_pickup') out.hand = '\u2714';
+  else if (mode === 'courier') out.courier = ['\u2714', through].filter(Boolean).join(' ');
+  else if (mode) out.others = [mode.charAt(0).toUpperCase() + mode.slice(1), through].filter(Boolean).join(' - ');
+
+  return {
+    ref,
+    date: new Date().toLocaleDateString('en-GB'),
+    company,
+    address,
+    details: [...lines, ...(extra.length ? ['', ...extra] : [])].join('\n'),
+    ...out,
+    recv: row.kind === 'order' ? odfDateTime(d.order_date) : odfDateTime(d.allotment_date || d.created_at),
+    serials: serials.join('\n'),
+    handover: disp.docket_no ? `Docket No.: ${String(disp.docket_no).toUpperCase()}` : ''
+  };
+}
+
+function openDispatchForm(row) {
+  if (typeof A4Print === 'undefined') { alert('print_a4.js is not loaded.'); return; }
+  const d = row.data;
+  A4Print.form(`${row.kind}:${d.order_id || d.allocation_id}`, odfDefaults(row));
+}
+
 function openDispatchModal(row) {
   const modal = document.getElementById('dispatchModal');
   const content = modal.querySelector('.modal-content');

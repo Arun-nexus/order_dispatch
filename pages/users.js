@@ -1,3 +1,9 @@
+/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
+(function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
+function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
+function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
+function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
+function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
 const userState = {
   users: [], customers: [], orders: [], allocations: [], tab: 'users', userSearch: '',
   customerFilter: { text: '', field: 'credit_limit', min: '', max: '' }
@@ -594,8 +600,9 @@ function openUserCardDetail(type, keep) {
     userCvPaint();
   });
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  if (customers) a4Twin(box.querySelector('.card-export'), CARD_TITLES[type]);
   box.querySelector('.card-export').addEventListener('click', () => {
-    if (customers) openCompanyExportModal();
+    if (customers) exportCompaniesCsv(userCvCustomers());
     else openUserExportModal({ type });
   });
   userCvPaint();
@@ -992,6 +999,7 @@ function openDeleteModal(u) {
 //  - Companies: filters pre-filled from whatever is applied, editable before exporting.
 // =========================================================
 function downloadCSV(header, rows, filename) {
+  if (a4Intercept(header, rows, filename)) return;
   const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const csv = '﻿' + [header, ...rows].map(r => r.map(q).join(',')).join('\n');
   const a = document.createElement('a');
@@ -1044,7 +1052,7 @@ const EXPORT_KINDS = {
 function openUserExportModal(opts) {
   opts = opts || {};
   const modal = getExportModal();
-  const fixed = opts.users || (opts.type ? userCardList(opts.type) : null);   // opened from a card -> that card's users
+  const fixed = opts.users || (opts.type ? (userCV.type === opts.type ? userCvUsers() : userCardList(opts.type)) : null);   // opened from a card -> that card's users
   const title = opts.title || (opts.type ? `Export — ${CARD_TITLES[opts.type]}` : 'Export Users');
   const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;width:100%;';
   const lbl = 'font-size:13px;color:#64748b;';
@@ -1097,6 +1105,7 @@ function openUserExportModal(opts) {
       </form>
     </div>`;
 
+  a4WizardPrint(modal, title);
   const form = modal.querySelector('#exportForm');
   const roleSel = form.querySelector('[name=role]');
   const textInp = form.querySelector('[name=text]');
@@ -1196,6 +1205,16 @@ function openUserExportModal(opts) {
   modal.style.display = 'flex';
 }
 
+function exportCompaniesCsv(rows) {
+  if (!rows.length) { alert('No companies match these filters.'); return false; }
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Overall', 'Total Orders'],
+    rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
+      s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
+    `companies_${stamp}.csv`);
+  return true;
+}
+
 function openCompanyExportModal() {
   const modal = getExportModal();
   const inp = 'padding:10px;border:1px solid #e2e8f0;border-radius:8px;width:100%;';
@@ -1227,6 +1246,7 @@ function openCompanyExportModal() {
       </form>
     </div>`;
 
+  a4WizardPrint(modal, 'Companies');
   modal.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.querySelector('.cancel-btn').addEventListener('click', () => { modal.style.display = 'none'; });
   modal.querySelector('#exportForm').addEventListener('submit', e => {
@@ -1234,12 +1254,7 @@ function openCompanyExportModal() {
     const fd = new FormData(e.target);
     const stamp = new Date().toISOString().slice(0, 10);
     const rows = customerRows({ text: fd.get('text') || '', field: fd.get('field') || 'credit_limit', min: fd.get('min') ?? '', max: fd.get('max') ?? '' });
-    if (!rows.length) { alert('No companies match these filters.'); return; }
-    downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Overall', 'Total Orders'],
-      rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
-        s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
-      `companies_${stamp}.csv`);
-    modal.style.display = 'none';
+    if (exportCompaniesCsv(rows)) modal.style.display = 'none';
   });
   modal.style.display = 'flex';
 }
