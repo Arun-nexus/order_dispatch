@@ -133,7 +133,7 @@ function renderTable(users) {
   tbody.querySelectorAll('.delete-btn').forEach(b => b.addEventListener('click', e => openDeleteModal(rowUser(e))));
 }
 
-function openUserDetail(u) {
+function openUserDetail(u, back) {
   if (!u) return;
   const modal = document.getElementById('userCardDetailModal');
   const box = modal.querySelector('.modal-content');
@@ -166,7 +166,7 @@ function openUserDetail(u) {
   ]);
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <h3>${esc(u.full_name ?? u.name) || esc(uname)} <span style="color:#94a3b8;font-weight:400;">@${esc(uname)}</span></h3>
+      <h3>${back ? '<button type="button" class="user-back" style="border:none;background:none;cursor:pointer;font-size:16px;margin-right:6px;"><i class="fa-solid fa-arrow-left"></i></button>' : ''}${esc(u.full_name ?? u.name) || esc(uname)} <span style="color:#94a3b8;font-weight:400;">@${esc(uname)}</span></h3>
       <div style="display:flex;align-items:center;gap:10px;">
         <button type="button" class="user-export" style="padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-download"></i> Export</button>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
@@ -191,6 +191,8 @@ function openUserDetail(u) {
     ${tableHTML(['Allotted', 'Items', 'Serial No.', 'Customer', 'Return Due', 'Status'], demoRows)}`;
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
   box.querySelector('.user-export').addEventListener('click', () => openUserExportModal({ users: [u], title: `Export — ${u.full_name ?? u.name ?? uname}` }));
+  const backBtn = box.querySelector('.user-back');
+  if (backBtn) backBtn.addEventListener('click', back);
   modal.style.display = 'flex';
 }
 
@@ -456,35 +458,148 @@ function userCardList(type) {
   return type === 'all' ? userState.users : userState.users.filter(u => u.role === type);
 }
 
-function openUserCardDetail(type) {
-  const box = document.querySelector('#userCardDetailModal .modal-content');
-  let table;
-  let count;
-  if (type === 'customers') {
-    const rows = userState.customers.map(c => ({ c, s: customerStats(c) }));
-    count = rows.length;
-    table = tableHTML(['Company', 'GST', 'Contact', 'Credit Limit', 'Debit', 'Credit', 'Overall'],
-      rows.map(({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, nw(s.limit), nw(s.creditGiven), nw(s.returned), `<span style="white-space:nowrap;">${overallInfo(s).text}</span>`]));
+const userCV = { type: '', f: {} };
+
+function cvEnsureStyles() {
+  if (document.getElementById('cvStyles')) return;
+  const st = document.createElement('style');
+  st.id = 'cvStyles';
+  st.textContent = `
+    .cv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .cv-head h3{margin:0}
+    .cv-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .cv-bar select,.cv-bar input{padding:7px 9px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;background:var(--bg-white);min-width:0}
+    .cv-bar input[type=text]{flex:1;min-width:150px}
+    .cv-bar input[type=number]{width:110px}
+    .cv-bar label{font-size:12px;color:var(--text-muted)}
+    .cv-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+    .cv-btn.exp{background:var(--primary);color:#fff}
+    .cv-btn.rst{background:var(--bg-hover);color:var(--text-secondary)}
+    .cv-count{font-size:12px;color:var(--text-muted);margin:0 0 8px}
+    .cv-wrap{overflow:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}
+    .cv-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:640px}
+    .cv-tbl th{position:sticky;top:0;background:var(--bg-light);color:var(--text-secondary);text-align:left;padding:8px;border-bottom:1px solid var(--border);white-space:nowrap}
+    .cv-tbl td{color:var(--text-primary);padding:8px;border-bottom:1px solid var(--bg-hover);vertical-align:top}
+    .cv-tbl tbody tr.cv-row{cursor:pointer}
+    .cv-tbl tbody tr.cv-row:hover{background:var(--bg-light)}
+    .cv-hint{font-size:11.5px;color:var(--text-light);margin-top:8px}
+  `;
+  document.head.appendChild(st);
+}
+
+function userCvUsers() {
+  const f = userCV.f;
+  const q = (f.q || '').toLowerCase();
+  return userCardList(userCV.type).filter(u => {
+    if (f.role && u.role !== f.role) return false;
+    if (f.company && u.company_name !== f.company) return false;
+    if (q && !`${u.username || ''} ${u.name || ''} ${u.full_name || ''} ${u.company_name || ''} ${u.mobile_no ?? u.phone ?? ''} ${u.email_id ?? u.email ?? ''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function userCvCustomers() {
+  const f = userCV.f;
+  const q = (f.q || '').toLowerCase();
+  const min = f.min === undefined || f.min === '' ? null : Number(f.min);
+  const max = f.max === undefined || f.max === '' ? null : Number(f.max);
+  return userState.customers.map(c => ({ c, s: customerStats(c) })).filter(({ c, s }) => {
+    if (q && !`${c.company_name || ''} ${c.company_address || ''} ${c.gst_number || ''} ${c.contractor_person || ''} ${c.contractor_number || ''} ${c.contractor_email || ''}`.toLowerCase().includes(q)) return false;
+    if (f.status === 'overdue' && !s.overduePurchases.length) return false;
+    if (f.status === 'over_limit' && !(s.creditGiven > s.limit)) return false;
+    if (f.status === 'outstanding' && !(s.outstanding > 0)) return false;
+    if (f.status === 'clear' && s.outstanding > 0) return false;
+    if (min !== null && s.outstanding < min) return false;
+    if (max !== null && s.outstanding > max) return false;
+    return true;
+  });
+}
+
+function userCvPaint() {
+  const body = document.getElementById('cvBody');
+  if (!body) return;
+  const customers = userCV.type === 'customers';
+  const list = customers ? userCvCustomers() : userCvUsers();
+  const total = customers ? userState.customers.length : userCardList(userCV.type).length;
+  const cols = customers ? 8 : 5;
+  const cells = customers
+    ? ({ c, s }) => [esc(c.company_name), esc(c.gst_number) || '-', `${esc(c.contractor_person) || '-'} ${esc(c.contractor_number)}`, nw(s.limit), nw(s.creditGiven), nw(s.returned), nw(s.outstanding), `<span style="white-space:nowrap;">${overallInfo(s).text}</span>`]
+    : u => [esc(u.username), esc(u.full_name ?? u.name), displayRole(u.role), esc(u.company_name), esc(u.mobile_no ?? u.phone)];
+  body.innerHTML = list.map((x, i) => `<tr class="cv-row" data-i="${i}">${cells(x).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
+    || `<tr><td colspan="${cols}" style="text-align:center;color:var(--text-light);padding:20px;">Nothing matches these filters.</td></tr>`;
+  document.getElementById('cvCount').textContent = `${list.length} of ${total} record(s)`;
+  body.querySelectorAll('tr.cv-row').forEach(tr => tr.addEventListener('click', () => {
+    const x = list[Number(tr.dataset.i)];
+    if (customers) {
+      const hm = document.getElementById('customerHistoryModal');
+      if (hm) hm.style.zIndex = 1100;
+      openCustomerHistory(x.c);
+    } else {
+      const t = userCV.type;
+      openUserDetail(x, () => openUserCardDetail(t, true));
+    }
+  }));
+}
+
+function openUserCardDetail(type, keep) {
+  cvEnsureStyles();
+  const modal = document.getElementById('userCardDetailModal');
+  const box = modal.querySelector('.modal-content');
+  userCV.type = type;
+  if (!keep) userCV.f = {};
+  const customers = type === 'customers';
+  const uniq = arr => [...new Set(arr.filter(Boolean))].sort();
+  const opt = arr => arr.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  let bar;
+  let head;
+  if (customers) {
+    head = ['Company', 'GST', 'Contact', 'Credit Limit', 'Debit', 'Credit', 'Outstanding', 'Overall'];
+    bar = `
+      <input type="text" data-f="q" placeholder="Search company, GST, contact, address...">
+      <select data-f="status"><option value="">All Status</option><option value="overdue">Payment Overdue</option><option value="over_limit">Over Credit Limit</option><option value="outstanding">Has Outstanding</option><option value="clear">No Outstanding</option></select>
+      <label>Outstanding</label>
+      <input type="number" data-f="min" placeholder="Min" min="0"><input type="number" data-f="max" placeholder="Max" min="0">`;
   } else {
-    const list = userCardList(type);
-    count = list.length;
-    table = tableHTML(['Username', 'Name', 'Role', 'Company', 'Mobile'],
-      list.map(u => [esc(u.username), esc(u.full_name ?? u.name), displayRole(u.role), esc(u.company_name), esc(u.mobile_no ?? u.phone)]));
+    const base = userCardList(type);
+    head = ['Username', 'Name', 'Role', 'Company', 'Mobile'];
+    bar = `
+      <input type="text" data-f="q" placeholder="Search username, name, company, mobile, email...">
+      ${type === 'all' ? `<select data-f="role"><option value="">All Roles</option>${uniq(base.map(u => u.role)).map(r => `<option value="${esc(r)}">${esc(displayRole(r))}</option>`).join('')}</select>` : ''}
+      <select data-f="company"><option value="">All Companies</option>${opt(uniq(base.map(u => u.company_name)))}</select>`;
   }
+  box.style.width = 'min(1000px,95vw)';
   box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3>${CARD_TITLES[type]} <span style="color:#94a3b8;font-weight:400;">(${count})</span></h3>
+    <div class="cv-head"><h3>${CARD_TITLES[type]}</h3>
       <div style="display:flex;align-items:center;gap:10px;">
-        <button type="button" class="card-export" style="padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-download"></i> Export</button>
+        <button type="button" class="cv-btn exp card-export"><i class="fa-solid fa-download"></i> Export</button>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-    </div>${table}`;
-  box.querySelector('.close').addEventListener('click', () => { document.getElementById('userCardDetailModal').style.display = 'none'; });
+    </div>
+    <div class="cv-bar">${bar}<button class="cv-btn rst" id="cvReset">Reset</button></div>
+    <p class="cv-count" id="cvCount"></p>
+    <div class="cv-wrap"><table class="cv-tbl">
+      <thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody id="cvBody"></tbody></table></div>
+    <p class="cv-hint">Click a row to see full details.</p>`;
+  box.querySelectorAll('[data-f]').forEach(el => {
+    el.value = userCV.f[el.dataset.f] || '';
+    el.addEventListener(el.type === 'text' || el.type === 'number' ? 'input' : 'change', e => {
+      userCV.f[el.dataset.f] = e.target.value;
+      userCvPaint();
+    });
+  });
+  box.querySelector('#cvReset').addEventListener('click', () => {
+    userCV.f = {};
+    box.querySelectorAll('[data-f]').forEach(el => { el.value = ''; });
+    userCvPaint();
+  });
+  box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
   box.querySelector('.card-export').addEventListener('click', () => {
-    if (type === 'customers') openCompanyExportModal();
+    if (customers) openCompanyExportModal();
     else openUserExportModal({ type });
   });
-  document.getElementById('userCardDetailModal').style.display = 'flex';
+  userCvPaint();
+  modal.style.display = 'flex';
 }
 
 function openCustomerHistory(c, focusEntry) {

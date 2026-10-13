@@ -461,52 +461,210 @@ function requestSummary(r) {
   return '-';
 }
 
+const allocCV = { type: '', base: [], f: {}, requests: false };
+const ALLOC_REQ_LABELS = { demo_unit: 'Demo Unit', spare_part: 'Spare Part', order: 'Order', media_review: 'Service Media', status_update: 'Status Change', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
+const ALLOC_KIND_LABELS = { product: 'Product', demo_unit: 'Demo', spare_part: 'Spare Part' };
+
+function cvEnsureStyles() {
+  if (document.getElementById('cvStyles')) return;
+  const st = document.createElement('style');
+  st.id = 'cvStyles';
+  st.textContent = `
+    .cv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .cv-head h3{margin:0}
+    .cv-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .cv-bar select,.cv-bar input{padding:7px 9px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;background:var(--bg-white);min-width:0}
+    .cv-bar input[type=text]{flex:1;min-width:150px}
+    .cv-bar label{font-size:12px;color:var(--text-muted)}
+    .cv-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+    .cv-btn.exp{background:var(--primary);color:#fff}
+    .cv-btn.rst{background:var(--bg-hover);color:var(--text-secondary)}
+    .cv-count{font-size:12px;color:var(--text-muted);margin:0 0 8px}
+    .cv-wrap{overflow:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}
+    .cv-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:760px}
+    .cv-tbl th{position:sticky;top:0;background:var(--bg-light);color:var(--text-secondary);text-align:left;padding:8px;border-bottom:1px solid var(--border);white-space:nowrap}
+    .cv-tbl td{color:var(--text-primary);padding:8px;border-bottom:1px solid var(--bg-hover);vertical-align:top}
+    .cv-tbl tbody tr.cv-row{cursor:pointer}
+    .cv-tbl tbody tr.cv-row:hover{background:var(--bg-light)}
+    .cv-hint{font-size:11.5px;color:var(--text-light);margin-top:8px}
+  `;
+  document.head.appendChild(st);
+}
+
+function cvPlain(html) {
+  const d = document.createElement('div');
+  d.innerHTML = String(html ?? '');
+  return d.textContent.replace(/\s+/g, ' ').trim();
+}
+
+function cvDownloadCsv(head, rows, fileBase) {
+  const cell = v => {
+    const t = String(v ?? '');
+    return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const csv = '\ufeff' + [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `${fileBase}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function allocKind(a) {
+  return a.allocation_type === 'spare_part' ? 'spare_part' : (a.allocation_type === 'demo_unit' ? 'demo_unit' : 'product');
+}
+
+function allocWho(a) {
+  return a.allocation_type === 'spare_part'
+    ? `Service #${(a.spare_part?.service_id || '').slice(0, 8)}`
+    : (a.sales_person?.name ?? '');
+}
+
+function allocProductHtml(a) {
+  return a.allocation_type === 'spare_part'
+    ? sparePartLabel(a.spare_part)
+    : (a.items || []).map(itemLabel).join(', ');
+}
+
+function allocSerialText(a) {
+  return a.allocation_type === 'spare_part' ? '-' : ((a.items || []).map(itemSerials).filter(Boolean).join(', ') || '-');
+}
+
+function allocStatusKey(a) {
+  const meta = returnMeta(a);
+  return meta.complete ? 'returned' : (meta.overdue ? 'overdue' : 'pending');
+}
+
+function allocCvFiltered() {
+  const f = allocCV.f;
+  const q = (f.q || '').toLowerCase();
+  if (allocCV.requests) {
+    return allocCV.base.filter(r => {
+      if (f.reqType && r.request_type !== f.reqType) return false;
+      if (f.raisedBy && r.raised_by !== f.raisedBy) return false;
+      if (q && !`${ALLOC_REQ_LABELS[r.request_type] || r.request_type || ''} ${cvPlain(requestSummary(r))} ${r.raised_by || ''}`.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }
+  return allocCV.base.filter(a => {
+    if (f.kind && allocKind(a) !== f.kind) return false;
+    if (f.status && allocStatusKey(a) !== f.status) return false;
+    if (f.who && allocWho(a) !== f.who) return false;
+    const d = (a.allotment_date || '').slice(0, 10);
+    if (f.from && d < f.from) return false;
+    if (f.to && d > f.to) return false;
+    if (q) {
+      const hay = [a.allocation_id, a.company_name, a.address, allocWho(a), cvPlain(allocProductHtml(a)), allocSerialText(a)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function allocCvHead() {
+  return allocCV.requests
+    ? ['Type', 'Details', 'Raised By', 'Raised On']
+    : ['Type', 'Product / Spare Part', 'Serial No.', 'Sales Person / Service', 'Allotment Date', 'Return Due', 'Status'];
+}
+
+function allocCvCells(x) {
+  if (allocCV.requests) {
+    return [esc(ALLOC_REQ_LABELS[x.request_type] || x.request_type || '-'), requestSummary(x), esc(x.raised_by || '-'),
+      x.created_at ? new Date(x.created_at).toLocaleDateString('en-GB') : '-'];
+  }
+  const meta = returnMeta(x);
+  return [
+    ALLOC_KIND_LABELS[allocKind(x)],
+    allocProductHtml(x),
+    esc(allocSerialText(x)),
+    esc(allocWho(x)),
+    x.allotment_date ? new Date(x.allotment_date).toLocaleDateString('en-GB') : '-',
+    x.return_due_date ? new Date(x.return_due_date).toLocaleDateString('en-GB') : '-',
+    `<span class="stock ${meta.cls}">${meta.label}</span>`
+  ];
+}
+
+function allocCvPaint() {
+  const body = document.getElementById('cvBody');
+  if (!body) return;
+  const list = allocCvFiltered();
+  const cols = allocCvHead().length;
+  body.innerHTML = list.map((x, i) => `<tr class="cv-row" data-i="${i}">${allocCvCells(x).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
+    || `<tr><td colspan="${cols}" style="text-align:center;color:var(--text-light);padding:20px;">Nothing matches these filters.</td></tr>`;
+  document.getElementById('cvCount').textContent = `${list.length} of ${allocCV.base.length} record(s)`;
+  body.querySelectorAll('tr.cv-row').forEach(tr => tr.addEventListener('click', () => {
+    const x = list[Number(tr.dataset.i)];
+    const vm = document.getElementById('viewAllocationModal');
+    if (vm) vm.style.zIndex = 1100;
+    if (allocCV.requests) openRequestDetailsModal(x);
+    else openViewAllocationModal(x);
+  }));
+}
+
 function openAllocCardDetailModal(type) {
   const modal = document.getElementById('allocCardDetailModal');
   const box = modal.querySelector('.modal-content');
+  cvEnsureStyles();
   const titles = { all: 'All Allocations', pending: 'Pending Return', overdue: 'Overdue Allocations', returned: 'Returned Allocations', requests: 'Pending Requests' };
-  const th = 'style="text-align:left;padding:8px;"';
-  const td = 'style="padding:8px;border-top:1px solid #eef1f6;"';
-  let head;
-  let rows;
-  if (type === 'requests') {
-    const typeLabels = { demo_unit: 'Demo Unit', spare_part: 'Spare Part', order: 'Order', media_review: 'Service Media', status_update: 'Status Change', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
-    head = ['Type', 'Details', 'Raised By', 'Raised On'];
-    rows = allocState.requests
-      .filter(r => r.status === 'pending')
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-      .map(r => [typeLabels[r.request_type] || esc(r.request_type || '-'), requestSummary(r), esc(r.raised_by || '-'), r.created_at ? new Date(r.created_at).toLocaleDateString('en-GB') : '-']);
+  const requests = type === 'requests';
+  allocCV.type = type;
+  allocCV.requests = requests;
+  allocCV.f = {};
+  allocCV.base = requests
+    ? allocState.requests.filter(r => r.status === 'pending').sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    : allocCardList(type);
+  const opt = arr => arr.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  const uniq = arr => [...new Set(arr.filter(Boolean))].sort();
+
+  let bar;
+  if (requests) {
+    const types = uniq(allocCV.base.map(r => r.request_type));
+    const raised = uniq(allocCV.base.map(r => r.raised_by));
+    bar = `
+      <input type="text" data-f="q" placeholder="Search details, raised by...">
+      <select data-f="reqType"><option value="">All Types</option>${types.map(t => `<option value="${esc(t)}">${esc(ALLOC_REQ_LABELS[t] || t)}</option>`).join('')}</select>
+      <select data-f="raisedBy"><option value="">All Raised By</option>${opt(raised)}</select>`;
   } else {
-    head = ['Type', 'Product / Spare Part', 'Serial No.', 'Sales Person / Service', 'Allotment Date', 'Return Due', 'Status'];
-    rows = allocCardList(type).map(a => {
-      const meta = returnMeta(a);
-      const isSpare = a.allocation_type === 'spare_part';
-      return [
-        isSpare ? 'Spare Part' : (a.allocation_type === 'demo_unit' ? 'Demo' : 'Product'),
-        isSpare ? sparePartLabel(a.spare_part) : (a.items || []).map(itemLabel).join(', '),
-        isSpare ? '-' : ((a.items || []).map(itemSerials).filter(Boolean).join(', ') || '-'),
-        isSpare ? `Service #${esc((a.spare_part?.service_id || '').slice(0, 8))}` : esc(a.sales_person?.name ?? ''),
-        a.allotment_date ? new Date(a.allotment_date).toLocaleDateString('en-GB') : '-',
-        a.return_due_date ? new Date(a.return_due_date).toLocaleDateString('en-GB') : '-',
-        `<span class="stock ${meta.cls}">${meta.label}</span>`,
-      ];
-    });
+    const whos = uniq(allocCV.base.map(allocWho));
+    bar = `
+      <input type="text" data-f="q" placeholder="Search product, serial, company, ID...">
+      <select data-f="kind"><option value="">All Types</option><option value="product">Product</option><option value="demo_unit">Demo</option><option value="spare_part">Spare Part</option></select>
+      ${type === 'all' ? '<select data-f="status"><option value="">All Status</option><option value="pending">Pending</option><option value="overdue">Overdue</option><option value="returned">Returned</option></select>' : ''}
+      <select data-f="who"><option value="">All Sales / Service</option>${opt(whos)}</select>
+      <label>Allotted</label>
+      <input type="date" data-f="from" title="From"><input type="date" data-f="to" title="To">`;
   }
+
+  box.style.width = 'min(1100px,95vw)';
   box.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h3>${titles[type]} <span style="color:#94a3b8;font-weight:400;">(${rows.length})</span></h3>
-      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    <div class="cv-head"><h3>${titles[type]}</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="cv-bar">${bar}
+      <button class="cv-btn rst" id="cvReset">Reset</button>
+      <button class="cv-btn exp" id="cvExport"><i class="fa-solid fa-download"></i> Export CSV</button>
     </div>
-    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
-      <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead style="background:#f8fafc;"><tr>${head.map(h => `<th ${th}>${h}</th>`).join('')}</tr></thead>
-        <tbody>
-          ${rows.map(r => `<tr>${r.map(c => `<td ${td}>${c}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${head.length}" style="text-align:center;color:#94a3b8;padding:24px;">Nothing to show</td></tr>`}
-        </tbody>
-      </table>
-    </div>
-  `;
+    <p class="cv-count" id="cvCount"></p>
+    <div class="cv-wrap"><table class="cv-tbl">
+      <thead><tr>${allocCvHead().map(h => `<th>${h}</th>`).join('')}</tr></thead>
+      <tbody id="cvBody"></tbody></table></div>
+    <p class="cv-hint">Click a row to see full details.</p>`;
+
   box.querySelector('.close').addEventListener('click', () => { modal.style.display = 'none'; });
+  box.querySelectorAll('[data-f]').forEach(el => el.addEventListener(el.type === 'text' ? 'input' : 'change', e => {
+    allocCV.f[el.dataset.f] = e.target.value;
+    allocCvPaint();
+  }));
+  box.querySelector('#cvReset').addEventListener('click', () => {
+    allocCV.f = {};
+    box.querySelectorAll('[data-f]').forEach(el => { el.value = ''; });
+    allocCvPaint();
+  });
+  box.querySelector('#cvExport').addEventListener('click', () => {
+    const list = allocCvFiltered();
+    cvDownloadCsv(allocCvHead(), list.map(x => allocCvCells(x).map(cvPlain)), titles[type].toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+  });
+  allocCvPaint();
   modal.style.display = 'flex';
 }
 
