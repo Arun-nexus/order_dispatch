@@ -3173,11 +3173,24 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
         if not serial_number:
             raise HTTPException(status_code=400, detail="serial number is required")
 
+        # Stored serials are not consistently lowercase (assembly serials are
+        # upper-case, imported/typed ones vary, some carry stray spaces), so an
+        # exact lowercase match missed many of them. Match case-insensitively
+        # and ignore surrounding whitespace in every collection, and compare
+        # the same way in Python below.
+        rx = {"$regex": r"^\s*" + re.escape(serial_number) + r"\s*$", "$options": "i"}
+
+        def _same(v):
+            return str(v or "").strip().lower() == serial_number
+
+        def _has(lst):
+            return any(_same(x) for x in (lst or []))
+
         events = []
 
         # ---- Currently in inventory (and under which category) ----
         inv_db = inventory_manager()
-        inv_entries = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"serial_numbers": serial_number})
+        inv_entries = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"serial_numbers": rx})
         for entry in inv_entries:
             events.append({
                 "type": "inventory",
@@ -3196,9 +3209,9 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
 
         # ---- Assembly (when/how this unit was built, if it was assembled in-house) ----
         asm_db = assembly_manager()
-        assemblies = asm_db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"serials.serial_number": serial_number})
+        assemblies = asm_db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"serials.serial_number": rx})
         for asm in assemblies:
-            serial_entry = next((s for s in asm.get("serials", []) if s.get("serial_number") == serial_number), {})
+            serial_entry = next((s for s in asm.get("serials", []) if _same(s.get("serial_number"))), {})
             events.append({
                 "type": "assembly",
                 "label": "Assembled",
@@ -3213,9 +3226,9 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
 
         # ---- Orders (sale + any return) ----
         order_db = order_manager()
-        orders = order_db.get_data(collection_name=ORDERS_COLLECTION, query={"items.serial_numbers": serial_number})
+        orders = order_db.get_data(collection_name=ORDERS_COLLECTION, query={"items.serial_numbers": rx})
         for o in orders:
-            item = next((it for it in o.get("items", []) if serial_number in (it.get("serial_numbers") or [])), {})
+            item = next((it for it in o.get("items", []) if _has(it.get("serial_numbers"))), {})
             events.append({
                 "type": "order",
                 "label": "Sold via order",
@@ -3228,7 +3241,7 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                 }
             })
             if o.get("status") == "returned":
-                ret_item = next((r for r in (o.get("returned_items") or []) if serial_number in (r.get("serial_numbers") or [])), None)
+                ret_item = next((r for r in (o.get("returned_items") or []) if _has(r.get("serial_numbers"))), None)
                 events.append({
                     "type": "order_return",
                     "label": "Returned (order)",
@@ -3242,9 +3255,9 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
 
         # ---- Allocations (demo unit or sales-person product allocation + return/damage) ----
         alloc_db = allocation_manager()
-        allocations = alloc_db.get_data(collection_name=ALLOCATION_COLLECTION, query={"items.serial_numbers": serial_number})
+        allocations = alloc_db.get_data(collection_name=ALLOCATION_COLLECTION, query={"items.serial_numbers": rx})
         for a in allocations:
-            item = next((it for it in a.get("items", []) if serial_number in (it.get("serial_numbers") or [])), {})
+            item = next((it for it in a.get("items", []) if _has(it.get("serial_numbers"))), {})
             is_demo = a.get("allocation_type") == "demo_unit"
             events.append({
                 "type": "allocation",
@@ -3274,7 +3287,10 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
 
         # ---- Service records raised against this serial ----
         svc_db = service_detail(product_id="", serial_no="")
-        services = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"serial_no": serial_number})
+        try:
+            services = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"serial_no": rx})
+        except Exception:
+            services = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"serial_no": serial_number})
         for s in services:
             events.append({
                 "type": "service",

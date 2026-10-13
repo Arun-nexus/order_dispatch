@@ -240,7 +240,7 @@ const A4Print = (() => {
     ovl.innerHTML = `
       <div class="odf-bar">
         <b><i class="fa-solid fa-file-lines"></i> Order Dispatch Form</b>
-        <span class="hint">Yellow fields editable hain — print se pehle kuch bhi add / change karo. Changes is computer pe save rehte hain. Print: A4 portrait.</span>
+        <span class="hint">Yellow fields are editable — add/edit details before the print. Changes was stored to the computer. Print: A4 portrait.</span>
         <button class="pr"><i class="fa-solid fa-print"></i> Print (A4)</button>
         <button class="rs"><i class="fa-solid fa-rotate-left"></i> Reset to system data</button>
         <button class="cl">Close</button>
@@ -285,7 +285,7 @@ const A4Print = (() => {
 
     ovl.querySelector('.cl').addEventListener('click', close);
     ovl.querySelector('.rs').addEventListener('click', () => {
-      if (!confirm('Saari manual edits hata kar system ka data wapas laga du?')) return;
+      if (!confirm('Are You sure you wanna to restore all the entries to Default')) return;
       saved = {};
       try { localStorage.removeItem(storeKey); } catch (e) { /* ignore */ }
       fill(false);

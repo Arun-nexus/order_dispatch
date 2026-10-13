@@ -85,7 +85,8 @@ function wireSerialRecordModal() {
     resultsBox.innerHTML = '<p style="color:var(--text-light);font-size:13px;">Searching...</p>';
     // serials are stored lowercase (see wireEditSerialFileUpload / the add-product
     // wizard) — lowercase here too so a serial typed in a different case still matches.
-    const normalizedSerial = serial.toLowerCase();
+    // server matches case-insensitively (stored serials are not all lowercase)
+    const normalizedSerial = serial.trim();
     try {
       const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(normalizedSerial)}`);
       const data = await res.json();
