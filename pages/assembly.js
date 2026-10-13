@@ -146,26 +146,26 @@ function asmEnsureStyles() {
     .as-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
     .as-head h3{margin:0}
     .as-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
-    .as-bar select,.as-bar input{padding:7px 9px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;background:#fff;color:var(--text-primary);min-width:0}
+    .as-bar select,.as-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px;background:#fff;color:#1e293b;min-width:0}
     .as-bar input[type=text]{flex:1;min-width:150px}
     .as-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
-    .as-btn.exp{background:var(--primary);color:#fff}
-    .as-btn.rst{background:var(--border);color:var(--text-secondary)}
-    .as-count{font-size:12px;color:var(--text-muted);margin:0 0 8px}
-    .as-wrap{overflow:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}
-    .as-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:820px;color:var(--text-primary)}
-    .as-tbl th{position:sticky;top:0;background:var(--bg-hover) !important;color:var(--text-secondary) !important;text-align:left;padding:8px;border-bottom:1px solid var(--border);white-space:nowrap}
-    .as-tbl td{padding:8px;border-bottom:1px solid var(--bg-hover);vertical-align:top;color:var(--text-primary)}
+    .as-btn.exp{background:#1665ff;color:#fff}
+    .as-btn.rst{background:#eef1f6;color:#334155}
+    .as-count{font-size:12px;color:#64748b;margin:0 0 8px}
+    .as-wrap{overflow:auto;max-height:58vh;border:1px solid #eef1f6;border-radius:10px}
+    .as-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:820px;color:#1e293b}
+    .as-tbl th{position:sticky;top:0;background:#f1f5f9 !important;color:#334155 !important;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+    .as-tbl td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top;color:#1e293b}
     .as-tbl tbody tr.clk{cursor:pointer}
-    .as-tbl tbody tr.clk:hover{background:var(--bg-light)}
-    .as-sub{display:block;font-size:11px;color:var(--text-muted);margin-top:1px}
+    .as-tbl tbody tr.clk:hover{background:#f8fbff}
+    .as-sub{display:block;font-size:11px;color:#64748b;margin-top:1px}
     .as-line{margin-bottom:6px}
     .as-line:last-child{margin-bottom:0}
-    .as-chip{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:var(--info-bg);color:var(--primary-dark);margin-left:4px}
-    .as-chip.local{background:var(--bg-hover);color:var(--text-secondary)}
+    .as-chip{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:#eef2ff;color:#3730a3;margin-left:4px}
+    .as-chip.local{background:#f1f5f9;color:#475569}
     /* table headings were white-on-light-grey in the detail modals */
-    #viewAssemblyModal th,#assemblyModal th,#assemblyCardDetailModal th{color:var(--text-secondary) !important}
-    #viewAssemblyModal thead,#assemblyModal thead{background:var(--bg-hover) !important}
+    #viewAssemblyModal th,#assemblyModal th,#assemblyCardDetailModal th{color:#334155 !important}
+    #viewAssemblyModal thead,#assemblyModal thead{background:#f1f5f9 !important}
   `;
   document.head.appendChild(st);
 }
@@ -219,18 +219,18 @@ function asmFiltered() {
 
 function asmRowsHtml(list) {
   if (asmCV.type === 'parts') {
-    if (!list.length) return '<tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:20px;">No parts match these filters.</td></tr>';
+    if (!list.length) return '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px;">No parts match these filters.</td></tr>';
     return list.map(p => `<tr>
       <td><b>${aesc(p.part_name)}</b></td>
       <td>${aesc(partBelongs(p) || '—')}</td>
       <td>${aesc(p.hologram_available ?? 0)}</td>
       <td>${aesc(p.quantity ?? 0)}</td></tr>`).join('');
   }
-  if (!list.length) return '<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:20px;">No assemblies match these filters.</td></tr>';
+  if (!list.length) return '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">No assemblies match these filters.</td></tr>';
   return list.map(a => {
     const parts = (a.partsUsed || []).map(p => `
       <div class="as-line">${aesc(p.name)} × ${aesc(p.quantity)}<span class="as-chip ${p.source === 'local' ? 'local' : ''}">${p.source === 'local' ? 'Local' : 'Inventory'}</span>
-        ${p.belongsTo ? `<span class="as-sub">Belongs to: ${aesc(p.belongsTo)}</span>` : ''}</div>`).join('') || '<span style="color:var(--text-light);">—</span>';
+        ${p.belongsTo ? `<span class="as-sub">Belongs to: ${aesc(p.belongsTo)}</span>` : ''}</div>`).join('') || '<span style="color:#94a3b8;">—</span>';
     return `<tr class="clk" data-id="${aesc(a.id)}">
       <td><b>${aesc(a.productName)}</b><span class="as-sub">${aesc(a.productId || '—')} · ${aesc(a.modelNumber || '—')}</span></td>
       <td>${aesc(a.quantity)}</td>
@@ -301,7 +301,7 @@ function openAssemblyCardDetailModal(type) {
       <select id="asF_status"><option value="">All Status</option>${Object.entries(ASM_STATUS_LABEL).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
       <select id="asF_source"><option value="">All Part Sources</option><option value="inventory">Inventory</option><option value="local">Local</option><option value="both">Inventory + Local</option></select>
       <select id="asF_product"><option value="">All Products</option>${opt(uniq(base.map(a => a.productName)))}</select>
-      <label style="font-size:12px;color:var(--text-muted);">Created</label>
+      <label style="font-size:12px;color:#64748b;">Created</label>
       <input type="date" id="asF_from" title="From"><input type="date" id="asF_to" title="To">`;
 
   const head = isParts
@@ -321,7 +321,7 @@ function openAssemblyCardDetailModal(type) {
     <div class="as-wrap"><table class="as-tbl">
       <thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead>
       <tbody id="asCvBody"></tbody></table></div>
-    ${isParts ? '' : '<p style="font-size:11.5px;color:var(--text-light);margin-top:8px;">Click a row to see full assembly details.</p>'}`;
+    ${isParts ? '' : '<p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Click a row to see full assembly details.</p>'}`;
 
   content.querySelector('.close').addEventListener('click', () => closeModal('assemblyCardDetailModal'));
   content.querySelectorAll('.as-bar select,.as-bar input').forEach(el => {
@@ -368,8 +368,8 @@ function statusPill(a) {
   const total = (a.serials || []).length;
   const done = (a.approvedSerials || []).length;
   if (a.status === 'completed') return '<span class="status delivered">Fully Approved</span>';
-  if (a.status === 'partially_approved') return `<span class="status pending" style="background:var(--warning-bg);color:var(--warning-dark);">Partially Approved (${done}/${total})</span>`;
-  if (a.status === 'pending_approval') return '<span class="status pending" style="background:var(--info-bg);color:var(--primary);">Awaiting Approval</span>';
+  if (a.status === 'partially_approved') return `<span class="status pending" style="background:#fff4e0;color:#b45309;">Partially Approved (${done}/${total})</span>`;
+  if (a.status === 'pending_approval') return '<span class="status pending" style="background:#e8f0ff;color:#1665ff;">Awaiting Approval</span>';
   return '<span class="status pending">Pending</span>';
 }
 
@@ -391,7 +391,7 @@ function renderTable() {
   const rows = asmTableRows();
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:24px;">No assemblies yet</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No assemblies yet</td></tr>`;
     return;
   }
 
@@ -450,17 +450,17 @@ function openViewAssemblyModal(id) {
       const last = a.editHistory[a.editHistory.length - 1];
       return `<div class="detail"><small>Last Edited</small><p>${last.edited_by || '—'} on ${(last.edited_at || '').slice(0, 10)} (${a.editHistory.length} edit${a.editHistory.length > 1 ? 's' : ''})</p></div>`;
     })() : ''}
-    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
     <h4 style="margin-bottom:8px;">Parts Used</h4>
-    <ul style="margin:0 0 14px 18px;font-size:13px;color:var(--text-secondary);">
-      ${(a.partsUsed || []).map(p => `<li>${p.name}${p.belongsTo ? ` <span style="color:var(--primary);">[Belongs to: ${p.belongsTo}]</span>` : ''} — qty ${p.quantity} <span style="color:var(--text-light);">(${sourceLabel(p)})</span></li>`).join('') || '<li style="color:var(--text-light);">No parts recorded</li>'}
+    <ul style="margin:0 0 14px 18px;font-size:13px;color:#475569;">
+      ${(a.partsUsed || []).map(p => `<li>${p.name}${p.belongsTo ? ` <span style="color:#1665ff;">[Belongs to: ${p.belongsTo}]</span>` : ''} — qty ${p.quantity} <span style="color:#94a3b8;">(${sourceLabel(p)})</span></li>`).join('') || '<li style="color:#94a3b8;">No parts recorded</li>'}
     </ul>
     <h4 style="margin-bottom:8px;">Serial / Hologram Numbers</h4>
-    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;">
+    <div style="max-height:220px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;">
         <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th>${a.status !== 'pending' ? '<th style="text-align:left;padding:8px;">Approval</th>' : ''}</tr></thead>
         <tbody>
-          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:var(--success-dark);">✔ Received</span>' : '<span style="color:var(--warning-dark);">Not received</span>'}</td>` : ''}</tr>`).join('')}
+          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:#16a34a;">✔ Received</span>' : '<span style="color:#d97706;">Not received</span>'}</td>` : ''}</tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -496,8 +496,8 @@ function openApproveAssemblyModal(id) {
       <h3>Approve — ${a.productName}</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">Tick the serial numbers that have arrived. Only ticked units are added to inventory.</p>
-    <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;">
+    <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Tick the serial numbers that have arrived. Only ticked units are added to inventory.</p>
+    <div style="max-height:320px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;">
         <thead><tr>
           <th style="padding:8px;width:40px;"><input type="checkbox" id="apprAll"></th>
@@ -510,14 +510,14 @@ function openApproveAssemblyModal(id) {
             <td style="padding:6px 8px;"><input type="checkbox" class="apprChk" value="${s.serial}" ${done.has(s.serial) ? 'checked disabled' : ''}></td>
             <td style="padding:6px 8px;">${s.serial}</td>
             <td style="padding:6px 8px;">${s.hologram}</td>
-            <td style="padding:6px 8px;">${done.has(s.serial) ? '<span style="color:var(--success-dark);">✔ Approved</span>' : '<span style="color:var(--warning-dark);">Not received</span>'}</td>
+            <td style="padding:6px 8px;">${done.has(s.serial) ? '<span style="color:#16a34a;">✔ Approved</span>' : '<span style="color:#d97706;">Not received</span>'}</td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
-      <span id="apprCount" style="font-size:13px;color:var(--text-muted);"></span>
-      <button id="apprSubmit" style="padding:10px 18px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Approve Selected</button>
+      <span id="apprCount" style="font-size:13px;color:#64748b;"></span>
+      <button id="apprSubmit" style="padding:10px 18px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Approve Selected</button>
     </div>`;
   const chks = () => [...box.querySelectorAll('.apprChk:not(:disabled)')];
   const sel = () => chks().filter(c => c.checked).map(c => c.value);
@@ -611,8 +611,8 @@ function stepDots(active) {
     <div style="display:flex;gap:8px;margin-bottom:20px;">
       ${labels.map((label, i) => `
         <div style="flex:1;text-align:center;">
-          <div style="height:6px;border-radius:99px;background:${i + 1 <= active ? 'var(--primary)' : 'var(--border)'};margin-bottom:6px;"></div>
-          <span style="font-size:11px;color:${i + 1 === active ? 'var(--primary)' : 'var(--text-light)'};font-weight:${i + 1 === active ? '600' : '400'};">${label}</span>
+          <div style="height:6px;border-radius:99px;background:${i + 1 <= active ? '#1665ff' : '#e2e8f0'};margin-bottom:6px;"></div>
+          <span style="font-size:11px;color:${i + 1 === active ? '#1665ff' : '#94a3b8'};font-weight:${i + 1 === active ? '600' : '400'};">${label}</span>
         </div>
       `).join('')}
     </div>`;
@@ -671,7 +671,7 @@ function renderAStep1() {
       <div style="display:flex;gap:8px;">
         ${['existing', 'new'].map(m => `
           <button type="button" data-mode="${m}" class="a1ModeBtn"
-            style="flex:1;padding:9px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid ${assemblyDraft.mode === m ? 'var(--primary)' : 'var(--border)'};background:${assemblyDraft.mode === m ? 'var(--info-bg)' : '#fff'};color:${assemblyDraft.mode === m ? 'var(--primary)' : 'var(--text-muted)'};">
+            style="flex:1;padding:9px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid ${assemblyDraft.mode === m ? '#1665ff' : '#e2e8f0'};background:${assemblyDraft.mode === m ? '#eef3fb' : '#fff'};color:${assemblyDraft.mode === m ? '#1665ff' : '#64748b'};">
             ${m === 'existing' ? 'Existing Product' : 'New Product'}
           </button>`).join('')}
       </div>
@@ -680,19 +680,19 @@ function renderAStep1() {
           <option value="">Choose product from inventory...</option>
           ${inventoryProducts.map((p, i) => `<option value="${i}" ${p.id === assemblyDraft.productId && p.model === assemblyDraft.modelNumber && p.name === assemblyDraft.productName ? 'selected' : ''}>${escAttr(p.name)} — ${escAttr(p.id)}${p.model ? ' — ' + escAttr(p.model) : ''}</option>`).join('')}
         </select>
-        <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" readonly style="background:var(--bg-hover);">
-        <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}" readonly style="background:var(--bg-hover);">
-        <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}" readonly style="background:var(--bg-hover);">
+        <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" readonly style="background:#f1f5f9;">
+        <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}" readonly style="background:#f1f5f9;">
+        <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}" readonly style="background:#f1f5f9;">
       ` : `
         <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" required>
         <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}">
         <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
       `}
-      <label style="font-size:13px;color:var(--text-muted);">Quantity to Assemble</label>
+      <label style="font-size:13px;color:#64748b;">Quantity to Assemble</label>
       <input type="number" id="a1Quantity" min="1" value="${assemblyDraft.quantity}" required>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-        <button type="button" class="cancel-btn" id="aCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Next: Parts Used</button>
+        <button type="button" class="cancel-btn" id="aCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Parts Used</button>
       </div>
     </form>
   `;
@@ -740,8 +740,8 @@ function renderAStep2() {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(2)}
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:4px;">Add every part this batch needs. Parts pulled from inventory are deducted from its spare parts stock when you save; local parts are not.</p>
-    <p style="font-size:12px;color:var(--primary-dark);background:var(--info-bg);border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+    <p style="font-size:13px;color:#64748b;margin-bottom:4px;">Add every part this batch needs. Parts pulled from inventory are deducted from its spare parts stock when you save; local parts are not.</p>
+    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <i class="fa-solid fa-circle-info"></i>
       Only hologram-tagged parts show up here. Exactly one inventory part's quantity must equal the assembly quantity
       (${assemblyDraft.quantity}) — that part's hologram numbers get assigned to the finished units.
@@ -749,17 +749,17 @@ function renderAStep2() {
     <div id="partsUsedRows" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div style="display:flex;gap:10px;margin-top:10px;">
       <button type="button" id="addInvPartBtn" ${availableParts.length ? '' : 'disabled'}
-        style="flex:1;padding:10px 12px;border:1px dashed var(--primary);border-radius:8px;background:var(--info-bg);cursor:pointer;font-size:13px;color:var(--primary);${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
+        style="flex:1;padding:10px 12px;border:1px dashed #1665ff;border-radius:8px;background:#f0f6ff;cursor:pointer;font-size:13px;color:#1665ff;${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
         <i class="fa-solid fa-boxes-stacked"></i> Add Part from Inventory
       </button>
       <button type="button" id="addLocalPartBtn"
-        style="flex:1;padding:10px 12px;border:1px dashed var(--text-light);border-radius:8px;background:var(--bg-light);cursor:pointer;font-size:13px;color:var(--text-secondary);">
+        style="flex:1;padding:10px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
         <i class="fa-solid fa-plus"></i> Add Local Part
       </button>
     </div>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
-      <button type="button" id="aBackTo1Btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Back</button>
-      <button type="button" id="aNextTo3Btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Next: Serial / Hologram</button>
+      <button type="button" id="aBackTo1Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
+      <button type="button" id="aNextTo3Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Serial / Hologram</button>
     </div>
   `;
   box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
@@ -841,22 +841,22 @@ function renderPartsUsedRows() {
     }
 
     const belongsField = p.source === 'inventory'
-      ? `<span class="partBelongs" style="flex:1.2;font-size:12px;color:var(--text-secondary);background:var(--bg-hover);border-radius:6px;padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Belongs to">${p.belongsTo || '—'}</span>`
+      ? `<span class="partBelongs" style="flex:1.2;font-size:12px;color:#475569;background:#f1f5f9;border-radius:6px;padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Belongs to">${p.belongsTo || '—'}</span>`
       : `<input type="text" class="partUsedBelongs" placeholder="Belongs to" value="${p.belongsTo || ''}" style="flex:1.2;">`;
 
     return `
       <div style="display:flex;gap:8px;align-items:center;" data-part-row="${i}">
-        <span style="font-size:11px;font-weight:600;color:${p.source === 'inventory' ? 'var(--primary)' : 'var(--text-muted)'};width:70px;flex-shrink:0;">
+        <span style="font-size:11px;font-weight:600;color:${p.source === 'inventory' ? '#1665ff' : '#64748b'};width:70px;flex-shrink:0;">
           ${p.source === 'inventory' ? 'INVENTORY' : 'LOCAL'}
         </span>
         ${nameField}
         ${belongsField}
         <input type="number" min="0" class="partUsedQty" placeholder="Qty" value="${p.quantity}" style="flex:1;">
-        <button type="button" class="removePartUsedBtn" data-index="${i}" style="border:none;background:var(--danger-bg);color:var(--danger);border-radius:8px;width:36px;height:36px;cursor:pointer;">
+        <button type="button" class="removePartUsedBtn" data-index="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:36px;height:36px;cursor:pointer;">
           <i class="fa-solid fa-xmark"></i>
         </button>
       </div>`;
-  }).join('') || '<p style="color:var(--text-light);font-size:13px;">No parts added yet — use the buttons below.</p>';
+  }).join('') || '<p style="color:#94a3b8;font-size:13px;">No parts added yet — use the buttons below.</p>';
 
   wrap.querySelectorAll('.removePartUsedBtn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -935,33 +935,33 @@ function renderAStep3() {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(3)}
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:6px;">
+    <p style="font-size:13px;color:#64748b;margin-bottom:6px;">
       Enter (or adjust) Unit 1's serial number below, then generate the rest of the batch from it — or fill in / edit every unit by hand.
     </p>
-    <p style="font-size:12px;color:var(--primary-dark);background:var(--info-bg);border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <i class="fa-solid fa-circle-info"></i>
       Hologram numbers aren't entered here — each unit will automatically get the next hologram number on file for
       <strong>${hologramPart ? hologramPart.name : 'the inventory part'}</strong> when you save.
     </p>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
-      <button type="button" id="genFromUnit1Btn" style="padding:6px 12px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;font-size:12px;">
+      <button type="button" id="genFromUnit1Btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;">
         <i class="fa-solid fa-arrow-down-9-1"></i> Generate Remaining From Unit 1
       </button>
-      <button type="button" id="regenSerialsBtn" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;">
+      <button type="button" id="regenSerialsBtn" style="padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;">
         <i class="fa-solid fa-rotate"></i> Auto-generate All
       </button>
     </div>
-    <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;">
+    <div style="max-height:280px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead style="position:sticky;top:0;background:var(--bg-light);">
+        <thead style="position:sticky;top:0;background:#f8fafc;">
           <tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial Number</th></tr>
         </thead>
         <tbody id="serialRows"></tbody>
       </table>
     </div>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
-      <button type="button" id="aBackTo2Btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Back</button>
-      <button type="button" id="saveAssemblyBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;cursor:pointer;font-weight:600;">
+      <button type="button" id="aBackTo2Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
+      <button type="button" id="saveAssemblyBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#1665ff,#4c92ff);color:#fff;cursor:pointer;font-weight:600;">
         <i class="fa-solid fa-check"></i> Save Assembly
       </button>
     </div>
@@ -995,7 +995,7 @@ function renderSerialRows() {
   const tbody = document.getElementById('serialRows');
   tbody.innerHTML = assemblyDraft.serials.map((s, i) => `
     <tr data-serial-row="${i}">
-      <td style="padding:6px 8px;">${i + 1}${i === 0 ? ' <span style="color:var(--text-light);font-size:11px;">(seed)</span>' : ''}</td>
+      <td style="padding:6px 8px;">${i + 1}${i === 0 ? ' <span style="color:#94a3b8;font-size:11px;">(seed)</span>' : ''}</td>
       <td style="padding:6px 8px;"><input type="text" class="serialInput" placeholder="Serial Number" value="${s}" style="width:100%;"></td>
     </tr>
   `).join('');
@@ -1110,11 +1110,11 @@ function renderEditAssemblyModal() {
       <input id="eProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}">
       <input id="eProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}">
       <input id="eModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
-      <label style="font-size:13px;color:var(--text-muted);">Quantity to Assemble (cannot be changed)</label>
+      <label style="font-size:13px;color:#64748b;">Quantity to Assemble (cannot be changed)</label>
       <input type="number" value="${assemblyDraft.quantity}" disabled>
     </div>
     <h4 style="margin:18px 0 6px;">Parts Used</h4>
-    <p style="font-size:12px;color:var(--primary-dark);background:var(--info-bg);border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <i class="fa-solid fa-circle-info"></i>
       Add, remove or change parts. If an inventory part's quantity goes up, the extra is deducted from inventory;
       if it goes down or the part is removed, the difference is restocked.
@@ -1123,17 +1123,17 @@ function renderEditAssemblyModal() {
     <div id="partsUsedRows" style="display:flex;flex-direction:column;gap:8px;"></div>
     <div style="display:flex;gap:10px;margin-top:10px;">
       <button type="button" id="eAddInvPartBtn" ${availableParts.length ? '' : 'disabled'}
-        style="flex:1;padding:10px 12px;border:1px dashed var(--primary);border-radius:8px;background:var(--info-bg);cursor:pointer;font-size:13px;color:var(--primary);${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
+        style="flex:1;padding:10px 12px;border:1px dashed #1665ff;border-radius:8px;background:#f0f6ff;cursor:pointer;font-size:13px;color:#1665ff;${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
         <i class="fa-solid fa-boxes-stacked"></i> Add Part from Inventory
       </button>
       <button type="button" id="eAddLocalPartBtn"
-        style="flex:1;padding:10px 12px;border:1px dashed var(--text-light);border-radius:8px;background:var(--bg-light);cursor:pointer;font-size:13px;color:var(--text-secondary);">
+        style="flex:1;padding:10px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
         <i class="fa-solid fa-plus"></i> Add Local Part
       </button>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;">
-      <button type="button" id="eCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
-      <button type="button" id="eSaveBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;cursor:pointer;font-weight:600;">
+      <button type="button" id="eCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+      <button type="button" id="eSaveBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#1665ff,#4c92ff);color:#fff;cursor:pointer;font-weight:600;">
         <i class="fa-solid fa-check"></i> Save Changes
       </button>
     </div>

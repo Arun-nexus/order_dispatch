@@ -78,7 +78,7 @@ function paymentSummaryHtml(s) {
     <div class="detail"><small>Payment</small><p>${mode === 'partial' ? 'Partial — part paid, rest on credit' : 'Credit'}</p></div>
     <div class="detail"><small>Paid now</small><p>${curMoney(paid, s.currency)}</p></div>
     <div class="detail"><small>On credit (balance)</small><p>${curMoney(Math.max(total - paid, 0), s.currency)}</p></div>
-    <div class="detail"><small>Credit time</small><p>${s.creditDays} day(s) — due ${due || '—'}<br><small style="color:var(--text-light);">Later payments are tracked in Users → Companies.</small></p></div>`;
+    <div class="detail"><small>Credit time</small><p>${s.creditDays} day(s) — due ${due || '—'}<br><small style="color:#94a3b8;">Later payments are tracked in Users → Companies.</small></p></div>`;
 }
 async function loadCompanyList() {
   try {
@@ -202,27 +202,27 @@ function shipEnsureStyles() {
     .sh-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
     .sh-head h3{margin:0}
     .sh-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
-    .sh-bar select,.sh-bar input{padding:7px 9px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;background:#fff;min-width:0}
+    .sh-bar select,.sh-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px;background:#fff;min-width:0}
     .sh-bar input[type=text]{flex:1;min-width:150px}
     .sh-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
-    .sh-btn.exp{background:var(--primary);color:#fff}
-    .sh-btn.rst{background:var(--border);color:var(--text-secondary)}
-    .sh-count{font-size:12px;color:var(--text-muted);margin:0 0 8px}
-    .sh-wrap{overflow:auto;max-height:58vh;border:1px solid var(--border);border-radius:10px}
+    .sh-btn.exp{background:#1665ff;color:#fff}
+    .sh-btn.rst{background:#eef1f6;color:#334155}
+    .sh-count{font-size:12px;color:#64748b;margin:0 0 8px}
+    .sh-wrap{overflow:auto;max-height:58vh;border:1px solid #eef1f6;border-radius:10px}
     .sh-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:900px}
-    .sh-tbl th{position:sticky;top:0;background:var(--bg-hover) !important;color:var(--text-secondary) !important;text-align:left;padding:8px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
-    .sh-tbl td{color:var(--text-primary);padding:8px;border-bottom:1px solid var(--bg-hover);vertical-align:top}
+    .sh-tbl th{position:sticky;top:0;background:#f1f5f9 !important;color:#334155 !important;text-align:left;padding:8px 8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+    .sh-tbl td{color:#1e293b;padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
     .sh-tbl tbody tr{cursor:pointer}
-    .sh-tbl tbody tr:hover{background:var(--bg-light)}
-    .sh-sub{display:block;font-size:11px;color:var(--text-muted);margin-top:1px}
+    .sh-tbl tbody tr:hover{background:#f8fbff}
+    .sh-sub{display:block;font-size:11px;color:#64748b;margin-top:1px}
     .sh-line{margin-bottom:6px}
     .sh-line:last-child{margin-bottom:0}
-    .sh-chip{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:var(--info-bg);color:var(--primary-dark);margin-left:4px}
-    .sh-chip.purchase{background:var(--warning-bg);color:var(--warning-dark)}
-    .sh-chip.warranty{background:var(--success-bg);color:var(--success-dark)}
+    .sh-chip{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:#eef2ff;color:#3730a3;margin-left:4px}
+    .sh-chip.purchase{background:#fff7ed;color:#9a3412}
+    .sh-chip.warranty{background:#ecfdf5;color:#065f46}
     .sh-pill{padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600}
-    .sh-pill.received{background:var(--success-bg);color:var(--success-dark)}
-    .sh-pill.pending{background:var(--warning-bg);color:var(--warning-dark)}
+    .sh-pill.received{background:#dcfce7;color:#166534}
+    .sh-pill.pending{background:#fef3c7;color:#92400e}
   `;
   document.head.appendChild(st);
 }
@@ -270,7 +270,7 @@ function shipFiltered() {
 }
 
 function shipRowsHtml(list) {
-  if (!list.length) return '<tr><td colspan="9" style="text-align:center;color:var(--text-light);padding:20px;">No shipments match these filters.</td></tr>';
+  if (!list.length) return '<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:20px;">No shipments match these filters.</td></tr>';
   return list.map(s => {
     const st = shipmentStatus(s);
     const prods = (s.products || []).map(p => `
@@ -278,7 +278,7 @@ function shipRowsHtml(list) {
         <span class="sh-sub">${curMoney(p.price, s.currency)} each${p.warranty ? ' · Warranty: ' + esc(p.warranty) : ''}</span></div>`).join('') || '—';
     const parts = shipPartsOf(s).map(pt => `
       <div class="sh-line">${esc(pt.name)} × ${esc(pt.qty)}<span class="sh-chip ${esc(pt.status)}">${esc(partStatusLabel(pt.status))}</span>
-        <span class="sh-sub">Belongs to: ${esc(pt.product)}</span></div>`).join('') || '<span style="color:var(--text-light);">—</span>';
+        <span class="sh-sub">Belongs to: ${esc(pt.product)}</span></div>`).join('') || '<span style="color:#94a3b8;">—</span>';
     const total = draftTotal(s);
     return `<tr data-id="${esc(s.id)}">
       <td>${esc(s.id)}</td>
@@ -373,7 +373,7 @@ function openShipmentCardDetailModal(type) {
       <select id="shF_currency"><option value="">All Currency</option>${opt(currencies)}</select>
       <select id="shF_company"><option value="">All Companies</option>${opt(companies)}</select>
       <select id="shF_partStatus"><option value="">All Part Types</option><option value="assembly">Assembly</option><option value="purchase">Purchase</option><option value="warranty">Warranty</option></select>
-      <label style="font-size:12px;color:var(--text-muted);">Dispatch</label>
+      <label style="font-size:12px;color:#64748b;">Dispatch</label>
       <input type="date" id="shF_from" title="From"><input type="date" id="shF_to" title="To">
       <button class="sh-btn rst" id="shF_reset">Reset</button>
       <button class="sh-btn exp" id="shF_export"><i class="fa-solid fa-download"></i> Export CSV</button>
@@ -382,7 +382,7 @@ function openShipmentCardDetailModal(type) {
     <div class="sh-wrap"><table class="sh-tbl">
       <thead><tr><th>Shipment ID</th><th>Company</th><th>Products</th><th>Parts</th><th>Dispatch</th><th>Received</th><th>Payment</th><th>Total</th><th>Status</th></tr></thead>
       <tbody id="shCvBody"></tbody></table></div>
-    <p style="font-size:11.5px;color:var(--text-light);margin-top:8px;">Click a row to see full shipment details.</p>`;
+    <p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Click a row to see full shipment details.</p>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   ['status', 'payment', 'currency', 'company', 'partStatus', 'from', 'to'].forEach(k => {
@@ -434,7 +434,7 @@ function renderTable() {
   const rows = shipTableRows();
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:24px;">No shipments yet</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px;">No shipments yet</td></tr>`;
     return;
   }
 
@@ -487,22 +487,22 @@ function openViewModal(id) {
     <div class="detail"><small>Total</small><p>${curMoney(draftTotal(s), s.currency)}${s.currency !== 'INR' ? ` ≈ ${money(s.totalInr)} (₹${s.exchangeRate}/${s.currency})` : ''}</p></div>
     <div class="detail"><small>Dispatch Date</small><p>${s.dispatchDate || '—'}</p></div>
     <div class="detail"><small>Received Date</small><p>${s.receivedDate || 'Not received yet'}</p></div>
-    <hr style="margin:14px 0;border:none;border-top:1px solid var(--border);">
+    <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
     <h4 style="margin-bottom:10px;">Products</h4>
     ${(s.products || []).map(p => `
-      <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px;">
+      <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;font-weight:600;">
           <span>${p.name}</span>
           <span>${curMoney(p.price, s.currency)} x ${p.quantity} = ${curMoney((Number(p.price)||0)*(Number(p.quantity)||0), s.currency)}</span>
         </div>
-        ${p.warranty ? `<p style="font-size:12px;color:var(--text-muted);margin-top:4px;">Warranty: ${p.warranty}</p>` : ''}
+        ${p.warranty ? `<p style="font-size:12px;color:#64748b;margin-top:4px;">Warranty: ${p.warranty}</p>` : ''}
         ${(p.parts && p.parts.length) ? `
-          <p style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-top:8px;">Parts</p>
-          <ul style="margin:4px 0 0 18px;font-size:13px;color:var(--text-secondary);">
-            ${p.parts.map(part => `<li>${part.name} — qty ${part.quantity} <span style="color:var(--text-light);">(${partStatusLabel(part.status)})</span></li>`).join('')}
-          </ul>` : `<p style="font-size:12px;color:var(--text-light);margin-top:6px;">No parts added</p>`}
+          <p style="font-size:12px;font-weight:600;color:#334155;margin-top:8px;">Parts</p>
+          <ul style="margin:4px 0 0 18px;font-size:13px;color:#475569;">
+            ${p.parts.map(part => `<li>${part.name} — qty ${part.quantity} <span style="color:#94a3b8;">(${partStatusLabel(part.status)})</span></li>`).join('')}
+          </ul>` : `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">No parts added</p>`}
       </div>
-    `).join('') || '<p style="color:var(--text-light);">No products added</p>'}
+    `).join('') || '<p style="color:#94a3b8;">No products added</p>'}
   `;
   box.querySelector('.close').addEventListener('click', () => closeModal('viewShipmentModal'));
   openModal('viewShipmentModal');
@@ -521,11 +521,11 @@ function openReceivedModal(id) {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     <form id="receivedForm" style="display:flex;flex-direction:column;gap:10px;">
-      <label style="font-size:13px;color:var(--text-muted);">Shipment Received Date</label>
+      <label style="font-size:13px;color:#64748b;">Shipment Received Date</label>
       <input type="date" id="receivedDateInput" value="${todayStr()}" required>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Save</button>
+        <button type="button" class="cancel-btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
       </div>
     </form>
   `;
@@ -605,8 +605,8 @@ function stepDots(active) {
     <div style="display:flex;gap:8px;margin-bottom:20px;">
       ${labels.map((label, i) => `
         <div style="flex:1;text-align:center;">
-          <div style="height:6px;border-radius:99px;background:${i + 1 <= active ? 'var(--primary)' : 'var(--border)'};margin-bottom:6px;"></div>
-          <span style="font-size:11px;color:${i + 1 === active ? 'var(--primary)' : 'var(--text-light)'};font-weight:${i + 1 === active ? '600' : '400'};">${label}</span>
+          <div style="height:6px;border-radius:99px;background:${i + 1 <= active ? '#1665ff' : '#e2e8f0'};margin-bottom:6px;"></div>
+          <span style="font-size:11px;color:${i + 1 === active ? '#1665ff' : '#94a3b8'};font-weight:${i + 1 === active ? '600' : '400'};">${label}</span>
         </div>
       `).join('')}
     </div>`;
@@ -708,13 +708,13 @@ function renderStep1() {
     </div>
     ${stepDots(1)}
     <form id="shipStep1Form" style="display:flex;flex-direction:column;gap:10px;">
-      <label style="font-size:13px;color:var(--text-muted);">Company</label>
+      <label style="font-size:13px;color:#64748b;">Company</label>
       <select id="s1Company">
         <option value="">➕ Create new company manually</option>
         ${companyList.map(c => `<option value="${esc(c.customer_id)}" ${c.customer_id === d.customerId ? 'selected' : ''}>${esc(c.company_name)}</option>`).join('')}
       </select>
       ${picked ? `
-        <div style="background:var(--bg-light);border-radius:10px;padding:10px;font-size:13px;color:var(--text-secondary);">
+        <div style="background:#f8fafc;border-radius:10px;padding:10px;font-size:13px;color:#475569;">
           <div>${esc(picked.company_address) || '—'}</div>
           <div>GST: ${esc(picked.gst_number) || '—'} • ${esc(picked.contractor_person) || ''} ${esc(picked.contractor_number) || ''}</div>
         </div>` : `
@@ -726,7 +726,7 @@ function renderStep1() {
         ${input('s1ContactEmail', 'Contact Email (optional)', d.contactEmail)}`}
       <div style="display:flex;gap:10px;">
         <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
-          <label style="font-size:13px;color:var(--text-muted);">Payment</label>
+          <label style="font-size:13px;color:#64748b;">Payment</label>
           <select id="s1Payment">
             <option value="paid" ${d.paymentMode === 'paid' ? 'selected' : ''}>Paid (full)</option>
             <option value="partial" ${d.paymentMode === 'partial' ? 'selected' : ''}>Partial (part now, rest later)</option>
@@ -734,35 +734,35 @@ function renderStep1() {
           </select>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
-          <label style="font-size:13px;color:var(--text-muted);">Price Currency</label>
+          <label style="font-size:13px;color:#64748b;">Price Currency</label>
           <select id="s1Currency">
             ${Object.keys(CURRENCIES).map(c => `<option value="${c}" ${c === d.currency ? 'selected' : ''}>${c}</option>`).join('')}
           </select>
         </div>
       </div>
       ${d.paymentMode !== 'paid' ? `
-        <div style="background:var(--warning-bg);border:1px solid var(--warning-bg);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;">
-          <label style="font-size:13px;color:var(--warning-dark);font-weight:600;">In how many days will the ${d.paymentMode === 'partial' ? 'remaining' : ''} payment be made?</label>
+        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;">
+          <label style="font-size:13px;color:#9a3412;font-weight:600;">In how many days will the ${d.paymentMode === 'partial' ? 'remaining' : ''} payment be made?</label>
           <div style="display:flex;gap:8px;align-items:center;">
             <input id="s1CreditDays" type="number" min="1" max="365" step="1" placeholder="Credit time (days)" value="${esc(d.creditDays)}" style="flex:1;">
-            <span style="font-size:12px;color:var(--warning-dark);white-space:nowrap;" id="s1DueHint"></span>
+            <span style="font-size:12px;color:#9a3412;white-space:nowrap;" id="s1DueHint"></span>
           </div>
-          ${d.paymentMode === 'partial' ? '<small style="color:var(--warning-dark);">The amount paid now is asked on the next step, once products and prices are added.</small>' : ''}
+          ${d.paymentMode === 'partial' ? '<small style="color:#9a3412;">The amount paid now is asked on the next step, once products and prices are added.</small>' : ''}
         </div>` : ''}
       ${d.currency !== 'INR' ? `
         <div style="display:flex;gap:8px;align-items:center;">
-          <span style="font-size:13px;color:var(--text-muted);white-space:nowrap;">1 ${d.currency} = ₹</span>
+          <span style="font-size:13px;color:#64748b;white-space:nowrap;">1 ${d.currency} = ₹</span>
           <input id="s1Rate" type="number" step="any" min="0" value="${d.exchangeRate}" style="flex:1;">
-          <button type="button" id="s1RefreshRate" style="padding:8px 12px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Refresh</button>
+          <button type="button" id="s1RefreshRate" style="padding:8px 12px;border:none;border-radius:8px;background:#e2e8f0;cursor:pointer;">Refresh</button>
         </div>
-        <small style="color:var(--text-light);">${esc(d.rateNote)}</small>` : ''}
-      <label style="font-size:13px;color:var(--text-muted);">Shipment Dispatch Date</label>
+        <small style="color:#94a3b8;">${esc(d.rateNote)}</small>` : ''}
+      <label style="font-size:13px;color:#64748b;">Shipment Dispatch Date</label>
       <input type="date" id="s1Dispatch" value="${esc(d.dispatchDate)}" required>
-      ${d.isEdit ? `<input type="hidden" id="s1ReceivedDate" value="${esc(d.receivedDate)}">` : `<label style="font-size:13px;color:var(--text-muted);">Shipment Received Date <span style="color:var(--text-light);">(optional — can be added later)</span></label>
+      ${d.isEdit ? `<input type="hidden" id="s1ReceivedDate" value="${esc(d.receivedDate)}">` : `<label style="font-size:13px;color:#64748b;">Shipment Received Date <span style="color:#94a3b8;">(optional — can be added later)</span></label>
       <input type="date" id="s1ReceivedDate" value="${esc(d.receivedDate)}">`}
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
-        <button type="button" class="cancel-btn" id="shipCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Next: Add Products</button>
+        <button type="button" class="cancel-btn" id="shipCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Add Products</button>
       </div>
     </form>
   `;
@@ -825,21 +825,21 @@ function renderStep2() {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(2)}
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">Add every product going out in this shipment.</p>
+    <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Add every product going out in this shipment.</p>
     <div id="productRows" style="display:flex;flex-direction:column;gap:10px;"></div>
-    <p id="shipTotals" style="margin-top:12px;font-size:13px;font-weight:600;color:var(--text-secondary);text-align:right;"></p>
+    <p id="shipTotals" style="margin-top:12px;font-size:13px;font-weight:600;color:#334155;text-align:right;"></p>
     ${shipmentDraft.paymentMode === 'partial' ? `
-      <div style="margin-top:10px;background:var(--warning-bg);border:1px solid var(--warning-bg);border-radius:10px;padding:10px;">
-        <label style="font-size:13px;color:var(--warning-dark);font-weight:600;">Amount paid now (${shipmentDraft.currency})</label>
+      <div style="margin-top:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px;">
+        <label style="font-size:13px;color:#9a3412;font-weight:600;">Amount paid now (${shipmentDraft.currency})</label>
         <input id="s2PaidAmount" type="number" min="0" step="any" placeholder="e.g. half of the total" value="${shipmentDraft.paidAmount || ''}" style="width:100%;margin-top:4px;">
-        <p id="s2PaidHint" style="font-size:12px;color:var(--warning-dark);margin-top:6px;"></p>
+        <p id="s2PaidHint" style="font-size:12px;color:#9a3412;margin-top:6px;"></p>
       </div>` : ''}
-    <button type="button" id="addProductRowBtn" style="margin-top:10px;padding:10px 14px;border:1px dashed var(--text-light);border-radius:8px;background:var(--bg-light);cursor:pointer;font-size:13px;color:var(--text-secondary);">
+    <button type="button" id="addProductRowBtn" style="margin-top:10px;padding:10px 14px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
       <i class="fa-solid fa-plus"></i> Add Product
     </button>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
-      <button type="button" id="shipBackBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Back</button>
-      <button type="button" id="shipNextToPartsBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Next: Add Parts</button>
+      <button type="button" id="shipBackBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
+      <button type="button" id="shipNextToPartsBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Add Parts</button>
     </div>
   `;
   box.querySelector('.close').addEventListener('click', () => closeModal('shipmentModal'));
@@ -889,7 +889,7 @@ function renderProductRows() {
       <input type="text" class="prodName" placeholder="Product Name" value="${p.name}" style="flex:2;">
       <input type="number" min="0" class="prodQty" placeholder="Qty" value="${p.quantity}" style="flex:1;">
       <input type="number" min="0" step="any" class="prodPrice" placeholder="Price (${shipmentDraft.currency})" value="${p.price}" style="flex:1;">
-      <button type="button" class="removeProdBtn" data-index="${i}" style="border:none;background:var(--danger-bg);color:var(--danger);border-radius:8px;width:38px;height:38px;cursor:pointer;">
+      <button type="button" class="removeProdBtn" data-index="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:38px;height:38px;cursor:pointer;">
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
@@ -947,11 +947,11 @@ function renderStep3() {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${stepDots(3)}
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">Add spare parts and warranty for each product (optional, but recommended).</p>
+    <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Add spare parts and warranty for each product (optional, but recommended).</p>
     <div id="partsWizard" style="display:flex;flex-direction:column;gap:16px;"></div>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
-      <button type="button" id="shipBackToProductsBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--border);cursor:pointer;">Back</button>
-      <button type="button" id="saveShipmentBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--primary-light));color:#fff;cursor:pointer;font-weight:600;">
+      <button type="button" id="shipBackToProductsBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
+      <button type="button" id="saveShipmentBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#1665ff,#4c92ff);color:#fff;cursor:pointer;font-weight:600;">
         <i class="fa-solid fa-check"></i> Save Shipment
       </button>
     </div>
@@ -966,15 +966,15 @@ function renderStep3() {
 function renderPartsWizard() {
   const wrap = document.getElementById('partsWizard');
   wrap.innerHTML = shipmentDraft.products.map((p, pi) => `
-    <div style="border:1px solid var(--border);border-radius:12px;padding:14px;" data-product="${pi}">
+    <div style="border:1px solid #e2e8f0;border-radius:12px;padding:14px;" data-product="${pi}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <strong>${p.name || 'Unnamed product'}</strong>
-        <span style="font-size:12px;color:var(--text-light);">Qty ${p.quantity || 0}</span>
+        <span style="font-size:12px;color:#94a3b8;">Qty ${p.quantity || 0}</span>
       </div>
 
-      <label style="font-size:12px;color:var(--text-muted);">Warranty (for parts)</label>
+      <label style="font-size:12px;color:#64748b;">Warranty (for parts)</label>
       <input type="text" class="partWarranty" placeholder="e.g. 12 months" value="${p.warranty}" style="margin-bottom:6px;">
-      <p style="font-size:11px;color:var(--text-light);margin:0 0 10px;">Status: <b>Assembly</b> parts go to Inventory's Spare Parts on receive; <b>Purchase</b>/<b>Warranty</b> parts go to Service Parts.</p>
+      <p style="font-size:11px;color:#94a3b8;margin:0 0 10px;">Status: <b>Assembly</b> parts go to Inventory's Spare Parts on receive; <b>Purchase</b>/<b>Warranty</b> parts go to Service Parts.</p>
 
       <div class="partsRows" style="display:flex;flex-direction:column;gap:8px;">
         ${p.parts.map((part, prtIdx) => `
@@ -986,14 +986,14 @@ function renderPartsWizard() {
               <option value="purchase" ${part.status === 'purchase' ? 'selected' : ''}>Purchase</option>
               <option value="warranty" ${part.status === 'warranty' ? 'selected' : ''}>Warranty</option>
             </select>
-            <button type="button" class="removePartBtn" data-index="${prtIdx}" style="border:none;background:var(--danger-bg);color:var(--danger);border-radius:8px;width:34px;height:34px;cursor:pointer;">
+            <button type="button" class="removePartBtn" data-index="${prtIdx}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:34px;height:34px;cursor:pointer;">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
         `).join('')}
       </div>
 
-      <button type="button" class="addPartBtn" style="margin-top:8px;padding:8px 12px;border:1px dashed var(--text-light);border-radius:8px;background:var(--bg-light);cursor:pointer;font-size:12px;color:var(--text-secondary);">
+      <button type="button" class="addPartBtn" style="margin-top:8px;padding:8px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:12px;color:#334155;">
         <i class="fa-solid fa-plus"></i> Add Part
       </button>
     </div>
