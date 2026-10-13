@@ -1,5 +1,6 @@
 const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [], searchQuery: '', activeFilters: null };
 let dispPage = 1;
+let dispUserNames = {};   // username -> display name (for the form's REF box)
 const DISP_PAGE_SIZE = 30;
 
 function renderTablePagination(container, page, totalPages, onChange) {
@@ -294,7 +295,20 @@ function getFilteredRows() {
   return rows;
 }
 
+async function loadDispatchUsers() {
+  if (Object.keys(dispUserNames).length) return;
+  try {
+    const res = await apiFetch('/account/users');
+    if (res.ok) ((await res.json()).dataset || []).forEach(u => { if (u.username) dispUserNames[u.username] = u.name || u.username; });
+  } catch (e) { /* names are optional - falls back to the username */ }
+}
+
+function odfPersonName(username) {
+  return username ? (dispUserNames[username] || username) : '';
+}
+
 async function loadDispatchQueue() {
+  loadDispatchUsers();
   try {
     const res = await apiFetch('/dispatch/');
     if (!res.ok) throw new Error('failed to fetch dispatch queue');
@@ -586,15 +600,15 @@ function odfDefaults(row) {
     const c = d.customer || {};
     company = c.company_name || '';
     address = c.company_address || '';
-    ref = d.order_id || '';
+    ref = odfPersonName(d.reference || d.creator?.raised_by);
   } else if (row.kind === 'product_allocation') {
     company = d.sales_person?.name || d.company_name || '';
     address = d.address || '';
-    ref = d.allocation_id || '';
+    ref = d.sales_person?.name || '';
     lines.unshift('ALLOCATED / DEMO PRODUCT');
   } else {
     company = `Service #${(d.spare_part?.service_id || '').slice(0, 8)} (Spare Part)`;
-    ref = d.allocation_id || '';
+    ref = odfPersonName(d.allocated_by);
     lines = ['SPARE PART FOR SERVICE', `1. ${d.spare_part?.part_name ?? ''}  -  Qty: ${d.spare_part?.quantity ?? '-'}`];
   }
 
