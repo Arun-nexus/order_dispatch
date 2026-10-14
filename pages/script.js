@@ -141,10 +141,14 @@ async function loadAssignees() {
   return svcState.assignees;
 }
 
+// Product ID is a fixed blank value now (see DEFAULT_PRODUCT_ID below), so it
+// can't identify an order line any more — only match on it when it has content.
+const hasRealProductId = s => !!String(s.product_id ?? '').trim();
+
 function findOrderItemForService(s) {
   const items = svcState.orders.flatMap(o => o.items || []);
   return (s.serial_no && items.find(it => (it.serial_numbers || []).includes(s.serial_no)))
-    || items.find(it => it.product_id === s.product_id)
+    || (hasRealProductId(s) ? items.find(it => it.product_id === s.product_id) : null)
     || null;
 }
 
@@ -218,9 +222,9 @@ function statusBadge(status) {
 // finds the order this service's product belongs to by searching each order's
 // line items (orders store items[].serial_numbers, not a top-level serial_no)
 function findOrderForService(s) {
-  if (!s.serial_no) return svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id));
+  if (!s.serial_no) return hasRealProductId(s) ? svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id)) : undefined;
   return svcState.orders.find(o => (o.items || []).some(it => (it.serial_numbers || []).includes(s.serial_no)))
-      || svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id));
+      || (hasRealProductId(s) ? svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id)) : undefined);
 }
 
 // warranty = manual override (warranty_until) if admin/employee set one, else order_date + 365 days
@@ -549,6 +553,10 @@ function wireFilters() {
 
 // --- Create Service modal (injected: service.html ships a "new-service"
 // button but no matching modal markup) ---
+// Product ID is never typed in by hand — new service requests always use this
+// fixed value (a single space). The serial number identifies the unit.
+const DEFAULT_PRODUCT_ID = ' ';
+
 async function openCreateModal() {
   let modal = document.getElementById('createServiceModal');
   if (!modal) {
@@ -559,7 +567,6 @@ async function openCreateModal() {
       <div style="background:#fff;border-radius:16px;padding:26px;width:460px;">
         <h2 style="margin-bottom:18px;">New Service Request</h2>
         <form id="createServiceForm" style="display:flex;flex-direction:column;gap:12px;">
-          <input name="product_id" placeholder="Product" required>
           <select name="location" required>
             <option value="indoor">Inhouse</option>
             <option value="outdoor">Field</option>
@@ -610,7 +617,7 @@ async function openCreateModal() {
       }
 
       const payload = {
-        product_id: fd.get('product_id'),
+        product_id: DEFAULT_PRODUCT_ID,
         location: fd.get('location'),
         serial_no: (fd.get('serial_no') || '').trim().toLowerCase(),
         technician_id: fd.get('technician_id'),

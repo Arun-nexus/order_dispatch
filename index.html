@@ -62,7 +62,7 @@
           <div class="input-box">
             <label>Password</label>
             <div class="input-field">
-              <i class="fa-regular fa-eye"></i>
+              <i class="fa-regular fa-eye" id="togglePassword" style="cursor:pointer;" title="Show password"></i>
               <input type="password" id="password" placeholder="Enter your password" required>
             </div>
           </div>
@@ -115,6 +115,15 @@
       };
       if (token && role) window.location.href = roleHome[role] || 'main_dashboard.html';
     })();
+
+    document.getElementById('togglePassword').addEventListener('click', (e) => {
+      const input = document.getElementById('password');
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      e.currentTarget.classList.toggle('fa-eye', !show);
+      e.currentTarget.classList.toggle('fa-eye-slash', show);
+      e.currentTarget.title = show ? 'Hide password' : 'Show password';
+    });
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();

@@ -238,7 +238,7 @@ function asmRowsHtml(list) {
       <div class="as-line">${aesc(p.name)} × ${aesc(p.quantity)}<span class="as-chip ${p.source === 'local' ? 'local' : ''}">${p.source === 'local' ? 'Local' : 'Inventory'}</span>
         ${p.belongsTo ? `<span class="as-sub">Belongs to: ${aesc(p.belongsTo)}</span>` : ''}</div>`).join('') || '<span style="color:#94a3b8;">—</span>';
     return `<tr class="clk" data-id="${aesc(a.id)}">
-      <td><b>${aesc(a.productName)}</b><span class="as-sub">${aesc(a.productId || '—')} · ${aesc(a.modelNumber || '—')}</span></td>
+      <td><b>${aesc(a.productName)}</b><span class="as-sub">${aesc((a.productId || '').trim() || '—')} · ${aesc(a.modelNumber || '—')}</span></td>
       <td>${aesc(a.quantity)}</td>
       <td>${parts}</td>
       <td>${(a.serials || []).length}${a.hologramPart ? `<span class="as-sub">Hologram from: ${aesc(a.hologramPart)}${a.hologramPartBelongs ? ' (' + aesc(a.hologramPartBelongs) + ')' : ''}</span>` : ''}</td>
@@ -413,7 +413,7 @@ function renderTable() {
     return `
       <tr>
         <td>${a.productName}</td>
-        <td>${a.productId || '—'}</td>
+        <td>${(a.productId || '').trim() || '—'}</td>
         <td>${a.modelNumber || '—'}</td>
         <td>${a.quantity}</td>
         <td>${sourceSummary}</td>
@@ -451,7 +451,7 @@ function openViewAssemblyModal(id) {
       <h3>Assembly Details</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div class="detail"><small>Product</small><p>${a.productName} (${a.productId || '—'})</p></div>
+    <div class="detail"><small>Product</small><p>${a.productName} (${(a.productId || '').trim() || '—'})</p></div>
     <div class="detail"><small>Model Number</small><p>${a.modelNumber || '—'}</p></div>
     <div class="detail"><small>Quantity</small><p>${a.quantity}</p></div>
     ${(a.editHistory || []).length ? (() => {
@@ -626,6 +626,10 @@ function stepDots(active) {
     </div>`;
 }
 
+// Product ID is never typed in by hand — every assembly / assembled product
+// uses this fixed value (a single space).
+const DEFAULT_PRODUCT_ID = ' ';
+
 async function loadInventoryProducts() {
   try {
     const res = await apiFetch('/inventory/');
@@ -633,14 +637,14 @@ async function loadInventoryProducts() {
     const data = await res.json();
     const seen = new Set();
     inventoryProducts = (data.dataset || [])
-      .filter(p => (p.product_type || 'product') === 'product' && p.product_name && p.product_id)
+      .filter(p => (p.product_type || 'product') === 'product' && p.product_name)
       .filter(p => {
-        const k = `${p.product_id}||${p.model_no || ''}||${p.product_name}`;
+        const k = `${p.model_no || ''}||${p.product_name}`;
         if (seen.has(k)) return false;
         seen.add(k);
         return true;
       })
-      .map(p => ({ name: p.product_name, id: p.product_id, model: p.model_no || '' }))
+      .map(p => ({ name: p.product_name, model: p.model_no || '' }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     console.warn('assembly: could not load inventory products', err.message);
@@ -650,7 +654,7 @@ async function loadInventoryProducts() {
 async function openAddAssemblyModal() {
   assemblyDraft = {
     mode: 'existing',   // 'existing' = pick from inventory, 'new' = type details
-    productName: '', productId: '', modelNumber: '', quantity: 1,
+    productName: '', productId: DEFAULT_PRODUCT_ID, modelNumber: '', quantity: 1,
     partsUsed: [], serials: [],
   };
   assemblyStep = 1;
@@ -686,14 +690,12 @@ function renderAStep1() {
       ${assemblyDraft.mode === 'existing' ? `
         <select id="a1Existing" required>
           <option value="">Choose product from inventory...</option>
-          ${inventoryProducts.map((p, i) => `<option value="${i}" ${p.id === assemblyDraft.productId && p.model === assemblyDraft.modelNumber && p.name === assemblyDraft.productName ? 'selected' : ''}>${escAttr(p.name)} — ${escAttr(p.id)}${p.model ? ' — ' + escAttr(p.model) : ''}</option>`).join('')}
+          ${inventoryProducts.map((p, i) => `<option value="${i}" ${p.model === assemblyDraft.modelNumber && p.name === assemblyDraft.productName ? 'selected' : ''}>${escAttr(p.name)}${p.model ? ' — ' + escAttr(p.model) : ''}</option>`).join('')}
         </select>
         <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" readonly style="background:#f1f5f9;">
-        <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}" readonly style="background:#f1f5f9;">
         <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}" readonly style="background:#f1f5f9;">
       ` : `
         <input id="a1ProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" required>
-        <input id="a1ProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}">
         <input id="a1ModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
       `}
       <label style="font-size:13px;color:#64748b;">Quantity to Assemble</label>
@@ -713,7 +715,7 @@ function renderAStep1() {
       return;
     }
     assemblyDraft.mode = btn.dataset.mode;
-    assemblyDraft.productName = assemblyDraft.productId = assemblyDraft.modelNumber = '';
+    assemblyDraft.productName = assemblyDraft.modelNumber = '';
     assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
     renderAStep1();
   }));
@@ -721,7 +723,6 @@ function renderAStep1() {
   if (existingSel) existingSel.addEventListener('change', () => {
     const p = inventoryProducts[Number(existingSel.value)];
     document.getElementById('a1ProductName').value = p ? p.name : '';
-    document.getElementById('a1ProductId').value = p ? p.id : '';
     document.getElementById('a1ModelNumber').value = p ? p.model : '';
   });
   box.querySelector('#aStep1Form').addEventListener('submit', (e) => {
@@ -731,7 +732,7 @@ function renderAStep1() {
       return;
     }
     assemblyDraft.productName = document.getElementById('a1ProductName').value.trim();
-    assemblyDraft.productId = document.getElementById('a1ProductId').value.trim();
+    assemblyDraft.productId = DEFAULT_PRODUCT_ID;
     assemblyDraft.modelNumber = document.getElementById('a1ModelNumber').value.trim();
     assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
     assemblyStep = 2;
@@ -899,7 +900,10 @@ function syncPartsUsedFromDom() {
 // ---------- STEP 3: serial + hologram numbers ----------
 function generateSerialNumbers(quantity, productId) {
   const datePart = todayStr().replace(/-/g, '');
-  const base = (productId || 'PRD').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Product ID is a fixed blank value now, so it can't seed the serial prefix —
+  // fall back to the model number (then 'PRD') when the id has nothing usable.
+  const clean = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const base = clean(productId) || clean(assemblyDraft && assemblyDraft.modelNumber) || 'PRD';
   const serials = [];
   for (let i = 1; i <= quantity; i++) {
     const seq = String(i).padStart(4, '0');
@@ -1098,7 +1102,7 @@ async function openEditAssemblyModal(id) {
   editingHologramBelongs = a.hologramPartBelongs || '';
 
   assemblyDraft = {
-    productName: a.productName || '', productId: a.productId || '', modelNumber: a.modelNumber || '',
+    productName: a.productName || '', productId: DEFAULT_PRODUCT_ID, modelNumber: a.modelNumber || '',
     quantity: a.quantity,
     partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, belongsTo: p.belongsTo || '', source: p.source === 'local' ? 'local' : 'inventory' })),
     serials: [],
@@ -1116,7 +1120,6 @@ function renderEditAssemblyModal() {
     </div>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <input id="eProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}">
-      <input id="eProductId" placeholder="Product ID" value="${escAttr(assemblyDraft.productId)}">
       <input id="eModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
       <label style="font-size:13px;color:#64748b;">Quantity to Assemble (cannot be changed)</label>
       <input type="number" value="${assemblyDraft.quantity}" disabled>
@@ -1197,7 +1200,7 @@ async function saveAssemblyEdit() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         product_name: productName,
-        product_id: document.getElementById('eProductId').value.trim(),
+        product_id: DEFAULT_PRODUCT_ID,
         model_number: document.getElementById('eModelNumber').value.trim(),
         parts_used: parts.map(p => ({ part_name: p.name, quantity: Number(p.quantity), source: p.source })),
       }),

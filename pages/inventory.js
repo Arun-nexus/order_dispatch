@@ -14,8 +14,18 @@ const INV_PAGE_SIZE = 20;
 // missing segment), so we substitute this sentinel whenever we need to
 // target such a record over the network — app.py decodes it back to "".
 const EMPTY_PRODUCT_ID_SENTINEL = '__blank_id__';
+
+// Product ID is no longer typed in by hand anywhere on this page. Every
+// product created or edited from here gets this fixed value (a single space).
+const DEFAULT_PRODUCT_ID = ' ';
+// A space-only id gets trimmed away if it is sent as a URL path segment, so it
+// travels as this sentinel instead — app.py decodes it back to " ".
+const SPACE_PRODUCT_ID_SENTINEL = '__space_id__';
+
 function urlProductId(id) {
-  const v = (id ?? '').toString().trim();
+  const raw = (id ?? '').toString();
+  if (raw && !raw.trim()) return encodeURIComponent(SPACE_PRODUCT_ID_SENTINEL);
+  const v = raw.trim();
   return encodeURIComponent(v ? v : EMPTY_PRODUCT_ID_SENTINEL);
 }
 
@@ -198,7 +208,7 @@ function itemIdentityHtml(p) {
   if (ivIsPart(p)) {
     return `${name}<div class="iv-sub">Belongs to: <b style="color:var(--text-secondary);">${escapeHtmlInv(p.parent_product_name || '—')}</b></div>`;
   }
-  const sub = [p.product_id ? `ID: ${escapeHtmlInv(p.product_id)}` : '', p.model_no ? `Model: ${escapeHtmlInv(p.model_no)}` : ''].filter(Boolean).join(' · ');
+  const sub = [(p.product_id || '').trim() ? `ID: ${escapeHtmlInv(p.product_id)}` : '', p.model_no ? `Model: ${escapeHtmlInv(p.model_no)}` : ''].filter(Boolean).join(' · ');
   return `${name}${sub ? `<div class="iv-sub">${sub}</div>` : ''}`;
 }
 const ITEM_CSV_HEADS = ['Name', 'Product ID', 'Model No', 'Belongs To'];
@@ -746,7 +756,7 @@ function columnsForCategory(category) {
         : '';
       return `${escapeHtmlInv(p.product_name ?? '')}${belongs}`;
     }
-    const meta = [p.product_id, p.model_no].filter(Boolean).join(' · ');
+    const meta = [(p.product_id || '').trim(), p.model_no].filter(Boolean).join(' · ');
     return `${escapeHtmlInv(p.product_name ?? '')}${meta ? `<br><small style="color:var(--text-light);">${meta}</small>` : ''}`;
   };
   // shipment stores warranty length in months (e.g. "12 months"); the backend
@@ -1178,7 +1188,7 @@ function openSpecificProductPicker() {
     listBox.innerHTML = rows.map((p, i) => `
       <button type="button" class="single-product-opt" data-idx="${i}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:var(--bg-light);cursor:pointer;border-radius:8px;font-size:13px;color:var(--text-primary);">
         <strong>${escapeHtmlInv(p.product_name || '')}</strong><br>
-        <small style="color:var(--text-muted);">ID: ${escapeHtmlInv(p.product_id || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}</small>
+        <small style="color:var(--text-muted);">ID: ${escapeHtmlInv((p.product_id || '').trim() || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}</small>
       </button>`).join('');
 
     listBox.querySelectorAll('.single-product-opt').forEach(btn => {
@@ -1396,7 +1406,6 @@ function openEditModal(p) {
   const modal = document.getElementById('editModal');
   const form = modal.querySelector('form');
   form.elements['product_name'].value = p.product_name ?? '';
-  form.elements['product_id'].value = p.product_id ?? '';
   form.elements['model_no'].value = p.model_no ?? '';
   form.elements['parent_product_name'].value = p.parent_product_name ?? '';
   form.elements['lot_no'].value = p.lot_no ?? '';
@@ -2130,7 +2139,6 @@ function renderLotDetailsStep() {
     <form id="lotForm" style="display:flex;flex-direction:column;gap:10px;">
       <input type="hidden" name="product_type" id="lotProductType" value="${addWiz.productType}">
       <input name="product_name" placeholder="Product Name" required>
-      <input name="product_id" placeholder="Product ID" required>
       <input name="model_no" placeholder="Model No." required>
       <input name="lot_no" placeholder="Lot No." ${req}>
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
@@ -2344,7 +2352,7 @@ function renderLotDetailsStep() {
 
     const payload = {
       product_name: fd.get('product_name').trim(),
-      product_id: fd.get('product_id').trim(),
+      product_id: DEFAULT_PRODUCT_ID,
       model_no: fd.get('model_no').trim(),
       product_type: fd.get('product_type') || 'product',
       warranty_until: fd.get('warranty_until') || '',
@@ -2438,7 +2446,7 @@ function wireModals() {
       // vice versa.
       ...(editIsPart
         ? { parent_product_name: form.elements['parent_product_name'].value, product_id: '', model_no: '' }
-        : { product_id: form.elements['product_id'].value, model_no: form.elements['model_no'].value }),
+        : { product_id: DEFAULT_PRODUCT_ID, model_no: form.elements['model_no'].value }),
       lot_no: form.elements['lot_no'].value,
       supplier: form.elements['supplier'].value,
       purchase_date: form.elements['purchase_date'].value,

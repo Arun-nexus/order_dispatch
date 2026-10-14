@@ -5,13 +5,13 @@ const AUTH = {
 };
 
 const ROLE_ACCESS = {
-  admin:           ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html'],
-  accounts:        ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html'],
-  service_manager: ['service.html', 'inventory.html', 'dispatch.html','allocated.html'],
-  assembly:        ['assembly.html', 'inventory.html'],
-  technician:      ['technician.html','technician_dashboard.html'],
-  distributor:     ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html'],
-  inventory_manager: ['inventory.html', 'distributor.html', 'distributor_orders.html', 'assembly.html', 'shipment.html'],
+  admin:           ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html', 'work.html'],
+  accounts:        ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'work_report.html'],
+  service_manager: ['service.html', 'inventory.html', 'dispatch.html','allocated.html', 'work_report.html'],
+  assembly:        ['assembly.html', 'inventory.html', 'work_report.html'],
+  technician:      ['technician.html','technician_dashboard.html', 'work_report.html'],
+  distributor:     ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html', 'work_report.html'],
+  inventory_manager: ['inventory.html', 'distributor.html', 'distributor_orders.html', 'assembly.html', 'shipment.html', 'work_report.html'],
 };
 
 const ROLE_HOME = {
@@ -135,6 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
     filterSidebarByRole();
     initNotificationBell();
     initMessaging();
+    initWorkPopup();
     if (getRole() === 'distributor') {
       setTimeout(() => ['sidebarUserRole', 'headerUserRole'].forEach(id => {
         const el = document.getElementById(id);
@@ -930,3 +931,248 @@ function initMessaging() {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
+
+const _workState = { modalId: null, incoming: false, poll: null, sig: '', checking: false };
+
+function workFmt(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return isNaN(d) ? '-' : `${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function workPriorityPill(p) {
+  const map = {
+    urgent: ['var(--danger-bg)', 'var(--danger-dark)'],
+    high: ['var(--warning-bg)', 'var(--warning-dark)'],
+    normal: ['var(--info-bg)', 'var(--primary-dark)'],
+    low: ['var(--bg-hover)', 'var(--text-muted)']
+  };
+  const [bg, fg] = map[p] || map.normal;
+  return `<span style="background:${bg};color:${fg};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;text-transform:capitalize;">${msgEsc(p || 'normal')}</span>`;
+}
+
+function workStatusPill(s) {
+  const map = {
+    open: ['var(--warning-bg)', 'var(--warning-dark)', 'Open'],
+    in_progress: ['var(--info-bg)', 'var(--primary-dark)', 'In Progress'],
+    done: ['var(--success-bg)', 'var(--success-dark)', 'Done']
+  };
+  const [bg, fg, label] = map[s] || map.open;
+  return `<span style="background:${bg};color:${fg};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;">${label}</span>`;
+}
+
+function ensureWorkModal() {
+  let m = document.getElementById('workModal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'workModal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);justify-content:center;align-items:center;z-index:1950;';
+  m.innerHTML = '<div id="workModalBox" style="background:var(--bg-white,#fff);border-radius:16px;padding:22px;width:min(560px,94vw);max-height:92vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.25);"></div>';
+  document.body.appendChild(m);
+  m.addEventListener('mousedown', e => { if (e.target === m) closeWorkModal(); });
+  return m;
+}
+
+function closeWorkModal() {
+  const m = document.getElementById('workModal');
+  if (m) m.style.display = 'none';
+  if (_workState.poll) { clearInterval(_workState.poll); _workState.poll = null; }
+  _workState.modalId = null;
+  _workState.sig = '';
+  if (typeof window.onWorkChanged === 'function') window.onWorkChanged();
+  refreshWorkBadge();
+}
+
+async function openWorkModal(workId, incoming) {
+  const m = ensureWorkModal();
+  _workState.modalId = workId;
+  _workState.incoming = !!incoming;
+  _workState.sig = '';
+  m.style.display = 'flex';
+  await refreshWorkModal(true);
+  if (_workState.poll) clearInterval(_workState.poll);
+  _workState.poll = setInterval(() => refreshWorkModal(false), 5000);
+}
+
+async function refreshWorkModal(first) {
+  const id = _workState.modalId;
+  if (!id) return;
+  try {
+    const res = await apiFetch(`/work/${id}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'work could not be loaded');
+    if (id !== _workState.modalId) return;
+    const w = data.work;
+    const sig = `${(w.replies || []).length}|${w.status}`;
+    if (!first && sig === _workState.sig) return;
+    _workState.sig = sig;
+    drawWorkModal(w);
+  } catch (err) {
+    if (first && err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      closeWorkModal();
+      showResponseModal('Work', err.message, false);
+    }
+  }
+}
+
+function drawWorkModal(w) {
+  const box = document.getElementById('workModalBox');
+  if (!box) return;
+  const draftEl = document.getElementById('workReplyText');
+  const draft = draftEl ? draftEl.value : '';
+  const me = getUsername();
+  const admin = getRole() === 'admin';
+  const replies = w.replies || [];
+  const bubbles = replies.map(r => {
+    if (r.type === 'system') {
+      return `<div style="align-self:center;background:var(--bg-white,#fff);color:var(--text-muted);font-size:11px;border-radius:8px;padding:3px 10px;">${msgEsc(r.body)} · ${workFmt(r.created_at)}</div>`;
+    }
+    const mine = r.by === me;
+    return `<div style="max-width:80%;align-self:${mine ? 'flex-end' : 'flex-start'};background:${mine ? '#d9fdd3' : 'var(--bg-white,#fff)'};border-radius:10px;padding:6px 10px;box-shadow:0 1px 1px rgba(0,0,0,.08);">
+      ${mine ? '' : `<div style="font-size:11px;font-weight:600;color:var(--primary);">${msgEsc(r.by_name || r.by)}</div>`}
+      <div style="font-size:13.5px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;">${msgEsc(r.body)}</div>
+      <div style="text-align:right;font-size:10px;color:var(--text-light);margin-top:2px;">${workFmt(r.created_at)}</div>
+    </div>`;
+  }).join('') || '<p style="margin:auto;color:var(--text-light);font-size:13px;">No replies yet.</p>';
+
+  const statusBtns = [];
+  if (w.status === 'done') statusBtns.push(['open', 'Reopen', 'var(--bg-hover)', 'var(--text-secondary)']);
+  else {
+    if (!admin && w.status === 'open') statusBtns.push(['in_progress', 'Start Work', 'var(--info-bg)', 'var(--primary-dark)']);
+    statusBtns.push(['done', 'Mark as Done', 'var(--success-bg)', 'var(--success-dark)']);
+  }
+
+  const reportLink = location.pathname.includes('/pages/') ? 'work_report.html' : 'pages/work_report.html';
+  box.innerHTML = `
+    ${_workState.incoming && !admin ? `<div style="display:flex;align-items:center;gap:8px;background:var(--warning-bg);color:var(--warning-dark);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600;font-size:13px;"><i class="fa-solid fa-bell"></i> New work from ${msgEsc(w.assigned_by_name || w.assigned_by)}</div>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;">
+      <div>
+        <h3 style="color:var(--text-primary);margin:0 0 6px;">${msgEsc(w.title)}</h3>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${workPriorityPill(w.priority)} ${workStatusPill(w.status)}</div>
+      </div>
+      <button type="button" id="workModalClose" style="border:none;background:none;font-size:22px;cursor:pointer;color:var(--text-muted);">&times;</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.7;">
+      ${admin ? `Assigned to <strong>${msgEsc(w.assigned_to_name || w.assigned_to)}</strong> (${msgEsc(msgRoleLabel(w.assigned_to_role))})<br>` : `Assigned by <strong>${msgEsc(w.assigned_by_name || w.assigned_by)}</strong><br>`}
+      Created ${workFmt(w.created_at)}${w.due_date ? ` · Due <strong>${msgEsc(new Date(w.due_date).toLocaleDateString('en-GB'))}</strong>` : ''}
+    </div>
+    ${w.description ? `<div style="background:var(--bg-light);border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-size:13.5px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;margin-bottom:10px;">${msgEsc(w.description)}</div>` : ''}
+    <div id="workThread" style="height:230px;overflow-y:auto;background:#efeae2;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:5px;">${bubbles}</div>
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end;">
+      <textarea id="workReplyText" rows="1" maxlength="2000" placeholder="Write a reply..." style="flex:1;padding:10px;border:1px solid var(--border);border-radius:20px;resize:none;max-height:100px;font-family:inherit;"></textarea>
+      <button type="button" id="workReplySend" style="width:42px;height:42px;border:none;border-radius:50%;background:var(--success-dark);color:#fff;cursor:pointer;"><i class="fa-solid fa-paper-plane"></i></button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;">
+      ${statusBtns.map(([s, label, bg, fg]) => `<button type="button" class="workStatusBtn" data-s="${s}" style="padding:8px 14px;border:none;border-radius:8px;background:${bg};color:${fg};font-weight:600;font-size:12.5px;cursor:pointer;">${label}</button>`).join('')}
+      ${_workState.incoming && !admin ? `<a href="${reportLink}" style="margin-left:auto;font-size:12.5px;color:var(--primary);font-weight:600;text-decoration:none;">Open Work Report →</a>` : ''}
+    </div>`;
+
+  const thread = box.querySelector('#workThread');
+  thread.scrollTop = thread.scrollHeight;
+  const ta = box.querySelector('#workReplyText');
+  ta.value = draft;
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendWorkReply(w.work_id); }
+  });
+  ta.addEventListener('input', () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 100) + 'px';
+  });
+  if (draft) ta.focus();
+  box.querySelector('#workModalClose').addEventListener('click', closeWorkModal);
+  box.querySelector('#workReplySend').addEventListener('click', () => sendWorkReply(w.work_id));
+  box.querySelectorAll('.workStatusBtn').forEach(b => b.addEventListener('click', () => setWorkStatus(w.work_id, b.dataset.s)));
+}
+
+async function sendWorkReply(workId) {
+  const ta = document.getElementById('workReplyText');
+  if (!ta) return;
+  const body = ta.value.trim();
+  if (!body) return;
+  ta.value = '';
+  try {
+    const res = await apiFetch(`/work/${workId}/reply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'reply could not be sent');
+    _workState.sig = '';
+    await refreshWorkModal(true);
+    if (typeof window.onWorkChanged === 'function') window.onWorkChanged();
+  } catch (err) {
+    ta.value = body;
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Reply failed', err.message, false);
+  }
+}
+
+async function setWorkStatus(workId, status) {
+  try {
+    const res = await apiFetch(`/work/${workId}/status`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'status could not be updated');
+    _workState.sig = '';
+    await refreshWorkModal(true);
+    if (typeof window.onWorkChanged === 'function') window.onWorkChanged();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
+  }
+}
+
+async function pollWorkPopup() {
+  if (getRole() === 'admin' || _workState.modalId || _workState.checking) return;
+  _workState.checking = true;
+  try {
+    const res = await apiFetch('/work/popup');
+    if (!res.ok) return;
+    const data = await res.json();
+    const next = (data.dataset || [])[0];
+    if (!next) return;
+    await openWorkModal(next.work_id, true);
+    await apiFetch(`/work/${next.work_id}/seen`, { method: 'POST' });
+  } catch (err) {
+    console.error(err);
+  } finally {
+    _workState.checking = false;
+  }
+}
+
+async function refreshWorkBadge() {
+  const badge = document.getElementById('workNavBadge');
+  if (!badge) return;
+  try {
+    const admin = getRole() === 'admin';
+    const res = await apiFetch(admin ? '/work/all' : '/work/mine');
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.dataset || [];
+    const n = admin ? list.filter(w => w.admin_unread).length : list.filter(w => w.status !== 'done').length;
+    badge.textContent = n;
+    badge.style.display = n ? 'inline-block' : 'none';
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function injectWorkSidebarLink() {
+  const ul = document.querySelector('.sidebar ul');
+  if (!ul || ul.querySelector('a[data-work-link]')) return;
+  const admin = getRole() === 'admin';
+  const file = admin ? 'work.html' : 'work_report.html';
+  const href = location.pathname.includes('/pages/') ? file : `pages/${file}`;
+  const li = document.createElement('li');
+  if (location.pathname.split('/').pop() === file) li.className = 'active';
+  li.innerHTML = `<a href="${href}" data-work-link="1"><i class="fa-solid fa-clipboard-list"></i><span>${admin ? 'Work' : 'Work Report'}</span><b id="workNavBadge" style="display:none;margin-left:auto;background:#d62828;color:#fff;font-size:10px;border-radius:999px;padding:1px 6px;"></b></a>`;
+  const logout = [...ul.querySelectorAll('li')].find(x => /logout/i.test(x.textContent));
+  ul.insertBefore(li, logout || null);
+}
+
+function initWorkPopup() {
+  injectWorkSidebarLink();
+  refreshWorkBadge();
+  setInterval(refreshWorkBadge, 15000);
+  if (getRole() === 'admin') return;
+  pollWorkPopup();
+  setInterval(pollWorkPopup, 5000);
+}

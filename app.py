@@ -3599,6 +3599,8 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
 def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     if product_id == "__blank_id__":
         product_id = ""
+    elif product_id == "__space_id__":
+        product_id = " "
     try:
         db = inventory_manager()
         match_query = {"product_id": product_id}
@@ -3811,6 +3813,8 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
 def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
     if product_id == "__blank_id__":
         product_id = ""
+    elif product_id == "__space_id__":
+        product_id = " "
     try:
         db = inventory_manager(product_id=product_id)
         if model_no is not None:
@@ -3833,6 +3837,8 @@ def delete_product(product_id: str, model_no: Optional[str] = None, user: dict =
 def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     if product_id == "__blank_id__":
         product_id = ""
+    elif product_id == "__space_id__":
+        product_id = " "
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,
@@ -5603,6 +5609,244 @@ def message_thread(other: str, user: dict = Depends(get_current_user)):
     except Exception:
         logging.error("thread cannot be fetched")
         raise HTTPException(status_code=500, detail="thread cannot be fetched")
+
+
+WORK_COLLECTION = params.get("work_collection_name", "work_assignments")
+WORK_STATUSES = {"open": "Open", "in_progress": "In Progress", "done": "Done"}
+WORK_PRIORITIES = {"low", "normal", "high", "urgent"}
+
+
+class WorkAssignRequest(BaseModel):
+    assigned_to: str
+    title: str
+    description: Optional[str] = ""
+    priority: Optional[str] = "normal"
+    due_date: Optional[str] = None
+
+
+class WorkReplyRequest(BaseModel):
+    body: str
+
+
+class WorkStatusRequest(BaseModel):
+    status: str
+
+
+def _work_get(db, work_id: str):
+    found = db.get_data(collection_name=WORK_COLLECTION, query={"work_id": work_id}, projection={"_id": 0})
+    return found[0] if found else None
+
+
+def _work_user_name(db, username: str) -> str:
+    found = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
+    return (found[0].get("name") or username) if found else username
+
+
+def _work_check_access(work, user):
+    if not work:
+        raise HTTPException(status_code=404, detail="work not found")
+    if user["role"] != "admin" and work.get("assigned_to") != user["username"]:
+        raise HTTPException(status_code=403, detail="you do not have permission for this action")
+
+
+@app.post("/work/assign")
+def work_assign(request: WorkAssignRequest, user: dict = Depends(require_role("admin"))):
+    title = (request.title or "").strip()
+    description = (request.description or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="work title is required")
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="title is too long (max 120 characters)")
+    if len(description) > 2000:
+        raise HTTPException(status_code=400, detail="description is too long (max 2000 characters)")
+    priority = request.priority if request.priority in WORK_PRIORITIES else "normal"
+    try:
+        db = mongodbclient()
+        target = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": request.assigned_to})
+        if not target:
+            raise HTTPException(status_code=404, detail="user not found")
+        if target[0].get("role") == "admin":
+            raise HTTPException(status_code=400, detail="work can only be assigned to non-admin users")
+        now = datetime.now(timezone.utc).isoformat()
+        work_id = uuid.uuid4().hex
+        db.add(collection_name=WORK_COLLECTION, dictionary={
+            "work_id": work_id,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "due_date": request.due_date or None,
+            "assigned_to": request.assigned_to,
+            "assigned_to_name": target[0].get("name") or request.assigned_to,
+            "assigned_to_role": target[0].get("role"),
+            "assigned_by": user["username"],
+            "assigned_by_name": _work_user_name(db, user["username"]),
+            "status": "open",
+            "popup_pending": True,
+            "assignee_unread": True,
+            "admin_unread": False,
+            "seen_at": None,
+            "replies": [],
+            "created_at": now,
+            "updated_at": now,
+        })
+        logging.info(f"work {work_id} assigned by {user['username']} to {request.assigned_to}")
+        return {"message": "work assigned", "work_id": work_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("work could not be assigned")
+        raise HTTPException(status_code=500, detail="work could not be assigned")
+
+
+@app.get("/work/all")
+def work_all(user: dict = Depends(require_role("admin"))):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=WORK_COLLECTION, query={}, projection={"_id": 0})
+        dataset.sort(key=lambda w: w.get("updated_at") or w.get("created_at") or "", reverse=True)
+        return {"message": "work list", "dataset": dataset}
+    except Exception:
+        logging.error("work list cannot be fetched")
+        raise HTTPException(status_code=500, detail="work list cannot be fetched")
+
+
+@app.get("/work/mine")
+def work_mine(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=WORK_COLLECTION, query={"assigned_to": user["username"]}, projection={"_id": 0})
+        dataset.sort(key=lambda w: w.get("updated_at") or w.get("created_at") or "", reverse=True)
+        return {"message": "my work", "dataset": dataset}
+    except Exception:
+        logging.error("work cannot be fetched")
+        raise HTTPException(status_code=500, detail="work cannot be fetched")
+
+
+@app.get("/work/popup")
+def work_popup(user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=WORK_COLLECTION,
+                              query={"assigned_to": user["username"], "popup_pending": True}, projection={"_id": 0})
+        dataset.sort(key=lambda w: w.get("updated_at") or w.get("created_at") or "")
+        return {"message": "work popup", "dataset": dataset}
+    except Exception:
+        logging.error("work popup cannot be fetched")
+        raise HTTPException(status_code=500, detail="work popup cannot be fetched")
+
+
+@app.post("/work/{work_id}/seen")
+def work_seen(work_id: str, user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        work = _work_get(db, work_id)
+        _work_check_access(work, user)
+        if user["role"] != "admin":
+            db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id},
+                           update_values={"popup_pending": False, "seen_at": work.get("seen_at") or datetime.now(timezone.utc).isoformat()})
+        return {"message": "work seen"}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("work seen could not be saved")
+        raise HTTPException(status_code=500, detail="work could not be updated")
+
+
+@app.get("/work/{work_id}")
+def work_detail(work_id: str, user: dict = Depends(get_current_user)):
+    try:
+        db = mongodbclient()
+        work = _work_get(db, work_id)
+        _work_check_access(work, user)
+        if user["role"] == "admin":
+            if work.get("admin_unread"):
+                db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id}, update_values={"admin_unread": False})
+                work["admin_unread"] = False
+        elif work.get("assignee_unread") or not work.get("seen_at"):
+            seen = work.get("seen_at") or datetime.now(timezone.utc).isoformat()
+            db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id},
+                           update_values={"assignee_unread": False, "seen_at": seen})
+            work["assignee_unread"] = False
+            work["seen_at"] = seen
+        return {"message": "work detail", "work": work}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("work detail cannot be fetched")
+        raise HTTPException(status_code=500, detail="work cannot be fetched")
+
+
+@app.post("/work/{work_id}/reply")
+def work_reply(work_id: str, request: WorkReplyRequest, user: dict = Depends(get_current_user)):
+    body = (request.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="reply cannot be empty")
+    if len(body) > 2000:
+        raise HTTPException(status_code=400, detail="reply is too long (max 2000 characters)")
+    try:
+        db = mongodbclient()
+        work = _work_get(db, work_id)
+        _work_check_access(work, user)
+        now = datetime.now(timezone.utc).isoformat()
+        replies = list(work.get("replies") or [])
+        replies.append({
+            "reply_id": uuid.uuid4().hex,
+            "type": "message",
+            "by": user["username"],
+            "by_name": _work_user_name(db, user["username"]),
+            "by_role": user["role"],
+            "body": body,
+            "created_at": now,
+        })
+        update = {"replies": replies, "updated_at": now}
+        if user["role"] == "admin":
+            update["popup_pending"] = True
+            update["assignee_unread"] = True
+        else:
+            update["admin_unread"] = True
+            if work.get("status") == "open":
+                update["status"] = "in_progress"
+        db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id}, update_values=update)
+        return {"message": "reply sent"}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("work reply could not be sent")
+        raise HTTPException(status_code=500, detail="reply could not be sent")
+
+
+@app.post("/work/{work_id}/status")
+def work_status(work_id: str, request: WorkStatusRequest, user: dict = Depends(get_current_user)):
+    if request.status not in WORK_STATUSES:
+        raise HTTPException(status_code=400, detail="invalid status")
+    try:
+        db = mongodbclient()
+        work = _work_get(db, work_id)
+        _work_check_access(work, user)
+        now = datetime.now(timezone.utc).isoformat()
+        name = _work_user_name(db, user["username"])
+        replies = list(work.get("replies") or [])
+        replies.append({
+            "reply_id": uuid.uuid4().hex,
+            "type": "system",
+            "by": user["username"],
+            "by_name": name,
+            "by_role": user["role"],
+            "body": f"{name} marked this work as {WORK_STATUSES[request.status]}",
+            "created_at": now,
+        })
+        update = {"status": request.status, "replies": replies, "updated_at": now}
+        if user["role"] == "admin":
+            update["assignee_unread"] = True
+        else:
+            update["admin_unread"] = True
+        db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id}, update_values=update)
+        return {"message": "status updated"}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("work status could not be updated")
+        raise HTTPException(status_code=500, detail="status could not be updated")
 
 
 app.mount("/css", StaticFiles(directory=os.path.join(BASE_DIR, "css")), name="css")

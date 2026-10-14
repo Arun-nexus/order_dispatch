@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work Report | Acer Biomedical</title>
+  <link rel="stylesheet" href="../css/accure.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .work-panel { background: var(--bg-white); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+    .work-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .work-filters input, .work-filters select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--bg-white); }
+    .work-filters input[type=text] { flex: 1; min-width: 160px; }
+    .wr-btn { padding: 8px 14px; border: none; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+    .work-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .work-table th { text-align: left; padding: 9px 8px; background: var(--bg-light); color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .work-table td { padding: 9px 8px; border-bottom: 1px solid var(--bg-hover); color: var(--text-primary); vertical-align: middle; }
+    .work-table tbody tr { cursor: pointer; }
+    .work-table tbody tr:hover { background: var(--bg-light); }
+    .dot-new { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-left: 6px; }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+      <ul>
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="technician.html"><i class="fa-solid fa-house"></i><span>My Dashboard</span></a></li>
+        <li><a href="distributor.html"><i class="fa-solid fa-house"></i><span>My Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
+        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="User">
+        <div>
+          <h4 id="sidebarUserName">User</h4>
+          <p id="sidebarUserRole">Role</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>Work Report</h1>
+          <p>Work assigned to you — reply and update the status here</p>
+        </div>
+        <div class="right-header">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="workSearch" placeholder="Search work...">
+          </div>
+          <button id="msgBtn"><i class="fa-regular fa-envelope"></i></button>
+          <div style="position:relative;">
+            <button id="notifBell"><i class="fa-regular fa-bell"></i></button>
+          </div>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="User">
+            <div>
+              <h4 id="headerUserName">User</h4>
+              <p id="headerUserRole">Role</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="cards">
+        <div class="card card-clickable" data-status="" style="cursor:pointer;">
+          <div><span>Total Work</span>
+            <h2 id="cardTotal">0</h2>
+            <p>Assigned to you</p>
+          </div>
+          <i class="fa-solid fa-clipboard-list"></i>
+        </div>
+        <div class="card card-clickable" data-status="open" style="cursor:pointer;">
+          <div><span>Open</span>
+            <h2 id="cardOpen">0</h2>
+            <p>Not started</p>
+          </div>
+          <i class="fa-solid fa-hourglass-start"></i>
+        </div>
+        <div class="card card-clickable" data-status="in_progress" style="cursor:pointer;">
+          <div><span>In Progress</span>
+            <h2 id="cardProgress">0</h2>
+            <p>You are working on</p>
+          </div>
+          <i class="fa-solid fa-spinner"></i>
+        </div>
+        <div class="card card-clickable" data-status="done" style="cursor:pointer;">
+          <div><span>Done</span>
+            <h2 id="cardDone">0</h2>
+            <p>Completed</p>
+          </div>
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+      </section>
+
+      <div class="work-panel">
+        <div class="work-filters">
+          <input type="text" id="tblSearch" placeholder="Search title, details...">
+          <select id="fStatus"><option value="">All Status</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="done">Done</option></select>
+          <select id="fPriority"><option value="">All Priority</option><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select>
+          <button type="button" id="fReset" class="wr-btn">Reset</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="work-table">
+            <thead>
+              <tr><th>Work</th><th>From</th><th>Priority</th><th>Due</th><th>Status</th><th>Replies</th><th>Updated</th></tr>
+            </thead>
+            <tbody id="workBody"></tbody>
+          </table>
+        </div>
+        <p id="workCount" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></p>
+      </div>
+    </main>
+  </div>
+
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../common_auth.js"></script>
+  <script>
+    function openLogoutModal(e) {
+      e.preventDefault();
+      document.getElementById('logoutModal').classList.add('active');
+    }
+    function closeLogoutModal() {
+      document.getElementById('logoutModal').classList.remove('active');
+    }
+
+    const R = { works: [], f: { q: '', status: '', priority: '' } };
+
+    async function loadWorks() {
+      try {
+        const res = await apiFetch('/work/mine');
+        const data = await res.json();
+        R.works = data.dataset || [];
+        drawCards();
+        drawWorks();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function drawCards() {
+      const w = R.works;
+      document.getElementById('cardTotal').textContent = w.length;
+      document.getElementById('cardOpen').textContent = w.filter(x => x.status === 'open').length;
+      document.getElementById('cardProgress').textContent = w.filter(x => x.status === 'in_progress').length;
+      document.getElementById('cardDone').textContent = w.filter(x => x.status === 'done').length;
+    }
+
+    function filteredWorks() {
+      const f = R.f;
+      const q = f.q.toLowerCase();
+      return R.works.filter(w => {
+        if (f.status && w.status !== f.status) return false;
+        if (f.priority && w.priority !== f.priority) return false;
+        if (q && !`${w.title} ${w.description || ''} ${w.assigned_by_name || ''}`.toLowerCase().includes(q)) return false;
+        return true;
+      });
+    }
+
+    function drawWorks() {
+      const list = filteredWorks();
+      document.getElementById('workBody').innerHTML = list.map(w => `
+        <tr data-id="${w.work_id}">
+          <td><strong>${msgEsc(w.title)}</strong>${w.assignee_unread ? '<span class="dot-new" title="New"></span>' : ''}</td>
+          <td>${msgEsc(w.assigned_by_name || w.assigned_by)}</td>
+          <td>${workPriorityPill(w.priority)}</td>
+          <td>${w.due_date ? msgEsc(new Date(w.due_date).toLocaleDateString('en-GB')) : '-'}</td>
+          <td>${workStatusPill(w.status)}</td>
+          <td>${(w.replies || []).filter(r => r.type !== 'system').length}</td>
+          <td style="white-space:nowrap;">${workFmt(w.updated_at)}</td>
+        </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:22px;">No work assigned yet.</td></tr>';
+      document.getElementById('workCount').textContent = `${list.length} of ${R.works.length} assignment(s)`;
+      document.querySelectorAll('#workBody tr[data-id]').forEach(tr => tr.addEventListener('click', () => openWorkModal(tr.dataset.id, false)));
+    }
+
+    function syncFilterControls() {
+      document.getElementById('tblSearch').value = R.f.q;
+      document.getElementById('fStatus').value = R.f.status;
+      document.getElementById('fPriority').value = R.f.priority;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const role = getRole() || '';
+      const uname = getUsername() || 'User';
+      const label = role === 'distributor' ? 'Sales' : role.charAt(0).toUpperCase() + role.slice(1).replace(/_/g, ' ');
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+
+      document.getElementById('tblSearch').addEventListener('input', e => { R.f.q = e.target.value.trim(); drawWorks(); });
+      document.getElementById('workSearch').addEventListener('input', e => {
+        R.f.q = e.target.value.trim();
+        document.getElementById('tblSearch').value = R.f.q;
+        drawWorks();
+      });
+      ['fStatus', 'fPriority'].forEach(id => document.getElementById(id).addEventListener('change', e => {
+        R.f[id === 'fStatus' ? 'status' : 'priority'] = e.target.value;
+        drawWorks();
+      }));
+      document.getElementById('fReset').addEventListener('click', () => {
+        R.f = { q: '', status: '', priority: '' };
+        document.getElementById('workSearch').value = '';
+        syncFilterControls();
+        drawWorks();
+      });
+      document.querySelectorAll('.card-clickable').forEach(c => c.addEventListener('click', () => {
+        R.f.status = c.dataset.status;
+        syncFilterControls();
+        drawWorks();
+      }));
+
+      window.onWorkChanged = loadWorks;
+      loadWorks();
+      setInterval(loadWorks, 8000);
+    });
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Work | Acer Biomedical</title>
+  <link rel="stylesheet" href="../css/accure.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    .work-grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
+    @media (max-width: 1100px) { .work-grid { grid-template-columns: 1fr; } }
+    .work-panel { background: var(--bg-white); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+    .work-panel h3 { margin: 0 0 10px; color: var(--text-primary); font-size: 15px; }
+    .work-panel input, .work-panel select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--bg-white); }
+    .wu-list { max-height: 520px; overflow-y: auto; margin-top: 10px; }
+    .wu-item { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--bg-hover); }
+    .wu-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; flex-shrink: 0; }
+    .wu-meta { flex: 1; min-width: 0; }
+    .wu-meta strong { display: block; color: var(--text-primary); font-size: 13.5px; }
+    .wu-meta small { color: var(--text-muted); }
+    .wu-open { background: var(--warning-bg); color: var(--warning-dark); border-radius: 999px; font-size: 11px; font-weight: 600; padding: 1px 8px; }
+    .wu-btn { padding: 6px 12px; border: none; border-radius: 8px; background: var(--primary); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .work-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .work-filters input[type=text] { flex: 1; min-width: 160px; }
+    .work-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .work-table th { text-align: left; padding: 9px 8px; background: var(--bg-light); color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .work-table td { padding: 9px 8px; border-bottom: 1px solid var(--bg-hover); color: var(--text-primary); vertical-align: middle; }
+    .work-table tbody tr { cursor: pointer; }
+    .work-table tbody tr:hover { background: var(--bg-light); }
+    .dot-new { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-left: 6px; }
+    .wf-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .wf-row label { font-size: 12px; color: var(--text-muted); }
+    .wf-row input, .wf-row select, .wf-row textarea { padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 13.5px; }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="../images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
+      </div>
+      <ul>
+        <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
+        <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
+        <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
+        <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
+        <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
+        <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
+        <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
+        <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+        <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
+        <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
+        <li>
+          <a href="#" onclick="openLogoutModal(event)">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            <span>Logout</span>
+          </a>
+        </li>
+      </ul>
+      <div class="sidebar-profile">
+        <img src="../images/admin.jpg" alt="Admin">
+        <div>
+          <h4 id="sidebarUserName">Admin</h4>
+          <p id="sidebarUserRole">Super Admin</p>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1>Work</h1>
+          <p>Assign work to any user — it opens on their screen immediately</p>
+        </div>
+        <div class="right-header">
+          <div class="search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="workSearch" placeholder="Search work, user...">
+          </div>
+          <button id="msgBtn"><i class="fa-regular fa-envelope"></i></button>
+          <div style="position:relative;">
+            <button id="notifBell"><i class="fa-regular fa-bell"></i></button>
+          </div>
+          <div class="profile">
+            <img src="../images/admin.jpg" alt="Admin">
+            <div>
+              <h4 id="headerUserName">Admin</h4>
+              <p id="headerUserRole">Super Admin</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="cards">
+        <div class="card card-clickable" data-status="" style="cursor:pointer;">
+          <div><span>Total Work</span>
+            <h2 id="cardTotal">0</h2>
+            <p>All assignments</p>
+          </div>
+          <i class="fa-solid fa-clipboard-list"></i>
+        </div>
+        <div class="card card-clickable" data-status="open" style="cursor:pointer;">
+          <div><span>Open</span>
+            <h2 id="cardOpen">0</h2>
+            <p>Not started</p>
+          </div>
+          <i class="fa-solid fa-hourglass-start"></i>
+        </div>
+        <div class="card card-clickable" data-status="in_progress" style="cursor:pointer;">
+          <div><span>In Progress</span>
+            <h2 id="cardProgress">0</h2>
+            <p>Being worked on</p>
+          </div>
+          <i class="fa-solid fa-spinner"></i>
+        </div>
+        <div class="card card-clickable" data-status="done" style="cursor:pointer;">
+          <div><span>Done</span>
+            <h2 id="cardDone">0</h2>
+            <p>Completed</p>
+          </div>
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div class="card card-clickable" data-status="__new" style="cursor:pointer;">
+          <div><span>New Replies</span>
+            <h2 id="cardNew">0</h2>
+            <p>Unread from users</p>
+          </div>
+          <i class="fa-solid fa-comment-dots"></i>
+        </div>
+      </section>
+
+      <div class="work-grid">
+        <div class="work-panel">
+          <h3>Users</h3>
+          <input type="text" id="userSearch" placeholder="Search name, username, role" style="width:100%;">
+          <div id="userList" class="wu-list"></div>
+        </div>
+
+        <div class="work-panel">
+          <h3>Assigned Work</h3>
+          <div class="work-filters">
+            <input type="text" id="tblSearch" placeholder="Search title, description, user...">
+            <select id="fStatus"><option value="">All Status</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="done">Done</option><option value="__new">New Replies</option></select>
+            <select id="fPriority"><option value="">All Priority</option><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select>
+            <select id="fUser"><option value="">All Users</option></select>
+            <button type="button" id="fReset" class="wu-btn" style="background:var(--bg-hover);color:var(--text-secondary);">Reset</button>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="work-table">
+              <thead>
+                <tr><th>Work</th><th>Assigned To</th><th>Priority</th><th>Due</th><th>Status</th><th>Replies</th><th>Updated</th></tr>
+              </thead>
+              <tbody id="workBody"></tbody>
+            </table>
+          </div>
+          <p id="workCount" style="font-size:12px;color:var(--text-muted);margin-top:8px;"></p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="assignModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:1000;">
+    <div class="modal-content" style="background:var(--bg-white);border-radius:16px;padding:24px;width:min(480px,94vw);max-height:92vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <h3 style="margin:0;">Assign Work</h3>
+        <button type="button" id="assignClose" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+      </div>
+      <div class="wf-row"><label>Assign to</label><select id="aUser"></select></div>
+      <div class="wf-row"><label>Work title</label><input id="aTitle" maxlength="120" placeholder="e.g. Verify stock of ECG machines"></div>
+      <div class="wf-row"><label>Details</label><textarea id="aDesc" rows="4" maxlength="2000" placeholder="What needs to be done?"></textarea></div>
+      <div style="display:flex;gap:10px;">
+        <div class="wf-row" style="flex:1;"><label>Priority</label>
+          <select id="aPriority"><option value="normal">Normal</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select>
+        </div>
+        <div class="wf-row" style="flex:1;"><label>Due date (optional)</label><input id="aDue" type="date"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px;">
+        <button type="button" id="assignCancel" class="wu-btn" style="background:var(--bg-hover);color:var(--text-secondary);padding:10px 16px;">Cancel</button>
+        <button type="button" id="assignSend" class="wu-btn" style="padding:10px 18px;"><i class="fa-solid fa-paper-plane"></i> Send Work</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="logoutModal" class="logout-modal">
+    <div class="logout-box">
+      <i class="fa-solid fa-arrow-right-from-bracket logout-icon"></i>
+      <h2>Logout?</h2>
+      <p>Are you sure you want to logout from your account?</p>
+      <div class="logout-actions">
+        <button class="cancel-btn" onclick="closeLogoutModal()">Cancel</button>
+        <button class="confirm-btn" onclick="logoutNow()">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../common_auth.js"></script>
+  <script>
+    function openLogoutModal(e) {
+      e.preventDefault();
+      document.getElementById('logoutModal').classList.add('active');
+    }
+    function closeLogoutModal() {
+      document.getElementById('logoutModal').classList.remove('active');
+    }
+
+    const W = { users: [], works: [], f: { q: '', status: '', priority: '', user: '' }, userQ: '' };
+
+    function wInitials(name) {
+      const p = String(name || '?').trim().split(/\s+/);
+      return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+    }
+
+    async function loadUsers() {
+      try {
+        const res = await apiFetch('/message/recipients');
+        const data = await res.json();
+        W.users = (data.dataset || []).filter(u => u.role !== 'admin');
+        const sel = document.getElementById('fUser');
+        const keep = sel.value;
+        sel.innerHTML = '<option value="">All Users</option>' + W.users.map(u => `<option value="${msgEsc(u.username)}">${msgEsc(u.name)}</option>`).join('');
+        sel.value = keep;
+        drawUsers();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function loadWorks() {
+      try {
+        const res = await apiFetch('/work/all');
+        const data = await res.json();
+        W.works = data.dataset || [];
+        drawCards();
+        drawUsers();
+        drawWorks();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function drawCards() {
+      const w = W.works;
+      document.getElementById('cardTotal').textContent = w.length;
+      document.getElementById('cardOpen').textContent = w.filter(x => x.status === 'open').length;
+      document.getElementById('cardProgress').textContent = w.filter(x => x.status === 'in_progress').length;
+      document.getElementById('cardDone').textContent = w.filter(x => x.status === 'done').length;
+      document.getElementById('cardNew').textContent = w.filter(x => x.admin_unread).length;
+    }
+
+    function drawUsers() {
+      const q = W.userQ.toLowerCase();
+      const list = W.users.filter(u => `${u.name} ${u.username} ${u.role} ${msgRoleLabel(u.role)}`.toLowerCase().includes(q));
+      document.getElementById('userList').innerHTML = list.map(u => {
+        const open = W.works.filter(x => x.assigned_to === u.username && x.status !== 'done').length;
+        return `<div class="wu-item">
+          <div class="wu-avatar">${msgEsc(wInitials(u.name))}</div>
+          <div class="wu-meta"><strong>${msgEsc(u.name)}</strong><small>${msgEsc(u.username)} · ${msgEsc(msgRoleLabel(u.role))}</small></div>
+          ${open ? `<span class="wu-open" title="Pending work">${open}</span>` : ''}
+          <button type="button" class="wu-btn" data-u="${msgEsc(u.username)}">Assign</button>
+        </div>`;
+      }).join('') || '<p style="padding:14px;color:var(--text-light);font-size:13px;">No users found.</p>';
+      document.querySelectorAll('#userList .wu-btn').forEach(b => b.addEventListener('click', () => openAssign(b.dataset.u)));
+    }
+
+    function filteredWorks() {
+      const f = W.f;
+      const q = f.q.toLowerCase();
+      return W.works.filter(w => {
+        if (f.status === '__new' ? !w.admin_unread : (f.status && w.status !== f.status)) return false;
+        if (f.priority && w.priority !== f.priority) return false;
+        if (f.user && w.assigned_to !== f.user) return false;
+        if (q && !`${w.title} ${w.description || ''} ${w.assigned_to_name || ''} ${w.assigned_to}`.toLowerCase().includes(q)) return false;
+        return true;
+      });
+    }
+
+    function drawWorks() {
+      const list = filteredWorks();
+      document.getElementById('workBody').innerHTML = list.map(w => `
+        <tr data-id="${w.work_id}">
+          <td><strong>${msgEsc(w.title)}</strong>${w.admin_unread ? '<span class="dot-new" title="New reply"></span>' : ''}</td>
+          <td>${msgEsc(w.assigned_to_name || w.assigned_to)}<br><small style="color:var(--text-muted);">${msgEsc(msgRoleLabel(w.assigned_to_role))}</small></td>
+          <td>${workPriorityPill(w.priority)}</td>
+          <td>${w.due_date ? msgEsc(new Date(w.due_date).toLocaleDateString('en-GB')) : '-'}</td>
+          <td>${workStatusPill(w.status)}</td>
+          <td>${(w.replies || []).filter(r => r.type !== 'system').length}</td>
+          <td style="white-space:nowrap;">${workFmt(w.updated_at)}</td>
+        </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:22px;">No work found.</td></tr>';
+      document.getElementById('workCount').textContent = `${list.length} of ${W.works.length} assignment(s)`;
+      document.querySelectorAll('#workBody tr[data-id]').forEach(tr => tr.addEventListener('click', () => openWorkModal(tr.dataset.id, false)));
+    }
+
+    function openAssign(username) {
+      const sel = document.getElementById('aUser');
+      sel.innerHTML = W.users.map(u => `<option value="${msgEsc(u.username)}">${msgEsc(u.name)} — ${msgEsc(msgRoleLabel(u.role))}</option>`).join('');
+      if (username) sel.value = username;
+      document.getElementById('aTitle').value = '';
+      document.getElementById('aDesc').value = '';
+      document.getElementById('aDue').value = '';
+      document.getElementById('aPriority').value = 'normal';
+      document.getElementById('assignModal').style.display = 'flex';
+      document.getElementById('aTitle').focus();
+    }
+
+    function closeAssign() {
+      document.getElementById('assignModal').style.display = 'none';
+    }
+
+    async function sendAssign() {
+      const btn = document.getElementById('assignSend');
+      const title = document.getElementById('aTitle').value.trim();
+      const username = document.getElementById('aUser').value;
+      if (!username) { showResponseModal('Assign work', 'Select a user first.', false); return; }
+      if (!title) { showResponseModal('Assign work', 'Work title is required.', false); return; }
+      btn.disabled = true;
+      try {
+        const res = await apiFetch('/work/assign', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            assigned_to: username,
+            title,
+            description: document.getElementById('aDesc').value.trim(),
+            priority: document.getElementById('aPriority').value,
+            due_date: document.getElementById('aDue').value || null
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'work could not be assigned');
+        closeAssign();
+        const u = W.users.find(x => x.username === username);
+        showResponseModal('Work assigned', `Sent to ${u ? u.name : username}. It opens on their screen right away.`, true);
+        loadWorks();
+      } catch (err) {
+        if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Assign failed', err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function syncFilterControls() {
+      document.getElementById('tblSearch').value = W.f.q;
+      document.getElementById('fStatus').value = W.f.status;
+      document.getElementById('fPriority').value = W.f.priority;
+      document.getElementById('fUser').value = W.f.user;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const role = getRole() || '';
+      const uname = getUsername() || 'User';
+      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
+      ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
+
+      document.getElementById('userSearch').addEventListener('input', e => { W.userQ = e.target.value.trim(); drawUsers(); });
+      document.getElementById('tblSearch').addEventListener('input', e => { W.f.q = e.target.value.trim(); drawWorks(); });
+      document.getElementById('workSearch').addEventListener('input', e => {
+        W.f.q = e.target.value.trim();
+        document.getElementById('tblSearch').value = W.f.q;
+        drawWorks();
+      });
+      ['fStatus', 'fPriority', 'fUser'].forEach(id => document.getElementById(id).addEventListener('change', e => {
+        W.f[{ fStatus: 'status', fPriority: 'priority', fUser: 'user' }[id]] = e.target.value;
+        drawWorks();
+      }));
+      document.getElementById('fReset').addEventListener('click', () => {
+        W.f = { q: '', status: '', priority: '', user: '' };
+        document.getElementById('workSearch').value = '';
+        syncFilterControls();
+        drawWorks();
+      });
+      document.querySelectorAll('.card-clickable').forEach(c => c.addEventListener('click', () => {
+        W.f.status = c.dataset.status;
+        syncFilterControls();
+        drawWorks();
+      }));
+
+      document.getElementById('assignClose').addEventListener('click', closeAssign);
+      document.getElementById('assignCancel').addEventListener('click', closeAssign);
+      document.getElementById('assignSend').addEventListener('click', sendAssign);
+      document.getElementById('assignModal').addEventListener('mousedown', e => { if (e.target.id === 'assignModal') closeAssign(); });
+
+      window.onWorkChanged = loadWorks;
+      loadUsers();
+      loadWorks();
+      setInterval(loadWorks, 8000);
+    });
+  </script>
+</body>
+
+</html>
