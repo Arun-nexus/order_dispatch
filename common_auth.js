@@ -308,7 +308,8 @@ async function loadNotifications() {
   if (!ui) return;
 
   try {
-    const isManager = role === 'admin' || role === 'employee';
+    // same roles the backend allows on GET /request/ and approve/reject
+    const isManager = ['admin', 'accounts', 'service_manager', 'employee'].includes(role);
     const res = await apiFetch(isManager ? '/request/' : '/request/mine');
     if (!res.ok) throw new Error('failed');
     const data = await res.json();
