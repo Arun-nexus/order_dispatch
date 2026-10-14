@@ -839,3 +839,94 @@ function initMessaging() {
   if (_msgPoll) clearInterval(_msgPoll);
   _msgPoll = setInterval(loadMessageInbox, 30000);
 }
+
+// =========================================================
+// Resizable wizard / popup boxes — every modal on every page gets a
+// "smaller / larger" control (bar sticks to the top of the box, next to the
+// close button). Three sizes: normal (the page's own size) -> large -> full
+// screen. The chosen size is remembered per box. Works for boxes that are
+// rebuilt step by step (wizards) because the control is re-added whenever a
+// box's content is replaced.
+// =========================================================
+(function () {
+  const SKIP = /delete|logout|appresponse|overflow|confirm/i;   // tiny yes/no dialogs don't need it
+  const MAX_LEVEL = 2;
+  const LS = 'acer_modal_size_';
+
+  const st = document.createElement('style');
+  st.textContent = `
+    .ab-size-1 { box-sizing: border-box !important; width: min(1200px, 96vw) !important; max-width: 96vw !important; max-height: 94vh !important; }
+    .ab-size-2 { box-sizing: border-box !important; width: 100vw !important; max-width: 100vw !important; height: 100vh !important; max-height: 100vh !important;
+                 border-radius: 0 !important; font-size: 15px; }
+    .ab-size-1 [style*="max-height"] { max-height: 62vh !important; }
+    .ab-size-2 [style*="max-height"] { max-height: calc(100vh - 240px) !important; }
+    .ab-size-2 #msgThreadList, .ab-size-1 #msgThreadList { height: calc(100vh - 340px) !important; max-height: none !important; }
+    .ab-size-2 table, .ab-size-1 table { font-size: 14px; }
+    .ab-bar { position: sticky; top: 0; z-index: 30; height: 0; overflow: visible; }
+    .ab-bar-inner { position: absolute; right: 30px; top: -2px; display: flex; gap: 4px; }
+    .ab-bar button { width: 26px; height: 26px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff;
+                     color: #475569; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
+    .ab-bar button:hover:not(:disabled) { background: #eef3fb; color: #1665ff; border-color: #bfd4ff; }
+    .ab-bar button:disabled { opacity: .35; cursor: default; }`;
+  document.head.appendChild(st);
+
+  const levelOf = box => box.classList.contains('ab-size-2') ? 2 : box.classList.contains('ab-size-1') ? 1 : 0;
+
+  function setLevel(box, lvl, remember) {
+    lvl = Math.max(0, Math.min(MAX_LEVEL, lvl));
+    box.classList.remove('ab-size-1', 'ab-size-2');
+    if (lvl) box.classList.add('ab-size-' + lvl);
+    const bar = box.querySelector(':scope > .ab-bar');
+    if (bar) {
+      bar.querySelector('.ab-smaller').disabled = lvl === 0;
+      bar.querySelector('.ab-larger').disabled = lvl === MAX_LEVEL;
+    }
+    if (remember && box.dataset.abKey) {
+      try { localStorage.setItem(LS + box.dataset.abKey, String(lvl)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function addBar(box) {
+    if (box.querySelector(':scope > .ab-bar')) return;
+    const bar = document.createElement('div');
+    bar.className = 'ab-bar';
+    bar.innerHTML = `<div class="ab-bar-inner">
+      <button type="button" class="ab-smaller" title="Smaller"><i class="fa-solid fa-compress"></i></button>
+      <button type="button" class="ab-larger" title="Larger / full screen"><i class="fa-solid fa-expand"></i></button></div>`;
+    bar.querySelector('.ab-smaller').addEventListener('click', e => { e.stopPropagation(); setLevel(box, levelOf(box) - 1, true); });
+    bar.querySelector('.ab-larger').addEventListener('click', e => { e.stopPropagation(); setLevel(box, levelOf(box) + 1, true); });
+    box.insertBefore(bar, box.firstChild);
+    setLevel(box, levelOf(box), false);   // sync disabled state
+  }
+
+  function enhance(box, key) {
+    if (!box || box.dataset.abReady === '1') return;
+    box.dataset.abReady = '1';
+    box.dataset.abKey = key;
+    let saved = 0;
+    try { saved = Number(localStorage.getItem(LS + key)) || 0; } catch (e) { /* ignore */ }
+    if (saved) box.classList.add('ab-size-' + Math.min(MAX_LEVEL, saved));
+    addBar(box);
+    // wizards rebuild box.innerHTML on every step — put the control back
+    new MutationObserver(() => addBar(box)).observe(box, { childList: true });
+  }
+
+  // an overlay is a fixed full-screen element holding one box
+  function scan(root) {
+    const overlays = (root.matches && root.matches('.modal, #msgModal')) ? [root] : [];
+    if (root.querySelectorAll) root.querySelectorAll('.modal, #msgModal').forEach(m => overlays.push(m));
+    overlays.forEach(m => {
+      const key = m.id || m.className;
+      if (SKIP.test(key)) return;
+      const box = m.querySelector(':scope > .modal-content') || (m.id === 'msgModal' ? m.firstElementChild : null);
+      if (box) enhance(box, key);
+    });
+  }
+
+  function init() {
+    scan(document.body);
+    new MutationObserver(muts => muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1 && n.matches && n.matches('.modal, #msgModal')) scan(n); })))
+      .observe(document.body, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();

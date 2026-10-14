@@ -33,6 +33,8 @@ function renderTablePagination(container, page, totalPages, onChange) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  ensureRequestCards();
+  wireOrderCardClicks();
   loadOrders();
   loadInventoryForOrders();
   wireHeaderButtons();
@@ -57,18 +59,31 @@ async function loadOrders() {
 
     // Demo-to-order conversions waiting for approval (or refused) show up here as rows
     // until admin approves; after approval the real order replaces them.
+    // Requests still waiting for approval (or refused) show up here as rows until
+    // admin/accounts approves them; after approval the real order replaces them.
+    //  - "order"            : order request raised from this page (Create Order)
+    //  - "convert_to_order" : demo unit -> order request raised from My Demo Units
     let convertRows = [];
     try {
       const rr = await apiFetch('/request/mine');
       if (rr.ok) {
         convertRows = ((await rr.json()).dataset || [])
-          .filter(r => r.request_type === 'convert_to_order' && (r.status === 'pending' || r.status === 'rejected'))
+          .filter(r => (r.request_type === 'convert_to_order' || r.request_type === 'order') && (r.status === 'pending' || r.status === 'rejected'))
           .map(r => {
-            const items = r.details?.items || [];
-            const amount = items.reduce((s, i) => s + (i.price || 0) * (i.quantity || 0) * (1 + (i.tax_rate || 0) / 100), 0);
+            const isOrderReq = r.request_type === 'order';
+            const items = (r.details?.items || []).map(i => ({ ...i, line_total: Number(((i.price || 0) * (i.quantity || 0)).toFixed(2)) }));
+            const subtotal = items.reduce((s, i) => s + (i.price || 0) * (i.quantity || 0), 0);
+            const tax = items.reduce((s, i) => s + (i.price || 0) * (i.quantity || 0) * ((i.tax_rate || 0) / 100), 0);
+            const discount = isOrderReq ? (Number(r.details?.discount) || 0) : 0;
+            const total = Math.max(subtotal + tax - discount, 0);
             return {
-              _isRequest: true, order_id: r.request_id, customer: r.details?.customer || {}, items,
-              payment_mode: '-', total_mrp: Number(amount.toFixed(2)), order_date: r.created_at,
+              _isRequest: true, _reqKind: isOrderReq ? 'order' : 'convert',
+              order_id: r.request_id, customer: r.details?.customer || {}, items,
+              payment_mode: isOrderReq ? (r.details?.payment_mode || '-') : '-',
+              payment_details: isOrderReq ? (r.details?.payment_details || {}) : {},
+              subtotal: Number(subtotal.toFixed(2)), tax_total: Number(tax.toFixed(2)), discount,
+              total_mrp: Number(total.toFixed(2)), order_date: r.created_at,
+              attachments: (r.details?.attachments || r.attachments || []).map(a => ({ ...a, request_id: a.request_id || r.request_id })),
               status: r.status === 'rejected' ? 'request_rejected' : 'under_approval', reason: r.reason
             };
           });
@@ -110,6 +125,8 @@ function renderCards(orders) {
   set('cardTodayOrders', todaysOrders.length);
   set('cardDelivered', orders.filter(o => o.status === 'delivered').length);
   set('cardPendingOrders', orders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled').length);
+  set('cardPendingRequests', (doState.orders || []).filter(o => o._isRequest && o.status === 'under_approval').length);
+  set('cardRejectedRequests', (doState.orders || []).filter(o => o._isRequest && o.status === 'request_rejected').length);
 }
 
 function statusClass(status) {
@@ -149,7 +166,7 @@ function renderTable(orders) {
     const tr = document.createElement('tr');
     tr.dataset.orderId = o.order_id;
     tr.innerHTML = `
-      <td>${o.order_id ? o.order_id.slice(0, 8) : '-'}${o._isRequest ? '<br><small style="color:#94a3b8;">Request</small>' : ''}</td>
+      <td>${o.order_id ? o.order_id.slice(0, 8) : '-'}${o._isRequest ? `<br><small style="color:#94a3b8;">${o._reqKind === 'convert' ? 'Request (demo → order)' : 'Request'}</small>` : ''}</td>
       <td>${companyName}</td>
       <td>${productLabel}</td>
       <td>${o.payment_mode ?? ''}</td>
@@ -171,6 +188,223 @@ function renderTable(orders) {
 function rowOrder(e) {
   const tr = e.target.closest('tr');
   return doState.orders.find(o => o.order_id === tr.dataset.orderId);
+}
+
+// =========================================================
+// CARD POPUPS — filters + export + click-through to full details
+// =========================================================
+const ocv = { key: '', title: '', base: [], f: {} };
+
+function ocvEnsure() {
+  if (!document.getElementById('ocvStyles')) {
+    const st = document.createElement('style');
+    st.id = 'ocvStyles';
+    st.textContent = `
+      #viewOrderModal{z-index:1100 !important}
+      /* table headings in these popups/wizards were white on light grey */
+      #viewOrderModal th,#orderModal th,#cardDetailModal th{background:#f1f5f9 !important;color:#334155 !important}
+      .oc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+      .oc-head h3{margin:0}
+      .oc-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+      .oc-bar select,.oc-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px;background:#fff;color:#1e293b;min-width:0}
+      .oc-bar input[type=text]{flex:1;min-width:150px}
+      .oc-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+      .oc-btn.exp{background:#1665ff;color:#fff}
+      .oc-btn.rst{background:#eef1f6;color:#334155}
+      .oc-count{font-size:12px;color:#64748b;margin:0 0 8px}
+      .oc-wrap{overflow:auto;max-height:58vh;border:1px solid #eef1f6;border-radius:10px}
+      .oc-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:900px;color:#1e293b}
+      .oc-tbl th{position:sticky;top:0;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+      .oc-tbl td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+      .oc-tbl tbody tr{cursor:pointer}
+      .oc-tbl tbody tr:hover{background:#f8fbff}
+      .oc-sub{display:block;font-size:11px;color:#64748b;margin-top:1px}
+      .oc-line{margin-bottom:6px}
+      .oc-line:last-child{margin-bottom:0}
+      .oc-pill{padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600;white-space:nowrap}
+      .oc-pill.pending{background:#fef3c7;color:#92400e}
+      .oc-pill.delivered{background:#dcfce7;color:#166534}
+      .oc-pill.cancel{background:#fee2e2;color:#991b1b}`;
+    document.head.appendChild(st);
+  }
+  let modal = document.getElementById('cardDetailModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'cardDetailModal';
+    modal.className = 'modal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;';
+    modal.innerHTML = '<div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(1100px,96vw);max-height:92vh;overflow-y:auto;"></div>';
+    modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+    document.body.appendChild(modal);
+  }
+  return modal;
+}
+
+// "ID · Model" for products / accessories, "Belongs to: <product>" for spare / service parts
+function ocvInv(i) {
+  const list = doState.products || [];
+  return list.find(p => p.product_name === i.product_name && (p.product_id || '') === (i.product_id || '') && (p.model_no || '') === (i.model_no || ''))
+    || list.find(p => p.product_name === i.product_name) || null;
+}
+function ocvIdent(i) {
+  const p = ocvInv(i);
+  if (p && (p.product_type === 'spare_parts' || p.product_type === 'service_parts')) return 'Belongs to: ' + (p.parent_product_name || '—');
+  return [i.product_id || p?.product_id || '', i.model_no || p?.model_no || ''].filter(Boolean).join(' · ');
+}
+const ocvDay = o => (o.order_date || o.created_at || '').slice(0, 10);
+
+function ocvBase(key) {
+  const real = doState.orders.filter(o => !o._isRequest);
+  const todayStr = new Date().toDateString();
+  const todays = real.filter(o => o.order_date && new Date(o.order_date).toDateString() === todayStr);
+  switch (key) {
+    case 'total': return ['Total Orders', real];
+    case 'todayAmount': return ["Today's Order Amount", todays];
+    case 'today': return ["Today's Orders", todays];
+    case 'delivered': return ['Delivered', real.filter(o => o.status === 'delivered')];
+    case 'pending': return ['Pending', real.filter(o => o.status !== 'delivered' && o.status !== 'cancelled')];
+    case 'pendingReq': return ['Pending Requests', doState.orders.filter(o => o._isRequest && o.status === 'under_approval')];
+    case 'rejectedReq': return ['Rejected Requests', doState.orders.filter(o => o._isRequest && o.status === 'request_rejected')];
+    default: return ['Orders', doState.orders];
+  }
+}
+
+function ocvFiltered() {
+  const f = ocv.f, q = (f.q || '').toLowerCase();
+  return ocv.base.filter(o => {
+    if (f.status && statusLabel(o.status, o) !== f.status) return false;
+    if (f.payment && (o.payment_mode || '-') !== f.payment) return false;
+    if (f.company && (o.customer?.company_name || '') !== f.company) return false;
+    if (f.from && ocvDay(o) < f.from) return false;
+    if (f.to && ocvDay(o) > f.to) return false;
+    if (q) {
+      const hay = [o.order_id, o.customer?.company_name, o.customer?.gst_number,
+        ...(o.items || []).map(i => `${i.product_name} ${i.product_id || ''} ${i.model_no || ''} ${ocvIdent(i)} ${(i.serial_numbers || []).join(' ')}`)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function ocvRowsHtml(list) {
+  if (!list.length) return '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px;">Nothing matches these filters.</td></tr>';
+  return list.map(o => {
+    const items = (o.items || []).map(i => `
+      <div class="oc-line"><b>${esc(i.product_name)}</b> × ${esc(i.quantity ?? 0)}${i.price ? ` — ₹${esc(i.price)}` : ''}
+        ${ocvIdent(i) ? `<span class="oc-sub">${esc(ocvIdent(i))}</span>` : ''}
+        ${(i.serial_numbers || []).length ? `<span class="oc-sub">Serial: ${esc(i.serial_numbers.join(', '))}</span>` : ''}</div>`).join('') || '—';
+    return `<tr data-id="${esc(o.order_id)}">
+      <td>${esc((o.order_id || '').slice(0, 8))}${o._isRequest ? `<span class="oc-sub">${o._reqKind === 'convert' ? 'Request (demo → order)' : 'Request'}</span>` : ''}</td>
+      <td><b>${esc(o.customer?.company_name || '-')}</b>${o.customer?.gst_number ? `<span class="oc-sub">GST: ${esc(o.customer.gst_number)}</span>` : ''}</td>
+      <td>${items}</td>
+      <td>${esc(o.payment_mode || '-')}${o.payment_mode && o.payment_mode !== '-' ? `<span class="oc-sub">${esc(paymentDetailsLabel(o))}</span>` : ''}</td>
+      <td>₹${esc(o.total_mrp ?? 0)}</td>
+      <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td><span class="oc-pill ${statusClass(o.status)}">${esc(statusLabel(o.status, o))}</span>${o.status === 'request_rejected' && o.reason ? `<span class="oc-sub">${esc(o.reason)}</span>` : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function ocvPaint() {
+  const list = ocvFiltered();
+  const body = document.getElementById('ocBody');
+  if (!body) return;
+  body.innerHTML = ocvRowsHtml(list);
+  const total = list.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
+  document.getElementById('ocCount').textContent = `${list.length} of ${ocv.base.length} record(s) · Total ₹${total.toFixed(2)}`;
+  body.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', () => {
+    openViewOrderModal(doState.orders.find(o => o.order_id === tr.dataset.id));
+  }));
+}
+
+function ocvCsvCell(v) {
+  const t = String(v ?? '');
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function ocvExport(list, base) {
+  const head = ['Type', 'Order / Request ID', 'Company', 'Address', 'GST No.', 'Products (name x qty @ price - id/model or belongs to - serials)',
+    'Payment Mode', 'Payment Details', 'Subtotal', 'Tax', 'Discount', 'Total', 'Date', 'Status', 'Rejection Reason',
+    'Docket No.', 'Invoice No.', 'Invoice Date', 'Mode of Delivery'];
+  const rows = list.map(o => [
+    o._isRequest ? 'Request' : 'Order', o.order_id, o.customer?.company_name || '', o.customer?.company_address || '', o.customer?.gst_number || '',
+    (o.items || []).map(i => `${i.product_name} x ${i.quantity ?? 0}${i.price ? ' @ ' + i.price : ''}${ocvIdent(i) ? ' - ' + ocvIdent(i) : ''}${(i.serial_numbers || []).length ? ' - ' + i.serial_numbers.join('/') : ''}`).join(' | '),
+    o.payment_mode || '', o.payment_mode && o.payment_mode !== '-' ? paymentDetailsLabel(o) : '',
+    o.subtotal ?? '', o.tax_total ?? '', o.discount ?? '', o.total_mrp ?? 0,
+    (o.order_date || '').slice(0, 10), statusLabel(o.status, o), o.status === 'request_rejected' ? (o.reason || '') : '',
+    o.dispatch?.docket_no || '', o.dispatch?.invoice_no || '', o.dispatch?.invoice_date || '', o.dispatch?.mode_of_delivery || '']);
+  const csv = '﻿' + [head, ...rows].map(r => r.map(ocvCsvCell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `${base}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function openOrderCardModal(key) {
+  const modal = ocvEnsure();
+  const [title, base] = ocvBase(key);
+  ocv.key = key; ocv.title = title; ocv.base = base; ocv.f = {};
+  const uniq = arr => [...new Set(arr.filter(Boolean))].sort();
+  const opt = arr => arr.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div class="oc-head"><h3>${esc(title)} <span style="color:#94a3b8;font-weight:400;">(${base.length})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="oc-bar">
+      <input type="text" id="ocF_q" placeholder="Search order ID, company, product, ID, model, serial...">
+      <select id="ocF_status"><option value="">All Status</option>${opt(uniq(base.map(o => statusLabel(o.status, o))))}</select>
+      <select id="ocF_payment"><option value="">All Payment</option>${opt(uniq(base.map(o => o.payment_mode || '-')))}</select>
+      <select id="ocF_company"><option value="">All Customers</option>${opt(uniq(base.map(o => o.customer?.company_name)))}</select>
+      <label style="font-size:12px;color:#64748b;">Date</label>
+      <input type="date" id="ocF_from" title="From"><input type="date" id="ocF_to" title="To">
+      <button class="oc-btn rst" id="ocF_reset">Reset</button>
+      <button class="oc-btn exp" id="ocF_export"><i class="fa-solid fa-download"></i> Export CSV</button>
+    </div>
+    <p class="oc-count" id="ocCount"></p>
+    <div class="oc-wrap"><table class="oc-tbl">
+      <thead><tr><th>Order ID</th><th>Customer</th><th>Products</th><th>Payment</th><th>Amount</th><th>Date</th><th>Status</th></tr></thead>
+      <tbody id="ocBody"></tbody></table></div>
+    <p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Click a row to see full order details.</p>`;
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('.oc-bar select,.oc-bar input').forEach(el => {
+    const k = el.id.replace('ocF_', '');
+    el.addEventListener(el.type === 'text' ? 'input' : 'change', () => { ocv.f[k] = el.value; ocvPaint(); });
+  });
+  content.querySelector('#ocF_reset').addEventListener('click', () => {
+    ocv.f = {}; content.querySelectorAll('.oc-bar select,.oc-bar input').forEach(el => el.value = ''); ocvPaint();
+  });
+  content.querySelector('#ocF_export').addEventListener('click', () =>
+    ocvExport(ocvFiltered(), title.toLowerCase().replace(/[^a-z0-9]+/g, '_')));
+  ocvPaint();
+  modal.style.display = 'flex';
+}
+
+// Pending / Rejected request cards sit next to the existing order cards
+// (an order request shows here until admin/accounts approves it).
+function ensureRequestCards() {
+  const wrap = document.querySelector('.cards');
+  if (!wrap) return;
+  if (!document.getElementById('cardPendingRequests')) {
+    wrap.insertAdjacentHTML('beforeend', `
+      <div class="card"><div><span>Pending Requests</span><h2 id="cardPendingRequests">0</h2><p>Awaiting admin/accounts approval</p></div><i class="fa-solid fa-hourglass-half"></i></div>
+      <div class="card"><div><span>Rejected Requests</span><h2 id="cardRejectedRequests">0</h2><p>Declined by admin/accounts</p></div><i class="fa-solid fa-circle-xmark"></i></div>`);
+  }
+  const sel = document.getElementById('statusFilter');
+  if (sel && !sel.querySelector('option[value="request_rejected"]')) {
+    sel.insertAdjacentHTML('beforeend', '<option value="request_rejected">Rejected</option>');
+  }
+}
+
+function wireOrderCardClicks() {
+  ocvEnsure();
+  const map = { cardTotalOrders: 'total', cardTodayAmount: 'todayAmount', cardTodayOrders: 'today', cardDelivered: 'delivered',
+    cardPendingOrders: 'pending', cardPendingRequests: 'pendingReq', cardRejectedRequests: 'rejectedReq' };
+  Object.entries(map).forEach(([id, key]) => {
+    const card = document.getElementById(id)?.closest('.card');
+    if (!card) return;
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => openOrderCardModal(key));
+  });
 }
 
 // ---------- Header search + filter ----------
@@ -200,6 +434,7 @@ function wireFilter() {
     const filtered = doState.orders.filter(o => {
       if (statusVal === 'delivered') return o.status === 'delivered';
       if (statusVal === 'under_approval') return o.status === 'under_approval';
+      if (statusVal === 'request_rejected') return o.status === 'request_rejected';
       if (statusVal === 'dispatched') return o.status === 'processing' && !!o.dispatch;
       if (statusVal === 'pending') return !o._isRequest && o.status !== 'delivered' && o.status !== 'cancelled';
       return true;

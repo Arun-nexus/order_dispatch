@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadInventoryForDemo();
   wireFilter();
   injectAllotModal();
+  wireDemoCardClicks();
 });
 
 async function loadMyAllocations() {
@@ -388,6 +389,209 @@ function openViewModal(row) {
   content.innerHTML = html;
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   modal.style.display = 'flex';
+}
+
+// =========================================================
+// CARD POPUPS — filters + export + click-through to full details
+// =========================================================
+const dcv = { key: '', title: '', base: [], f: {} };
+
+function dcvEnsure() {
+  if (!document.getElementById('dcvStyles')) {
+    const st = document.createElement('style');
+    st.id = 'dcvStyles';
+    st.textContent = `
+      #viewAllocationModal{z-index:1100 !important}
+      /* table headings in these popups/wizards were white on light grey */
+      #viewAllocationModal th,#allotModal th,#cardDetailModal th{background:#f1f5f9 !important;color:#334155 !important}
+      .dc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+      .dc-head h3{margin:0}
+      .dc-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+      .dc-bar select,.dc-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px;background:#fff;color:#1e293b;min-width:0}
+      .dc-bar input[type=text]{flex:1;min-width:150px}
+      .dc-btn{padding:8px 12px;border:none;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600}
+      .dc-btn.exp{background:#1665ff;color:#fff}
+      .dc-btn.rst{background:#eef1f6;color:#334155}
+      .dc-count{font-size:12px;color:#64748b;margin:0 0 8px}
+      .dc-wrap{overflow:auto;max-height:58vh;border:1px solid #eef1f6;border-radius:10px}
+      .dc-tbl{width:100%;font-size:12.5px;border-collapse:collapse;min-width:880px;color:#1e293b}
+      .dc-tbl th{position:sticky;top:0;text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+      .dc-tbl td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+      .dc-tbl tbody tr{cursor:pointer}
+      .dc-tbl tbody tr:hover{background:#f8fbff}
+      .dc-sub{display:block;font-size:11px;color:#64748b;margin-top:1px}
+      .dc-line{margin-bottom:6px}
+      .dc-line:last-child{margin-bottom:0}
+      .dc-pill{padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600;white-space:nowrap}
+      .dc-pill.high{background:#dcfce7;color:#166534}
+      .dc-pill.medium{background:#fef3c7;color:#92400e}
+      .dc-pill.low{background:#fee2e2;color:#991b1b}`;
+    document.head.appendChild(st);
+  }
+  let modal = document.getElementById('cardDetailModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'cardDetailModal';
+    modal.className = 'modal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;';
+    modal.innerHTML = '<div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(1100px,96vw);max-height:92vh;overflow-y:auto;"></div>';
+    modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
+    document.body.appendChild(modal);
+  }
+  return modal;
+}
+
+// identity line for a product row: "ID · Model" for products/accessories,
+// "Belongs to: <product>" for spare / service parts
+function dcvInv(i) {
+  const list = spState.products || [];
+  return list.find(p => p.product_name === i.product_name && (p.product_id || '') === (i.product_id || '') && (p.model_no || '') === (i.model_no || ''))
+    || list.find(p => p.product_name === i.product_name) || null;
+}
+function dcvIdent(i) {
+  const p = dcvInv(i);
+  if (p && (p.product_type === 'spare_parts' || p.product_type === 'service_parts')) return 'Belongs to: ' + (p.parent_product_name || '—');
+  return [i.product_id || p?.product_id || '', i.model_no || p?.model_no || ''].filter(Boolean).join(' · ');
+}
+function dcvItems(row) { return (row.kind === 'req' ? row.data.details?.items : row.data.items) || []; }
+
+function dcvBase(key) {
+  const alloc = spState.rows.filter(r => r.kind === 'alloc');
+  switch (key) {
+    case 'total': return ['Total Allotted', alloc];
+    case 'notReturned': return ['Not Returned', alloc.filter(r => r.data.return_status !== 'returned')];
+    case 'overdue': return ['Return Overdue', spState.rows.filter(r => rowStatus(r).key === 'overdue')];
+    case 'pendingReq': return ['Pending Requests', spState.rows.filter(r => r.kind === 'req' && r.data.status === 'pending')];
+    case 'rejectedReq': return ['Rejected Requests', spState.rows.filter(r => r.kind === 'req' && r.data.status === 'rejected')];
+    default: return ['Demo Units', spState.rows];
+  }
+}
+
+function dcvFiltered() {
+  const f = dcv.f, q = (f.q || '').toLowerCase();
+  return dcv.base.filter(r => {
+    const st = rowStatus(r);
+    const d = r.data, isReq = r.kind === 'req';
+    const creator = isReq ? d.raised_by : d.allocated_by;
+    if (f.status && st.key !== f.status) return false;
+    if (f.creator && creator !== f.creator) return false;
+    const day = (r.date || '').slice(0, 10);
+    if (f.from && day < f.from) return false;
+    if (f.to && day > f.to) return false;
+    if (q) {
+      const hay = [r.id, creatorLabel(creator), isReq ? d.details?.remarks : d.remarks,
+        ...dcvItems(r).map(i => `${i.product_name} ${i.product_id || ''} ${i.model_no || ''} ${dcvIdent(i)} ${(i.serial_numbers || []).join(' ')}`)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function dcvRowsHtml(list) {
+  if (!list.length) return '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px;">Nothing matches these filters.</td></tr>';
+  return list.map(r => {
+    const st = rowStatus(r), d = r.data, isReq = r.kind === 'req';
+    const items = dcvItems(r).map(i => `
+      <div class="dc-line"><b>${esc(i.product_name)}</b> × ${esc(i.quantity)}
+        ${dcvIdent(i) ? `<span class="dc-sub">${esc(dcvIdent(i))}</span>` : ''}
+        ${(i.serial_numbers || []).length ? `<span class="dc-sub">Serial: ${esc(i.serial_numbers.join(', '))}</span>` : ''}</div>`).join('') || '—';
+    return `<tr data-key="${esc(r.kind + ':' + r.id)}">
+      <td>${esc(creatorLabel(isReq ? d.raised_by : d.allocated_by))}</td>
+      <td>${items}</td>
+      <td>${esc((isReq ? d.details?.remarks : d.remarks) || '-')}</td>
+      <td>${r.date ? new Date(r.date).toLocaleDateString('en-GB') : '-'}</td>
+      <td>${!isReq && d.return_due_date ? new Date(d.return_due_date).toLocaleDateString('en-GB') : '-'}</td>
+      <td><span class="dc-pill ${st.cls}">${esc(st.label)}</span>${isReq && d.status === 'rejected' && d.reason ? `<span class="dc-sub">${esc(d.reason)}</span>` : ''}</td>
+      <td>${isReq ? 'Request' : 'Allocation'}<span class="dc-sub">${esc(String(r.id).slice(0, 8))}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function dcvPaint() {
+  const list = dcvFiltered();
+  const body = document.getElementById('dcBody');
+  if (!body) return;
+  body.innerHTML = dcvRowsHtml(list);
+  document.getElementById('dcCount').textContent = `${list.length} of ${dcv.base.length} record(s)`;
+  body.querySelectorAll('tr[data-key]').forEach(tr => tr.addEventListener('click', () => {
+    openViewModal(spState.rows.find(r => `${r.kind}:${r.id}` === tr.dataset.key));
+  }));
+}
+
+function dcvCsvCell(v) {
+  const t = String(v ?? '');
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function dcvExport(list, base) {
+  const head = ['Type', 'ID', 'Creator', 'Products (name x qty - id/model or belongs to - serials)', 'Remarks',
+    'Date', 'Return Due', 'Status', 'Rejection Reason', 'Docket No.', 'Invoice No.', 'Mode of Delivery'];
+  const rows = list.map(r => {
+    const d = r.data, isReq = r.kind === 'req', st = rowStatus(r);
+    return [isReq ? 'Request' : 'Allocation', r.id, creatorLabel(isReq ? d.raised_by : d.allocated_by),
+      dcvItems(r).map(i => `${i.product_name} x ${i.quantity}${dcvIdent(i) ? ' - ' + dcvIdent(i) : ''}${(i.serial_numbers || []).length ? ' - ' + i.serial_numbers.join('/') : ''}`).join(' | '),
+      (isReq ? d.details?.remarks : d.remarks) || '',
+      (r.date || '').slice(0, 10), !isReq ? (d.return_due_date || '').slice(0, 10) : '', st.label,
+      isReq && d.status === 'rejected' ? (d.reason || '') : '',
+      d.dispatch?.docket_no || '', d.dispatch?.invoice_no || '', d.dispatch?.mode_of_delivery || ''];
+  });
+  const csv = '﻿' + [head, ...rows].map(r => r.map(dcvCsvCell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `${base}_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+function openDemoCardModal(key) {
+  const modal = dcvEnsure();
+  const [title, base] = dcvBase(key);
+  dcv.key = key; dcv.title = title; dcv.base = base; dcv.f = {};
+  const statuses = new Map(); const creators = new Set();
+  base.forEach(r => {
+    const st = rowStatus(r); statuses.set(st.key, st.label);
+    const c = r.kind === 'req' ? r.data.raised_by : r.data.allocated_by; if (c) creators.add(c);
+  });
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div class="dc-head"><h3>${esc(title)} <span style="color:#94a3b8;font-weight:400;">(${base.length})</span></h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="dc-bar">
+      <input type="text" id="dcF_q" placeholder="Search product, ID, model, serial, creator...">
+      <select id="dcF_status"><option value="">All Status</option>${[...statuses].map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join('')}</select>
+      <select id="dcF_creator"><option value="">All Creators</option>${[...creators].sort().map(c => `<option value="${esc(c)}">${esc(creatorLabel(c))}</option>`).join('')}</select>
+      <label style="font-size:12px;color:#64748b;">Date</label>
+      <input type="date" id="dcF_from" title="From"><input type="date" id="dcF_to" title="To">
+      <button class="dc-btn rst" id="dcF_reset">Reset</button>
+      <button class="dc-btn exp" id="dcF_export"><i class="fa-solid fa-download"></i> Export CSV</button>
+    </div>
+    <p class="dc-count" id="dcCount"></p>
+    <div class="dc-wrap"><table class="dc-tbl">
+      <thead><tr><th>Creator</th><th>Products</th><th>Remarks</th><th>Date</th><th>Return Due</th><th>Status</th><th>Type / ID</th></tr></thead>
+      <tbody id="dcBody"></tbody></table></div>
+    <p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Click a row to see full details.</p>`;
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('.dc-bar select,.dc-bar input').forEach(el => {
+    const k = el.id.replace('dcF_', '');
+    el.addEventListener(el.type === 'text' ? 'input' : 'change', () => { dcv.f[k] = el.value; dcvPaint(); });
+  });
+  content.querySelector('#dcF_reset').addEventListener('click', () => {
+    dcv.f = {}; content.querySelectorAll('.dc-bar select,.dc-bar input').forEach(el => el.value = ''); dcvPaint();
+  });
+  content.querySelector('#dcF_export').addEventListener('click', () =>
+    dcvExport(dcvFiltered(), title.toLowerCase().replace(/[^a-z0-9]+/g, '_')));
+  dcvPaint();
+  modal.style.display = 'flex';
+}
+
+function wireDemoCardClicks() {
+  dcvEnsure();
+  const map = { cardTotal: 'total', cardNotReturned: 'notReturned', cardOverdue: 'overdue', cardPendingRequests: 'pendingReq', cardRejectedRequests: 'rejectedReq' };
+  Object.entries(map).forEach(([id, key]) => {
+    const card = document.getElementById(id)?.closest('.card');
+    if (!card) return;
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => openDemoCardModal(key));
+  });
 }
 
 function wireFilter() {
