@@ -741,7 +741,6 @@ function columnsForCategory(category) {
   const dateCell = p => p.purchase_date ?? '';
   const supplierCell = p => p.supplier ?? '';
   const nameCell = p => p.product_name ?? '';
-  const idCell = p => p.product_id ?? '';
   const modelCell = p => p.model_no ?? '';
   // Mixed (no category filter) view: a part is identified by its own name +
   // which product it belongs to, not by product_id/model_no (those are
@@ -794,7 +793,6 @@ function columnsForCategory(category) {
     case 'product':
       return [
         { label: 'Product Name', cell: nameCell },
-        { label: 'Product ID', cell: idCell },
         { label: 'Model No.', cell: modelCell },
         { label: 'Receiving Date', cell: dateCell },
         { label: 'Quantity', cell: qtyCell },
@@ -826,7 +824,6 @@ function columnsForCategory(category) {
     case 'damaged':
       return [
         { label: 'Product Name', cell: nameCell },
-        { label: 'Product ID', cell: idCell },
         { label: 'Model No.', cell: modelCell },
         { label: 'Received Date', cell: p => p.damage_date ?? p.purchase_date ?? '' },
         { label: 'Quantity', cell: qtyCell },
@@ -1307,13 +1304,12 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
 
 function wireFilter() {
   document.querySelector('.filter-btn').addEventListener('click', () => {
-    const [nameBox, idBox, supplierBox, dateBox] = document.querySelectorAll('.filter-box input');
+    const [nameBox, supplierBox, dateBox] = document.querySelectorAll('.filter-box input');
     const name = nameBox.value.trim().toLowerCase();
-    const id = idBox.value.trim().toLowerCase();
     const supplier = supplierBox.value.trim().toLowerCase();
     const date = dateBox.value;
 
-    invState.activeFilters = (name || id || supplier || date) ? { name, id, supplier, date } : null;
+    invState.activeFilters = (name || supplier || date) ? { name, supplier, date } : null;
     invPage = 1;
     renderInventoryTable(getFilteredInventory());
   });
