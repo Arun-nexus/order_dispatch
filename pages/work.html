@@ -219,7 +219,7 @@
       try {
         const res = await apiFetch('/message/recipients');
         const data = await res.json();
-        W.users = (data.dataset || []).filter(u => u.role !== 'admin');
+        W.users = data.dataset || [];
         const sel = document.getElementById('fUser');
         const keep = sel.value;
         sel.innerHTML = '<option value="">All Users</option>' + W.users.map(u => `<option value="${msgEsc(u.username)}">${msgEsc(u.name)}</option>`).join('');
