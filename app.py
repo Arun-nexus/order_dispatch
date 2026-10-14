@@ -178,6 +178,7 @@ class CreateOrderRequest(BaseModel):
     discount: float = 0
     warranty_years: int = 1        # standard warranty is 1 year; > 1 means extended
     warranty_charge: float = 0     # additional charge for the extended warranty (0 for standard)
+    reference: str = ""            # username of the reference person; required by /order/create_order/
 
 
 class CustomerRequest(BaseModel):
@@ -876,7 +877,12 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
 
 @app.post("/order/create_order/")
 def create_order(request: CreateOrderRequest, user: dict = Depends(require_role("admin", "accounts"))):
+    reference = (request.reference or "").strip()
+    if not reference:
+        raise HTTPException(status_code=400, detail="reference is required, please select a reference user")
     try:
+        if not mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": reference}):
+            raise HTTPException(status_code=400, detail="selected reference user does not exist")
         order_id = _fulfill_order(
             customer_id=request.customer_id,
             customer=request.customer,
@@ -888,6 +894,8 @@ def create_order(request: CreateOrderRequest, user: dict = Depends(require_role(
             warranty_years=request.warranty_years,
             warranty_charge=request.warranty_charge
         )
+        order_manager().update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},
+                               update_values={"reference": reference})
         return {"message": "order created successfully", "order_id": order_id}
 
     except HTTPException:
@@ -5665,8 +5673,6 @@ def work_assign(request: WorkAssignRequest, user: dict = Depends(require_role("a
         target = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": request.assigned_to})
         if not target:
             raise HTTPException(status_code=404, detail="user not found")
-        if target[0].get("role") == "admin":
-            raise HTTPException(status_code=400, detail="work can only be assigned to non-admin users")
         now = datetime.now(timezone.utc).isoformat()
         work_id = uuid.uuid4().hex
         db.add(collection_name=WORK_COLLECTION, dictionary={
