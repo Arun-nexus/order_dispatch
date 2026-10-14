@@ -151,6 +151,15 @@ function reqItemLabel(i) {
   return esc(i.product_name || '') + (extra ? ` (${esc(extra)})` : '');
 }
 
+// "dd/mm/yyyy, hh:mm AM/PM" — date AND time the request was generated
+function fmtReqDateTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d)) return '-';
+  return d.toLocaleDateString('en-GB') + ', ' +
+    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
 function renderPendingRequests() {
   const box = document.getElementById('pendingRequestsList');
   const badge = document.getElementById('notifBadge');
@@ -213,16 +222,22 @@ function renderPendingRequests() {
           <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
         </div>`;
 
+    const typeLabel = ALLOC_REQ_LABELS[r.request_type] || 'Request';
     return `
-      <div class="order-item" data-id="${r.request_id}">
-        <div class="order-left">
+      <div class="order-item" data-id="${r.request_id}" style="align-items:flex-start;gap:14px;">
+        <div class="order-left" style="align-items:flex-start;min-width:0;flex:1;">
           <div class="order-icon"><i class="fa-solid ${icon}"></i></div>
-          <div>
-            <h4>${title}</h4>
-            <p>${subtitle} • raised by ${r.raised_by}</p>
+          <div style="min-width:0;">
+            <h4 style="margin:0 0 4px;">${title}</h4>
+            <p style="margin:0 0 6px;word-break:break-word;">${subtitle || '-'}</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:#64748b;">
+              <span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:999px;font-weight:600;">${esc(typeLabel)}</span>
+              <span><i class="fa-regular fa-user"></i> Raised by <b>${esc(r.raised_by ?? '-')}</b></span>
+              <span title="Request generated on"><i class="fa-regular fa-clock"></i> Requested on <b>${fmtReqDateTime(r.created_at)}</b></span>
+            </div>
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
           <button class="req-view-btn" title="View details" style="border:none;background:none;color:#1665ff;font-size:16px;cursor:pointer;"><i class="fa-solid fa-circle-info"></i></button>
           ${actions}
         </div>
@@ -310,7 +325,8 @@ function openRequestDetailsModal(r) {
       <h3>${heading}</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    ${body}`;
+    ${body}
+    <div class="detail"><small>Requested On</small><p>${fmtReqDateTime(r.created_at)}</p></div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async e => {
@@ -571,14 +587,14 @@ function allocCvFiltered() {
 
 function allocCvHead() {
   return allocCV.requests
-    ? ['Type', 'Details', 'Raised By', 'Raised On']
+    ? ['Type', 'Details', 'Raised By', 'Requested On (Date & Time)']
     : ['Type', 'Product / Spare Part', 'Serial No.', 'Sales Person / Service', 'Allotment Date', 'Return Due', 'Status'];
 }
 
 function allocCvCells(x) {
   if (allocCV.requests) {
     return [esc(ALLOC_REQ_LABELS[x.request_type] || x.request_type || '-'), requestSummary(x), esc(x.raised_by || '-'),
-      x.created_at ? new Date(x.created_at).toLocaleDateString('en-GB') : '-'];
+      fmtReqDateTime(x.created_at)];
   }
   const meta = returnMeta(x);
   return [
