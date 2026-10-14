@@ -1674,9 +1674,9 @@ function renderPaymentStep() {
       ${PAYMENT_MODES.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
     </select>
     <div id="paymentExtra"></div>
-    <label style="font-size:13px;color:var(--text-muted);">Reference <span style="color:var(--text-light);">(optional)</span></label>
-    <select id="orderReference" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:4px 0 10px;">
-      <option value="">No reference</option>
+    <label style="font-size:13px;color:var(--text-muted);">Reference <span style="color:var(--danger,#d62828);">*</span></label>
+    <select id="orderReference" required style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:4px 0 10px;">
+      <option value="">Select reference</option>
     </select>
     <div style = "padding-left:8px" ><small><p>Discount<p><small></div>
     <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:10px 0;">
@@ -1690,7 +1690,7 @@ function renderPaymentStep() {
   loadReferenceUsers().then(list => {
     const sel = document.getElementById('orderReference');
     if (!sel) return;
-    sel.innerHTML = '<option value="">No reference</option>' + list.map(u =>
+    sel.innerHTML = '<option value="">Select reference</option>' + list.map(u =>
       `<option value="${u.username}" ${u.username === wiz.reference ? 'selected' : ''}>${u.name || u.username} (${u.username}${u.role === 'distributor' ? ' · Sales' : (u.role ? ' · ' + u.role.replace('_', ' ') : '')})</option>`).join('');
   });
 
@@ -1759,6 +1759,9 @@ function proceedToSerialReview(modeSelect, extraBox) {
   const mode = modeSelect.value;
   if (!mode) { alert('Please select a payment mode.'); return; }
 
+  const referenceValue = document.getElementById('orderReference')?.value || '';
+  if (!referenceValue) { alert('Reference is required. Please select a reference user.'); return; }
+
   if (wiz.warrantyYears > 1 && (!wiz.warrantyCharge || wiz.warrantyCharge <= 0)) {
     alert('Please enter the additional charge for the extended warranty.');
     return;
@@ -1774,7 +1777,7 @@ function proceedToSerialReview(modeSelect, extraBox) {
 
   wiz.paymentMode = mode;
   wiz.paymentDetails = payment_details;
-  wiz.reference = document.getElementById('orderReference')?.value || '';
+  wiz.reference = referenceValue;
   renderSerialReviewStep();
 }
 
@@ -1887,6 +1890,7 @@ async function renderSerialReviewStep() {
 }
 
 async function finalizeSubmitOrder() {
+  if (!wiz.reference) { alert('Reference is required. Please go back and select a reference user.'); return; }
   const payload = {
     customer_id: wiz.customerId || '',
     customer: wiz.customer || {},
