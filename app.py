@@ -438,7 +438,7 @@ def login_page(request: LoginRequest, http_request: Request):
         if user["password"] != request.password or user["role"] != request.role:
             raise HTTPException(status_code=401, detail="details did not match")
 
-        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username != "Arun":
+        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username != "arun":
             ua = http_request.headers.get("user-agent", "")
             if f"key={APP_CLIENT_KEY}" not in ua:
                 raise HTTPException(status_code=403, detail="this role can log in only from the desktop app")
@@ -5778,7 +5778,7 @@ def _is_work_manager(user) -> bool:
 
 def require_work_manager(user: dict = Depends(get_current_user)):
     if not _is_work_manager(user):
-        raise HTTPException(status_code=403, detail="only Prashant and Arun can assign work")
+        raise HTTPException(status_code=403, detail="Only Director can assign work")
     return user
 
 
