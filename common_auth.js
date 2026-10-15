@@ -25,7 +25,7 @@ const ROLE_HOME = {
 };
 
 // Only these two usernames can assign / manage work (any role, even admin). Must match WORK_MANAGERS in app.py.
-const WORK_MANAGERS = ['prashant', 'Arun'];
+const WORK_MANAGERS = ['prashant', 'arun'];
 
 function isWorkManager(username) {
   return WORK_MANAGERS.includes(String(username ?? getUsername() ?? '').trim().toLowerCase());

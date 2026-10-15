@@ -29,6 +29,10 @@ function urlProductId(id) {
   return encodeURIComponent(v ? v : EMPTY_PRODUCT_ID_SENTINEL);
 }
 
+function refreshIfMissing(err) {
+  if (err && /not found|invalid id/i.test(err.message || '')) loadInventory();
+}
+
 function lockOnce(fn) {
   let busy = false;
   return async function (ev) {
@@ -1637,6 +1641,7 @@ async function submitHologramChange({ add = [], remove = [] }) {
       openHologramOverflowModal(data.hologram_added, data.hologram_leftover);
     }
   } catch (err) {
+    refreshIfMissing(err);
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Hologram update failed', err.message, false);
   } finally {
     hologramBusy = false;
@@ -2560,7 +2565,8 @@ function wireModals() {
       showResponseModal('Product updated', 'Inventory was updated successfully.', true);
       await loadInventory();
     } catch (err) {
-      if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
+      refreshIfMissing(err);
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
     }
   }));
 
@@ -2573,6 +2579,7 @@ function wireModals() {
       document.getElementById('deleteModal').style.display = 'none';
       await loadInventory();
     } catch (err) {
+      refreshIfMissing(err);
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   }));

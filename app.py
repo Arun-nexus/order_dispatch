@@ -3583,6 +3583,13 @@ def _id_query(item_id):
         return {"_id": item_id}
 
 
+def _find_lot(item_id, extra=None):
+    q = _id_query(item_id)
+    if extra:
+        q = {**q, **extra}
+    return mongodbclient().database[INVENTORY_COLLECTION].find_one(q)
+
+
 def _type_group(product_type):
     return {"$in": ["product", None]} if (product_type or "product") == "product" else product_type
 
@@ -3734,11 +3741,12 @@ def update_inventory(item_id: str, request: InventoryUpdateRequest, user: dict =
 def _update_inventory_impl(item_id: str, request: InventoryUpdateRequest, user: dict):
     try:
         db = inventory_manager()
-        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=_id_query(item_id))
-        if not existing:
+        lot = _find_lot(item_id)
+        if not lot:
             raise HTTPException(status_code=404, detail="product not found")
-        match_query = {"_id": existing[0]["_id"]}
-        product_id = existing[0].get("product_id", "")
+        existing = [lot]
+        match_query = {"_id": lot["_id"]}
+        product_id = lot.get("product_id", "")
         current_serials = existing[0].get("serial_numbers") or []
         current_type = existing[0].get("product_type", "product")
 
@@ -3933,8 +3941,13 @@ def _update_inventory_impl(item_id: str, request: InventoryUpdateRequest, user: 
                     reason=damage_reason,
                 ).add(collection_name=INVENTORY_COLLECTION)
 
-        db.update(collection_name=INVENTORY_COLLECTION, query=match_query,
-                   update_values=updated_values)
+        write_result = db.update(collection_name=INVENTORY_COLLECTION, query=match_query,
+                                  update_values=updated_values)
+        touched = getattr(write_result, "matched_count", None)
+        if touched is None:
+            touched = getattr(write_result, "deleted_count", 1)
+        if touched == 0:
+            raise HTTPException(status_code=409, detail="this product was changed or removed by someone else, refresh and try again")
         logging.info("inventory was updated")
         return {
             "message": "inventory was updated successfully",
@@ -3958,10 +3971,12 @@ def delete_product(item_id: str, user: dict = Depends(require_role("admin"))):
 def _delete_product_impl(item_id: str):
     try:
         db = inventory_manager()
-        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=_id_query(item_id))
-        if not existing:
+        lot = _find_lot(item_id)
+        if not lot:
             raise HTTPException(status_code=404, detail="product not found")
-        db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": existing[0]["_id"]})
+        del_result = db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": lot["_id"]})
+        if getattr(del_result, "deleted_count", 1) == 0:
+            raise HTTPException(status_code=409, detail="this product was already removed, refresh and try again")
         logging.info(f"product was deleted successfully from the inventory {item_id}")
         return {"message": "product deletion was successful", "id": item_id}
     except HTTPException:
@@ -3990,11 +4005,9 @@ def _repair_damaged_product_impl(item_id: str, user: dict):
     """
     try:
         db = inventory_manager()
-        match_query = {**_id_query(item_id), "product_type": "damaged"}
-        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
-        if not existing:
+        item = _find_lot(item_id, {"product_type": "damaged"})
+        if not item:
             raise HTTPException(status_code=404, detail="damaged product not found")
-        item = existing[0]
 
         is_product = bool(item.get("serial_numbers"))
 
@@ -5753,7 +5766,7 @@ WORK_PRIORITIES = {"low", "normal", "high", "urgent"}
 
 # Only these two usernames may assign / manage work (whatever their role is, even admin).
 # Everybody else can only receive work, reply and update its status.
-WORK_MANAGERS = {"prashant", "Arun"}
+WORK_MANAGERS = {"prashant", "arun"}
 # an unfinished work pops up again on the assignee's screen after this many hours,
 # and keeps coming back every time this many hours pass, until it is marked Done
 WORK_REMIND_HOURS = 24
@@ -5765,7 +5778,7 @@ def _is_work_manager(user) -> bool:
 
 def require_work_manager(user: dict = Depends(get_current_user)):
     if not _is_work_manager(user):
-        raise HTTPException(status_code=403, detail="Only Director can assign the work")
+        raise HTTPException(status_code=403, detail="only Prashant and Arun can assign work")
     return user
 
 
