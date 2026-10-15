@@ -166,8 +166,9 @@ function renderPendingRequests() {
   const countLabel = document.getElementById('pendingCountLabel');
   if (!box) return;
 
-  const pending = allocState.requests
-    .filter(r => r.status === 'pending')
+  const pending = allocState.requests.filter(r => r.status === 'pending');
+  const listed = allocState.requests
+    .filter(r => r.status === 'pending' || r.status === 'partially_approved')
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
   if (badge) {
@@ -178,12 +179,12 @@ function renderPendingRequests() {
   const reqCard = document.getElementById('cardPendingRequests');
   if (reqCard) reqCard.textContent = pending.length;
 
-  if (!pending.length) {
+  if (!listed.length) {
     box.innerHTML = '<p style="color:#94a3b8;padding:10px;">No pending requests.</p>';
     return;
   }
 
-  box.innerHTML = pending.map(r => {
+  box.innerHTML = listed.map(r => {
     const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen', convert_to_order: 'fa-file-invoice-dollar', return_demo: 'fa-rotate-left' };
     const icon = iconMap[r.request_type] || 'fa-bell';
 
@@ -213,12 +214,19 @@ function renderPendingRequests() {
       subtitle = r.details?.note || '';
     }
 
+    if (r.status === 'partially_approved') {
+      subtitle = (subtitle || '') + ` • Partial: ${(r.details?.partial?.approved_items || []).length} approved, ${(r.details?.partial?.unapproved_items || []).length} not approved — ${esc(r.details?.partial?.remarks || '')}`;
+    }
+    const canPartial = r.status === 'pending' && ['demo_unit', 'order'].includes(r.request_type) && (r.details?.items || []).length > 1;
     // status_update is completed from the Service page's Update Status action (needs
     // service charges etc. that this quick panel doesn't collect), so no approve/reject here
-    const actions = r.request_type === 'status_update'
+    const actions = r.status === 'partially_approved'
+      ? `<span style="font-size:12px;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:999px;font-weight:600;">Awaiting distributor</span>`
+      : r.request_type === 'status_update'
       ? `<p style="font-size:11px;color:#94a3b8;">Complete this from the Service page's Update Status action.</p>`
       : `<div style="display:flex;gap:8px;">
           <button class="req-approve-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Approve</button>
+          ${canPartial ? '<button class="req-partial-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d97706;color:#fff;cursor:pointer;">Partial</button>' : ''}
           <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
         </div>`;
 
@@ -232,6 +240,7 @@ function renderPendingRequests() {
             <p style="margin:0 0 6px;word-break:break-word;">${subtitle || '-'}</p>
             <div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:#64748b;">
               <span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:999px;font-weight:600;">${esc(typeLabel)}</span>
+              ${r.status === 'partially_approved' ? '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:999px;font-weight:600;">Partially approved</span>' : ''}
               <span><i class="fa-regular fa-user"></i> Raised by <b>${esc(r.raised_by ?? '-')}</b></span>
               <span title="Request generated on"><i class="fa-regular fa-clock"></i> Requested on <b>${fmtReqDateTime(r.created_at)}</b></span>
             </div>
@@ -246,6 +255,7 @@ function renderPendingRequests() {
 
   box.querySelectorAll('.req-approve-btn').forEach(btn => btn.addEventListener('click', e => approveRequest(rowRequestId(e))));
   box.querySelectorAll('.req-reject-btn').forEach(btn => btn.addEventListener('click', e => rejectRequest(rowRequestId(e))));
+  box.querySelectorAll('.req-partial-btn').forEach(btn => btn.addEventListener('click', e => openRequestPopup(rowRequest(e))));
   box.querySelectorAll('.req-view-btn').forEach(btn => btn.addEventListener('click', e => openRequestDetailsModal(rowRequest(e))));
 }
 
@@ -271,7 +281,8 @@ function openRequestDetailsModal(r) {
     body = `
       ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
       <div class="detail"><small>Requested By</small><p>${esc(r.raised_by)}</p></div>
-      <div class="detail"><small>Remarks</small><p>${esc(d.remarks || '-')}</p></div>`;
+      <div class="detail"><small>Remarks</small><p>${esc(d.remarks || '-')}</p></div>
+      ${partialInfoHtml(d)}`;
   } else if (r.request_type === 'return_demo') {
     heading = 'Demo Unit Return';
     const itemsRows = (d.items || []).map(i => itemDetailBlock(i, false)).join('');
@@ -298,6 +309,7 @@ function openRequestDetailsModal(r) {
       ${itemsRows || '<div class="detail"><small>Products</small><p>-</p></div>'}
       ${customerDetailBlock(d.customer)}
       ${detailRow('Payment Mode', d.payment_mode)}${detailRow('Discount', d.discount ? '₹' + d.discount : '')}
+      ${partialInfoHtml(d)}
       <div class="detail"><small>Requested By</small><p>${esc(r.raised_by ?? '-')}</p></div>
       ${(d.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${d.attachments.map((f, i) => `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(f.name)}</a>`).join('')}</p></div>` : ''}`;
   } else if (r.request_type === 'spare_part') {
@@ -766,7 +778,7 @@ function openAllocCardDetailModal(type) {
   allocCV.requests = requests;
   allocCV.f = {};
   allocCV.base = requests
-    ? allocState.requests.filter(r => r.status === 'pending').sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    ? allocState.requests.filter(r => r.status === 'pending' || r.status === 'partially_approved').sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     : allocCardList(type);
   const opt = arr => arr.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
   const uniq = arr => [...new Set(arr.filter(Boolean))].sort();
@@ -2000,3 +2012,4 @@ function renderSparePartFormStep() {
     }
   });
 }
+window.refreshCurrentPageData = () => { loadPendingRequests(); loadAllocations(); };

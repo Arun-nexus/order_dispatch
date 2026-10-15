@@ -277,48 +277,42 @@ function ensureBellUI() {
   return { bellBtn, badge, panel };
 }
 
-function notifItemHtml(r, canAct) {
-  const typeLabels = { demo_unit: 'Demo Unit', order: 'Order', spare_part: 'Spare Part', media_review: 'Service Media', status_update: 'Service Status Update', service: 'New Service' };
+function notifItemHtml(r, isManager) {
+  const typeLabels = { demo_unit: 'Demo Unit', order: 'Order', spare_part: 'Spare Part', media_review: 'Service Media', status_update: 'Service Status Update', service: 'New Service', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
   const label = typeLabels[r.request_type] || r.request_type;
-  const who = r.raised_by ? `by ${r.raised_by}` : '';
+  const who = r.raised_by ? `by ${rqEsc(r.raised_by)}` : '';
   let sub = '';
-  if (r.request_type === 'demo_unit' || r.request_type === 'order') {
-    sub = (r.details?.items || []).map(i => `${i.product_name} x${i.quantity}`).join(', ');
+  if (['demo_unit', 'order', 'convert_to_order', 'return_demo'].includes(r.request_type)) {
+    sub = (r.details?.items || []).map(i => `${rqEsc(i.product_name)} x${i.quantity}`).join(', ');
   } else if (r.request_type === 'spare_part') {
-    sub = r.details?.note || '';
+    sub = rqEsc(r.details?.note || '');
   } else if (r.request_type === 'service') {
-    sub = `${r.details?.product_id || ''} — ${r.details?.issue || ''}`;
+    sub = `${rqEsc(r.details?.product_id || '')} — ${rqEsc(r.details?.issue || '')}`;
   } else if (r.request_type === 'media_review') {
     sub = `Service #${(r.details?.service_id || '').slice(0, 8)} uploaded media`;
   } else if (r.request_type === 'status_update') {
-    const svcId = (r.details?.service_id || '').slice(0, 8);
-    const newStatus = (r.details?.service_status || '').replace('_', ' ');
-    sub = `Service #${svcId} — change status to "${newStatus}"${r.details?.reason ? ' — ' + r.details.reason : ''}`;
+    sub = `Service #${(r.details?.service_id || '').slice(0, 8)} — change status to "${rqEsc((r.details?.service_status || '').replace('_', ' '))}"`;
   }
-  const statusPill = r.status === 'pending'
-    ? '<span class="status pending">Pending</span>'
-    : `<span class="status ${r.status === 'approved' ? 'delivered' : 'cancelled'}">${r.status}${r.resolved_by ? ' by ' + r.resolved_by : ''}</span>`;
-
-  const isStatusUpdate = r.request_type === 'status_update';
-  const actions = (canAct && r.status === 'pending' && !isStatusUpdate) ? `
-    <div style="display:flex;gap:6px;margin-top:6px;">
-      <button class="notif-approve" data-id="${r.request_id}" style="flex:1;padding:6px 8px;border:none;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer;font-size:12px;">Approve</button>
-      <button class="notif-reject" data-id="${r.request_id}" style="flex:1;padding:6px 8px;border:none;border-radius:6px;background:#d62828;color:#fff;cursor:pointer;font-size:12px;">Reject</button>
-    </div>` : (canAct && r.status === 'pending' && isStatusUpdate ? `
-    <p style="font-size:11px;color:#94a3b8;margin-top:4px;">Complete this from the Service page's Update Status action.</p>` : '');
+  let pill;
+  if (r.status === 'pending') pill = '<span class="status pending">Pending</span>';
+  else if (r.status === 'partially_approved') pill = `<span class="status pending">${isManager ? 'Partially approved' : 'Action needed'}</span>`;
+  else if (r.status === 'approved' || r.status === 'partial_accepted') pill = `<span class="status delivered">${r.status === 'approved' ? 'approved' : 'partial accepted'}</span>`;
+  else pill = `<span class="status cancelled">${rqEsc(r.status.replace('_', ' '))}</span>`;
 
   return `
-    <div class="notif-item" style="border-bottom:1px solid #eef1f6;padding:10px 4px;">
+    <div class="notif-item" data-rid="${r.request_id}" style="border-bottom:1px solid #eef1f6;padding:10px 4px;cursor:pointer;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
         <div>
           <strong style="font-size:13px;">${label}</strong> ${who}
-          <p style="font-size:12px;color:#64748b;margin-top:2px;">${sub}${r.status === 'rejected' && r.reason ? ' — ' + r.reason : ''}</p>
+          <p style="font-size:12px;color:#64748b;margin-top:2px;">${sub}${r.reason && r.status !== 'approved' ? ' — ' + rqEsc(r.reason) : ''}</p>
         </div>
-        ${statusPill}
+        ${pill}
       </div>
-      ${actions}
+      <p style="font-size:11px;color:#1665ff;margin-top:4px;">Tap to view details</p>
     </div>`;
 }
+
+let _notifData = {};
 
 async function loadNotifications() {
   const role = getRole();
@@ -326,26 +320,27 @@ async function loadNotifications() {
   if (!ui) return;
 
   try {
-    // same roles the backend allows on GET /request/ and approve/reject
     const isManager = ['admin', 'accounts', 'service_manager', 'employee'].includes(role);
     const res = await apiFetch(isManager ? '/request/' : '/request/mine');
     if (!res.ok) throw new Error('failed');
     const data = await res.json();
     const all = data.dataset || [];
-    const pendingCount = all.filter(r => r.status === 'pending').length;
+    const badgeCount = all.filter(r => r.status === (isManager ? 'pending' : 'partially_approved')).length;
 
-    ui.badge.textContent = pendingCount;
-    ui.badge.style.display = pendingCount ? 'block' : 'none';
+    ui.badge.textContent = badgeCount;
+    ui.badge.style.display = badgeCount ? 'block' : 'none';
 
     const sorted = [...all].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 25);
+    _notifData = {};
+    sorted.forEach(r => { _notifData[r.request_id] = r; });
     ui.panel.innerHTML = sorted.length
       ? `<h4 style="padding:6px 4px 10px;">Notifications</h4>` + sorted.map(r => notifItemHtml(r, isManager)).join('')
       : '<p style="padding:16px;color:#94a3b8;font-size:13px;">No notifications yet.</p>';
 
-    if (isManager) {
-      ui.panel.querySelectorAll('.notif-approve').forEach(btn => btn.addEventListener('click', () => notifApprove(btn.dataset.id)));
-      ui.panel.querySelectorAll('.notif-reject').forEach(btn => btn.addEventListener('click', () => notifReject(btn.dataset.id)));
-    }
+    ui.panel.querySelectorAll('.notif-item').forEach(el => el.addEventListener('click', () => {
+      ui.panel.style.display = 'none';
+      openRequestPopup(_notifData[el.dataset.rid]);
+    }));
   } catch (err) {
     console.error(err);
   }
@@ -377,6 +372,154 @@ async function notifReject(requestId) {
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Rejection failed', err.message, false);
   }
+}
+
+function rqEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function rqItemLine(i) {
+  const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+  return `${rqEsc(i.product_name || '')}${meta ? ` <span style="color:#94a3b8;">(${rqEsc(meta)})</span>` : ''} x${i.quantity ?? 1}${i.price ? ' @ ₹' + rqEsc(i.price) : ''}`;
+}
+
+function partialInfoHtml(d) {
+  const p = d && d.partial;
+  if (!p) return '';
+  const list = arr => (arr || []).map(i => `<div style="font-size:13px;margin:2px 0;">${rqItemLine(i)}</div>`).join('') || '-';
+  return `
+    <div style="border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:10px 12px;margin:10px 0;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:#92400e;"><i class="fa-solid fa-circle-half-stroke"></i> Partial approval</div>
+      <small style="color:#16a34a;font-weight:600;">Approved</small>${list(p.approved_items)}
+      <small style="color:#d62828;font-weight:600;display:block;margin-top:6px;">Not approved</small>${list(p.unapproved_items)}
+      <small style="color:#64748b;display:block;margin-top:6px;">Remarks by ${rqEsc(p.by || '-')}</small>
+      <div style="font-size:13px;">${rqEsc(p.remarks || '-')}</div>
+    </div>`;
+}
+
+function closeRequestPopup() {
+  const el = document.getElementById('reqPopup');
+  if (el) el.remove();
+}
+
+async function afterRequestAction(title, msg) {
+  closeRequestPopup();
+  showResponseModal(title, msg, true);
+  await loadNotifications();
+  if (typeof window.refreshCurrentPageData === 'function') window.refreshCurrentPageData();
+  else if (typeof loadPendingRequests === 'function') loadPendingRequests();
+}
+
+async function rqPost(url, body, okTitle) {
+  try {
+    const res = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'action failed');
+    await afterRequestAction(okTitle, data.message || 'Done');
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Action failed', err.message, false);
+  }
+}
+
+function openRequestPopup(r) {
+  if (!r) return;
+  closeRequestPopup();
+  const role = getRole();
+  const isManager = ['admin', 'accounts', 'service_manager', 'employee'].includes(role);
+  const d = r.details || {};
+  const items = d.items || [];
+  const canAct = isManager && r.status === 'pending';
+  const distAct = role === 'distributor' && r.status === 'partially_approved';
+  const canPartial = canAct && ['demo_unit', 'order'].includes(r.request_type) && items.length > 1;
+  const labels = { demo_unit: 'Demo Unit Request', order: 'Order Request', spare_part: 'Spare Part Request', media_review: 'Service Media Review', status_update: 'Status Change Request', service: 'New Service Request', convert_to_order: 'Convert Demo to Order', return_demo: 'Demo Return' };
+
+  const itemRows = items.map((i, n) => `
+    <label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;margin:6px 0;${canPartial ? 'cursor:pointer;' : ''}">
+      ${canPartial ? `<input type="checkbox" class="rq-chk" data-i="${n}">` : ''}
+      <span style="font-size:13px;">${rqItemLine(i)}</span>
+    </label>`).join('');
+
+  const rows = [];
+  const row = (k, v) => { if (v) rows.push(`<div style="margin:6px 0;"><small style="color:#94a3b8;">${k}</small><p style="margin:0;font-size:13px;">${rqEsc(v)}</p></div>`); };
+  row('Raised By', r.raised_by);
+  row('Requested On', r.created_at ? new Date(r.created_at).toLocaleString('en-GB') : '');
+  row('Customer', d.customer?.company_name);
+  row('Remarks', d.remarks);
+  row('Payment Mode', d.payment_mode);
+  row('Discount', d.discount ? '₹' + d.discount : '');
+  row('Spare Part', d.note);
+  row('Service ID', d.service_id);
+  row('Issue', d.issue);
+  row('Requested Status', (d.service_status || '').replace('_', ' '));
+  row('Reason', d.reason);
+  row('Returned Through', d.returned_through);
+  row('Status', (r.status || '').replace('_', ' '));
+  if (r.status === 'rejected' || r.status === 'partial_rejected') row('Rejection Reason', r.reason);
+
+  const btn = (cls, bg, txt) => `<button class="${cls}" style="flex:1;padding:9px 10px;border:none;border-radius:8px;background:${bg};color:#fff;cursor:pointer;font-size:13px;font-weight:600;">${txt}</button>`;
+  let footer = '';
+  if (canAct) {
+    footer = `
+      <textarea id="rqRemarks" rows="2" placeholder="${canPartial ? 'Remarks (required for partial approval, optional for reject)' : 'Reason (optional for reject)'}" style="width:100%;margin-top:10px;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;resize:vertical;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        ${btn('rq-approve', '#16a34a', 'Approve')}
+        ${canPartial ? btn('rq-partial', '#d97706', 'Partial Approve') : ''}
+        ${btn('rq-reject', '#d62828', 'Reject')}
+      </div>
+      ${canPartial ? '<p style="font-size:11px;color:#64748b;margin-top:6px;">For partial approval tick the products you approve; the rest go back to the distributor with your remarks.</p>' : ''}`;
+  } else if (distAct) {
+    footer = `
+      <textarea id="rqRemarks" rows="2" placeholder="Reason (optional)" style="width:100%;margin-top:10px;padding:8px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;resize:vertical;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        ${btn('rq-accept', '#16a34a', 'Accept approved items')}
+        ${btn('rq-decline', '#d62828', 'Reject')}
+      </div>
+      <p style="font-size:11px;color:#64748b;margin-top:6px;">Accepting raises a new request for the approved products only. Rejecting closes this request permanently.</p>`;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'reqPopup';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:2000;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:22px;width:min(480px,94vw);max-height:90vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="margin:0;">${labels[r.request_type] || 'Request'}</h3>
+        <button class="rq-close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+      </div>
+      ${itemRows ? `<small style="color:#94a3b8;">Products</small>${itemRows}` : ''}
+      ${rows.join('')}
+      ${partialInfoHtml(d)}
+      ${footer}
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const q = s => overlay.querySelector(s);
+  const remarks = () => (q('#rqRemarks')?.value || '').trim();
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeRequestPopup(); });
+  q('.rq-close').addEventListener('click', closeRequestPopup);
+
+  q('.rq-approve')?.addEventListener('click', () => {
+    if (r.request_type === 'convert_to_order') {
+      closeRequestPopup();
+      if (typeof openInvoiceModal === 'function') return openInvoiceModal(r);
+      return showResponseModal('Invoice details needed', 'Approve this request from the Allocated page.', false);
+    }
+    if (r.request_type === 'status_update') {
+      return showResponseModal('Use Service page', "Complete this from the Service page's Update Status action.", false);
+    }
+    closeRequestPopup();
+    notifApprove(r.request_id);
+  });
+  q('.rq-reject')?.addEventListener('click', () => rqPost(`/request/reject/${r.request_id}`, { reason: remarks() }, 'Request rejected'));
+  q('.rq-partial')?.addEventListener('click', () => {
+    const picked = [...overlay.querySelectorAll('.rq-chk:checked')].map(c => Number(c.dataset.i));
+    if (!picked.length) return showResponseModal('Select products', 'Tick at least one product to approve.', false);
+    if (picked.length === items.length) return showResponseModal('Select fewer products', 'All products are ticked, use Approve instead.', false);
+    if (!remarks()) return showResponseModal('Remarks required', 'Write why the other products are not approved.', false);
+    rqPost(`/request/partial_approve/${r.request_id}`, { approved_indexes: picked, remarks: remarks() }, 'Partially approved');
+  });
+  q('.rq-accept')?.addEventListener('click', () => rqPost(`/request/partial_respond/${r.request_id}`, { accept: true, reason: remarks() }, 'Accepted'));
+  q('.rq-decline')?.addEventListener('click', () => rqPost(`/request/partial_respond/${r.request_id}`, { accept: false, reason: remarks() }, 'Request closed'));
 }
 
 function initNotificationBell() {

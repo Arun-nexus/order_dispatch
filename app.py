@@ -5242,6 +5242,95 @@ def reject_request(request_id: str, request: RequestRejectModel, user: dict = De
         raise HTTPException(status_code=500, detail="request could not be rejected")
 
 
+class PartialApproveModel(BaseModel):
+    approved_indexes: list[int]
+    remarks: str
+
+
+class PartialRespondModel(BaseModel):
+    accept: bool
+    reason: str = ""
+
+
+@app.post("/request/partial_approve/{request_id}")
+def partial_approve_request(request_id: str, body: PartialApproveModel, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    try:
+        db = request_manager()
+        found = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
+        if not found:
+            raise HTTPException(status_code=404, detail="request not found")
+        req = found[0]
+        if req["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"request already {req['status']}")
+        if req["request_type"] not in ("demo_unit", "order"):
+            raise HTTPException(status_code=400, detail="partial approval is only for demo unit and order requests")
+        details = dict(req.get("details") or {})
+        items = list(details.get("items") or [])
+        if len(items) < 2:
+            raise HTTPException(status_code=400, detail="partial approval needs at least 2 products")
+        idx = sorted(set(body.approved_indexes))
+        if not idx or any(i < 0 or i >= len(items) for i in idx):
+            raise HTTPException(status_code=400, detail="select at least one product to approve")
+        if len(idx) >= len(items):
+            raise HTTPException(status_code=400, detail="all products selected, use normal approve")
+        remarks = (body.remarks or "").strip()
+        if not remarks:
+            raise HTTPException(status_code=400, detail="remarks are required for partial approval")
+        now = datetime.now(timezone.utc).isoformat()
+        details["partial"] = {
+            "approved_items": [items[i] for i in idx],
+            "unapproved_items": [items[i] for i in range(len(items)) if i not in idx],
+            "remarks": remarks,
+            "by": user["username"],
+            "at": now
+        }
+        db.update_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id},
+                       update_values={"status": "partially_approved", "details": details,
+                                      "resolved_by": user["username"], "resolved_at": now, "reason": remarks})
+        return {"message": "partially approved, sent back to the distributor for confirmation"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"partial approval failed! {e}")
+        raise HTTPException(status_code=500, detail="partial approval failed")
+
+
+@app.post("/request/partial_respond/{request_id}")
+def partial_respond_request(request_id: str, body: PartialRespondModel, user: dict = Depends(require_role("distributor"))):
+    try:
+        import shutil
+        db = request_manager()
+        found = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
+        if not found or found[0].get("raised_by") != user["username"]:
+            raise HTTPException(status_code=404, detail="request not found")
+        req = found[0]
+        if req["status"] != "partially_approved":
+            raise HTTPException(status_code=400, detail=f"request already {req['status']}")
+        partial = (req.get("details") or {}).get("partial") or {}
+
+        if not body.accept:
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                          status="partial_rejected", resolved_by=user["username"], reason=(body.reason or "").strip())
+            return {"message": "partial approval rejected, request closed"}
+
+        new_details = {k: v for k, v in (req.get("details") or {}).items() if k != "partial"}
+        new_details["items"] = partial.get("approved_items", [])
+        new_details["parent_request_id"] = request_id
+        new_req = request_manager(request_type=req["request_type"], raised_by=req["raised_by"], details=new_details)
+        src = os.path.join(ORDER_ATTACH_DIR, request_id)
+        if new_details.get("attachments") and os.path.isdir(src):
+            shutil.copytree(src, os.path.join(ORDER_ATTACH_DIR, new_req.request_id), dirs_exist_ok=True)
+        new_req.add(collection_name=REQUESTS_COLLECTION)
+        db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                      status="partial_accepted", resolved_by=user["username"], reason=(body.reason or "").strip())
+        return {"message": "accepted, new request raised for approved products", "request_id": new_req.request_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"partial response failed! {e}")
+        raise HTTPException(status_code=500, detail="could not submit response")
+
+
 @app.post("/allocation/create")
 def create_allocation(request: CreateAllocationRequest, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
