@@ -83,7 +83,7 @@ function checkPageAccess() {
   const currentFile = location.pathname.split('/').pop() || 'main_dashboard.html';
   if (currentFile === 'work.html') {
     if (!isWorkManager()) {
-      alert('Only Prashant and Arun can assign work.');
+      alert('Only Director can assign work.');
       window.location.href = homePathFor(role);
     }
     return;

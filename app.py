@@ -5635,7 +5635,7 @@ WORK_PRIORITIES = {"low", "normal", "high", "urgent"}
 
 # Only these two usernames may assign / manage work (whatever their role is, even admin).
 # Everybody else can only receive work, reply and update its status.
-WORK_MANAGERS = {"prashant", "arun"}
+WORK_MANAGERS = {"prashant", "Arun"}
 # an unfinished work pops up again on the assignee's screen after this many hours,
 # and keeps coming back every time this many hours pass, until it is marked Done
 WORK_REMIND_HOURS = 24
@@ -5647,7 +5647,7 @@ def _is_work_manager(user) -> bool:
 
 def require_work_manager(user: dict = Depends(get_current_user)):
     if not _is_work_manager(user):
-        raise HTTPException(status_code=403, detail="only Prashant and Arun can assign work")
+        raise HTTPException(status_code=403, detail="only Directors can assign work")
     return user
 
 
