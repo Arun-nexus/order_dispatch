@@ -1,5 +1,6 @@
 const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [], searchQuery: '', activeFilters: null };
 let dispPage = 1;
+let dispAssemblyDates = {};   // serial -> assembling date (from backend)
 let dispUserNames = {};   // username -> display name (for the form's REF box)
 const DISP_PAGE_SIZE = 30;
 
@@ -113,7 +114,7 @@ function cvDownloadCsv(head, rows, fileBase) {
 function dispatchStatusHtml(d) {
   const s = dispatchRowState(d);
   if (s === 'pending') return '<span class="pending">Pending</span>';
-  if (s === 'dispatched') return '<span class="delivered">Dispatched</span>';
+  if (s === 'dispatched') return d.status === 'delivered' ? '<span class="delivered">Delivered</span>' : '<span class="delivered">Dispatched</span>';
   return '<span style="background:var(--warning-bg);color:var(--warning-dark);padding:3px 10px;border-radius:999px;font-size:12px;">In Progress</span>';
 }
 
@@ -319,6 +320,7 @@ async function loadDispatchQueue() {
     dispState.dispatchedOrders = data.dispatched_orders || [];
     dispState.dispatchedSpare = data.dispatched_spare_parts || [];
     dispState.dispatchedProductAlloc = data.dispatched_product_allocations || [];
+    dispAssemblyDates = data.assembly_dates || {};
     dispPage = 1;
     updateCards();
     renderTable(getFilteredRows());
@@ -409,7 +411,7 @@ function renderTable(rows) {
     const statusHtml = !hasDispatch
       ? `<span class="pending">Pending</span>`
       : hasDocket
-        ? `<span class="delivered">Dispatched</span>`
+        ? `<span class="delivered">${d.status === 'delivered' ? 'Delivered' : 'Dispatched'}</span>`
         : `<span style="background:#fef3c7;color:#b45309;padding:3px 10px;border-radius:999px;font-size:12px;">In Progress</span>`;
     const actionHtml = !hasDispatch
       ? '<button class="confirm-dispatch-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Confirm Dispatch</button>'
@@ -589,12 +591,18 @@ function odfDateTime(v) {
 
 function odfDefaults(row) {
   const d = row.data, disp = d.dispatch || {};
-  let company = '', address = '', ref = '', lines = [], serials = [];
+  let company = '', address = '', ref = '', lines = [], serials = [], mfg = [];
 
   if (row.kind === 'order' || row.kind === 'product_allocation') {
     const items = d.items || [];
     lines = items.map((it, i) => `${i + 1}. ${it.product_name ?? ''}${it.model_no ? ' (' + it.model_no + ')' : ''}  -  Qty: ${it.quantity ?? 0}`);
     serials = items.filter(it => (it.serial_numbers || []).length).map(it => `${it.product_name ?? ''}: ${it.serial_numbers.join(', ')}`);
+    // Manufacturing date = assembling date of the unit (only filled when an assembly record exists)
+    items.forEach(it => {
+      const days = [...new Set((it.serial_numbers || []).map(sn => dispAssemblyDates[sn]).filter(Boolean)
+        .map(v => new Date(v)).filter(x => !isNaN(x)).map(x => x.toLocaleDateString('en-GB')))];
+      if (days.length) mfg.push(`${it.product_name ?? ''}: ${days.join(', ')}`);
+    });
   }
   if (row.kind === 'order') {
     const c = d.customer || {};
@@ -613,7 +621,7 @@ function odfDefaults(row) {
   }
 
   const extra = [];
-  if (disp.invoice_no) extra.push(`Invoice No.: ${String(disp.invoice_no).toUpperCase()}${disp.invoice_date ? '   Invoice Date: ' + new Date(disp.invoice_date).toLocaleDateString('en-GB') : ''}`);
+  if (disp.invoice_date) extra.push(`Invoice Date: ${new Date(disp.invoice_date).toLocaleDateString('en-GB')}`);
   if (disp.docket_no) extra.push(`Docket No.: ${String(disp.docket_no).toUpperCase()}`);
   if (disp.ship_to_different) extra.push(`SHIP TO: ${disp.ship_to_address?.company_name ?? ''}${disp.ship_to_address?.address ? ', ' + disp.ship_to_address.address : ''}`);
 
@@ -626,14 +634,16 @@ function odfDefaults(row) {
   else if (mode) out.others = [mode.charAt(0).toUpperCase() + mode.slice(1), through].filter(Boolean).join(' - ');
 
   return {
+    inv: disp.invoice_no ? String(disp.invoice_no).toUpperCase() : '',
     ref,
     date: new Date().toLocaleDateString('en-GB'),
-    company,
+    party: company,
     address,
     details: [...lines, ...(extra.length ? ['', ...extra] : [])].join('\n'),
     ...out,
     recv: row.kind === 'order' ? odfDateTime(d.order_date) : odfDateTime(d.allotment_date || d.created_at),
     serials: serials.join('\n'),
+    mfg: mfg.join('\n'),
     handover: disp.docket_no ? `Docket No.: ${String(disp.docket_no).toUpperCase()}` : ''
   };
 }

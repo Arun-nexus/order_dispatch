@@ -948,3 +948,5 @@ class inventory_manager(mongodbclient):
         except Exception as e:
             logging.error("pushing shipment parts into inventory failed!")
             raise Exception(e)
+
+        

@@ -4,7 +4,7 @@ function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
 function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
 function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
-const invState = { products: [], activeProductId: null, activeModelNo: '', activeProductType: 'product', activeCategory: null, searchQuery: '', activeFilters: null, editSerials: [], editRemovedSerials: [], editFaultySerials: [], editHolograms: [], editHologramQuantity: 0 };
+const invState = { products: [], activeProductId: null, activeModelNo: '', activeId: '', searchId: '', activeProductType: 'product', activeCategory: null, searchQuery: '', activeFilters: null, editSerials: [], editRemovedSerials: [], editFaultySerials: [], editHolograms: [], editHologramQuantity: 0 };
 let invPage = 1;
 const INV_PAGE_SIZE = 20;
 
@@ -530,68 +530,150 @@ function wireCategoryFilter() {
   });
 }
 
+const SEARCH_FIELDS = ['product_name', 'product_id', 'model_no', 'supplier', 'lot_no', 'parent_product_name', 'part_category'];
+
+function normSearch(s) {
+  return String(s ?? '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, ' ').trim();
+}
+
+function searchTokens(q) {
+  return normSearch(q).split(' ').filter(Boolean);
+}
+
+function scoreProduct(p, tokens) {
+  if (!p._hay) {
+    p._hay = '|' + SEARCH_FIELDS.map(f => normSearch(p[f])).join('|');
+    p._hayC = p._hay.replace(/[ |]/g, '');
+    p._name = normSearch(p.product_name);
+    p._ids = [normSearch(p.product_id), normSearch(p.model_no)];
+  }
+  let score = 0;
+  for (const t of tokens) {
+    if (p._hay.includes(t)) score += (p._hay.includes('|' + t) || p._hay.includes(' ' + t)) ? 3 : 1;
+    else if (p._hayC.includes(t)) score += 0.5;
+    else return 0;
+  }
+  const q = tokens.join(' ');
+  if (p._name === q) score += 10;
+  else if (p._name.startsWith(q)) score += 5;
+  if (p._ids.includes(q)) score += 8;
+  return score;
+}
+
+function rankProducts(list, q) {
+  const tokens = searchTokens(q);
+  if (!tokens.length) return list;
+  return list
+    .map((p, i) => ({ p, i, s: scoreProduct(p, tokens) }))
+    .filter(x => x.s > 0)
+    .sort((a, b) => b.s - a.s || b.i - a.i)
+    .map(x => x.p);
+}
+
+function highlightHtml(text, tokens) {
+  const s = String(text ?? '');
+  tokens = tokens.filter(t => t.length > 1);
+  if (!tokens.length) return escapeHtmlInv(s);
+  const re = new RegExp('(' + tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi');
+  return s.split(re).map((part, i) => i % 2
+    ? `<mark style="background:#fde68a;color:inherit;padding:0">${escapeHtmlInv(part)}</mark>`
+    : escapeHtmlInv(part)).join('');
+}
+
 function wireHeaderSearch() {
   const input = document.getElementById('headerSearchInput') || document.querySelector('.search input');
   const suggestBox = document.getElementById('headerSearchSuggestions');
   if (!input) return;
 
-  input.addEventListener('input', () => {
-    invState.searchQuery = input.value.trim().toLowerCase();
+  let timer = null;
+  let activeIdx = -1;
+
+  const closeBox = () => {
+    if (!suggestBox) return;
+    suggestBox.style.display = 'none';
+    suggestBox.innerHTML = '';
+    activeIdx = -1;
+  };
+
+  const pick = item => {
+    input.value = item.dataset.value;
+    invState.searchQuery = '';
+    invState.searchId = item.dataset.id || '';
     invPage = 1;
     renderInventoryTable(getFilteredInventory());
+    closeBox();
+  };
+
+  const paintActive = () => {
+    const items = suggestBox.querySelectorAll('.search-suggestion-item');
+    items.forEach((it, i) => { it.style.background = i === activeIdx ? 'var(--bg-light)' : ''; });
+    if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
+  };
+
+  input.addEventListener('input', () => {
+    invState.searchQuery = input.value.trim().toLowerCase();
+    invState.searchId = '';
+    invPage = 1;
     renderSearchSuggestions(input, suggestBox);
+    activeIdx = -1;
+    clearTimeout(timer);
+    timer = setTimeout(() => renderInventoryTable(getFilteredInventory()), 120);
   });
 
-  input.addEventListener('focus', () => renderSearchSuggestions(input, suggestBox));
+  input.addEventListener('focus', () => { if (input.value.trim() && !invState.searchId) renderSearchSuggestions(input, suggestBox); });
+
+  input.addEventListener('keydown', e => {
+    if (!suggestBox || suggestBox.style.display === 'none') return;
+    const items = suggestBox.querySelectorAll('.search-suggestion-item');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = (activeIdx + 1) % items.length; paintActive(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = (activeIdx - 1 + items.length) % items.length; paintActive(); }
+    else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx]); }
+    else if (e.key === 'Escape') closeBox();
+  });
+
+  if (suggestBox) suggestBox.addEventListener('click', e => {
+    const item = e.target.closest('.search-suggestion-item');
+    if (item) pick(item);
+  });
 
   document.addEventListener('click', e => {
     if (!suggestBox) return;
-    if (e.target !== input && !suggestBox.contains(e.target)) suggestBox.style.display = 'none';
+    if (e.target !== input && !suggestBox.contains(e.target)) closeBox();
   });
 }
 
-// Shows up to 8 matching product names/IDs (deduped) from whatever is
-// currently loaded in the table, so the person can jump straight to a match
-// instead of reading the whole filtered table to find it. Purely a picker —
-// selecting one just fills the search box with that exact value, which then
-// drives the same getFilteredInventory() the table already uses.
 function renderSearchSuggestions(input, suggestBox) {
   if (!suggestBox) return;
-  const q = input.value.trim().toLowerCase();
-  if (!q) { suggestBox.style.display = 'none'; suggestBox.innerHTML = ''; return; }
+  const q = input.value.trim();
+  const tokens = searchTokens(q);
+  if (!tokens.length) { suggestBox.style.display = 'none'; suggestBox.innerHTML = ''; return; }
 
-  const seen = new Set();
-  const matches = [];
-  for (const p of invState.products) {
-    const name = p.product_name || '';
-    const id = p.product_id || '';
-    if (!name.toLowerCase().includes(q) && !id.toLowerCase().includes(q)) continue;
-    const key = `${name}||${id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    matches.push({ name, id, type: p.product_type || 'product' });
-    if (matches.length >= 8) break;
+  const base = invState.activeCategory
+    ? invState.products.filter(p => (p.product_type || 'product') === invState.activeCategory)
+    : invState.products;
+  const matches = rankProducts(base, q).slice(0, 8);
+
+  if (!matches.length) {
+    suggestBox.innerHTML = '<div style="padding:9px 12px;font-size:13px;color:var(--text-light);">No matches</div>';
+    suggestBox.style.display = 'block';
+    return;
   }
 
-  if (!matches.length) { suggestBox.style.display = 'none'; suggestBox.innerHTML = ''; return; }
-
-  suggestBox.innerHTML = matches.map(m => `
-    <div class="search-suggestion-item" data-value="${(m.name || m.id).replace(/"/g, '&quot;')}"
+  suggestBox.innerHTML = matches.map(p => {
+    const name = p.product_name || '';
+    const sub = [p.product_id, p.model_no, p.parent_product_name, productTypeLabel(p.product_type || 'product')].filter(Boolean).join(' · ');
+    return `
+    <div class="search-suggestion-item" data-id="${escapeHtmlInv(p._id)}" data-value="${escapeHtmlInv(name || p.product_id)}"
       style="padding:9px 12px;cursor:pointer;font-size:13px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--bg-hover);">
-      <span>${m.name || '(no name)'}</span>
-      <span style="color:var(--text-light);">${m.id || ''}</span>
-    </div>`).join('');
+      <span>${highlightHtml(name, tokens) || '(no name)'}</span>
+      <span style="color:var(--text-light);text-align:right;">${highlightHtml(sub, tokens)}</span>
+    </div>`;
+  }).join('');
 
   suggestBox.querySelectorAll('.search-suggestion-item').forEach(item => {
     item.addEventListener('mouseenter', () => item.style.background = 'var(--bg-light)');
     item.addEventListener('mouseleave', () => item.style.background = '');
-    item.addEventListener('click', () => {
-      input.value = item.dataset.value;
-      invState.searchQuery = input.value.trim().toLowerCase();
-      invPage = 1;
-      renderInventoryTable(getFilteredInventory());
-      suggestBox.style.display = 'none';
-    });
   });
 
   suggestBox.style.display = 'block';
@@ -608,18 +690,8 @@ function getFilteredInventory(ignoreCategory) {
     ? invState.products.filter(p => (p.product_type || 'product') === invState.activeCategory)
     : invState.products;
 
-  const q = invState.searchQuery;
-  if (q) {
-    // serial-number matching moved out of this quick search — the list no
-    // longer carries serial_numbers (that was the bulk of its payload).
-    // Use the "Record" search (top-actions) to look up a product by serial.
-    list = list.filter(p =>
-      (p.product_name || '').toLowerCase().includes(q) ||
-      (p.product_id || '').toLowerCase().includes(q) ||
-      (p.model_no || '').toLowerCase().includes(q) ||
-      (p.supplier || '').toLowerCase().includes(q)
-    );
-  }
+  if (invState.searchId) list = list.filter(p => p._id === invState.searchId);
+  if (invState.searchQuery) list = rankProducts(list, invState.searchQuery).reverse();
 
   const f = invState.activeFilters;
   if (f) {
@@ -962,8 +1034,7 @@ async function handleRepairClick(p) {
   if (!confirm(confirmMsg)) return;
 
   try {
-    const qs = p.model_no ? `?model_no=${encodeURIComponent(p.model_no)}` : '';
-    const res = await apiFetch(`/inventory/repair/${urlProductId(p.product_id)}${qs}`, { method: 'POST' });
+    const res = await apiFetch(`/inventory/repair/${p._id}`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'repair action failed');
     alert(data.mode === 'product'
@@ -1393,6 +1464,7 @@ function openViewModal(p) {
 function openEditModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
+  invState.activeId = p._id || '';
   invState.activeModelNo = p.model_no || '';
   invState.activeProductType = p.product_type || 'product';
   invState.editSerials = [...(p.serial_numbers || [])];
@@ -1523,15 +1595,13 @@ function renderHologramUI() {
 // the quantity that's actually on record right now.
 async function submitHologramChange({ add = [], remove = [] }) {
   try {
-    const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
+    const res = await apiFetch(`/inventory/update/${invState.activeId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         updated_values: {},
         new_hologram_numbers: add,
-        remove_hologram_numbers: remove,
-        model_no: invState.activeModelNo,
-        source_product_type: invState.activeProductType
+        remove_hologram_numbers: remove
       })
     });
     const data = await res.json();
@@ -1754,6 +1824,7 @@ function renderEditSerialsUI() {
 function openDeleteModal(p) {
   if (!p) return;
   invState.activeProductId = p.product_id;
+  invState.activeId = p._id || '';
   invState.activeModelNo = p.model_no || '';
   const msg = document.querySelector('#deleteModal p');
   if (msg) msg.textContent = `Are you sure you want to delete "${p.product_name}"? This action cannot be undone.`;
@@ -2455,10 +2526,10 @@ function wireModals() {
       // invState.activeProductId / invState.activeModelNo are the ORIGINAL id and
       // model number, used to locate the record being edited. Any new id/model
       // typed into the form travels inside updated_values as a rename request.
-      const res = await apiFetch(`/inventory/update/${urlProductId(invState.activeProductId)}`, {
+      const res = await apiFetch(`/inventory/update/${invState.activeId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers, model_no: invState.activeModelNo, source_product_type: invState.activeProductType })
+        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');
@@ -2473,7 +2544,7 @@ function wireModals() {
   const deleteBtn = document.querySelector('#deleteModal .delete-btn');
   if (deleteBtn) deleteBtn.addEventListener('click', async () => {
     try {
-      const res = await apiFetch(`/inventory/delete/${urlProductId(invState.activeProductId)}?model_no=${encodeURIComponent(invState.activeModelNo || '')}`, { method: 'POST' });
+      const res = await apiFetch(`/inventory/delete/${invState.activeId}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'delete failed');
       document.getElementById('deleteModal').style.display = 'none';

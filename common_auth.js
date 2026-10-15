@@ -5,7 +5,7 @@ const AUTH = {
 };
 
 const ROLE_ACCESS = {
-  admin:           ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html', 'work.html'],
+  admin:           ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html', 'work_report.html'],
   accounts:        ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'work_report.html'],
   service_manager: ['service.html', 'inventory.html', 'dispatch.html','allocated.html', 'work_report.html'],
   assembly:        ['assembly.html', 'inventory.html', 'work_report.html'],
@@ -23,6 +23,13 @@ const ROLE_HOME = {
   distributor: 'distributor.html',
   inventory_manager: 'inventory.html',
 };
+
+// Only these two usernames can assign / manage work (any role, even admin). Must match WORK_MANAGERS in app.py.
+const WORK_MANAGERS = ['prashant', 'Arun'];
+
+function isWorkManager(username) {
+  return WORK_MANAGERS.includes(String(username ?? getUsername() ?? '').trim().toLowerCase());
+}
 
 function getToken() {
   return localStorage.getItem(AUTH.tokenKey);
@@ -74,6 +81,17 @@ function checkPageAccess() {
   const role = getRole();
   if (!role) return;
   const currentFile = location.pathname.split('/').pop() || 'main_dashboard.html';
+  if (currentFile === 'work.html') {
+    if (!isWorkManager()) {
+      alert('Only Prashant and Arun can assign work.');
+      window.location.href = homePathFor(role);
+    }
+    return;
+  }
+  if (currentFile === 'work_report.html' && isWorkManager()) {
+    window.location.href = 'work.html';
+    return;
+  }
   const allowed = ROLE_ACCESS[role] || [];
   if (!allowed.includes(currentFile)) {
     alert('Your role doesnt have access to do that action');
@@ -933,7 +951,7 @@ function initMessaging() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 
-const _workState = { modalId: null, incoming: false, poll: null, sig: '', checking: false };
+const _workState = { modalId: null, incoming: false, kind: 'new', poll: null, sig: '', checking: false };
 
 function workFmt(iso) {
   if (!iso) return '-';
@@ -984,10 +1002,11 @@ function closeWorkModal() {
   refreshWorkBadge();
 }
 
-async function openWorkModal(workId, incoming) {
+async function openWorkModal(workId, incoming, kind) {
   const m = ensureWorkModal();
   _workState.modalId = workId;
   _workState.incoming = !!incoming;
+  _workState.kind = kind || 'new';
   _workState.sig = '';
   m.style.display = 'flex';
   await refreshWorkModal(true);
@@ -1022,7 +1041,7 @@ function drawWorkModal(w) {
   const draftEl = document.getElementById('workReplyText');
   const draft = draftEl ? draftEl.value : '';
   const me = getUsername();
-  const admin = getRole() === 'admin';
+  const admin = isWorkManager();
   const replies = w.replies || [];
   const bubbles = replies.map(r => {
     if (r.type === 'system') {
@@ -1045,7 +1064,9 @@ function drawWorkModal(w) {
 
   const reportLink = location.pathname.includes('/pages/') ? 'work_report.html' : 'pages/work_report.html';
   box.innerHTML = `
-    ${_workState.incoming && !admin ? `<div style="display:flex;align-items:center;gap:8px;background:var(--warning-bg);color:var(--warning-dark);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600;font-size:13px;"><i class="fa-solid fa-bell"></i> New work from ${msgEsc(w.assigned_by_name || w.assigned_by)}</div>` : ''}
+    ${_workState.incoming && !admin ? (_workState.kind === 'reminder'
+      ? `<div style="display:flex;align-items:center;gap:8px;background:var(--danger-bg);color:var(--danger-dark);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600;font-size:13px;"><i class="fa-solid fa-triangle-exclamation"></i> Reminder: this work from ${msgEsc(w.assigned_by_name || w.assigned_by)} is still not done. It will keep showing every 24 hours until you mark it as Done.</div>`
+      : `<div style="display:flex;align-items:center;gap:8px;background:var(--warning-bg);color:var(--warning-dark);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600;font-size:13px;"><i class="fa-solid fa-bell"></i> New work from ${msgEsc(w.assigned_by_name || w.assigned_by)}</div>`) : ''}
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;">
       <div>
         <h3 style="color:var(--text-primary);margin:0 0 6px;">${msgEsc(w.title)}</h3>
@@ -1122,7 +1143,7 @@ async function setWorkStatus(workId, status) {
 }
 
 async function pollWorkPopup() {
-  if (getRole() === 'admin' || _workState.modalId || _workState.checking) return;
+  if (isWorkManager() || _workState.modalId || _workState.checking) return;
   _workState.checking = true;
   try {
     const res = await apiFetch('/work/popup');
@@ -1130,7 +1151,7 @@ async function pollWorkPopup() {
     const data = await res.json();
     const next = (data.dataset || [])[0];
     if (!next) return;
-    await openWorkModal(next.work_id, true);
+    await openWorkModal(next.work_id, true, next.popup_kind);
     await apiFetch(`/work/${next.work_id}/seen`, { method: 'POST' });
   } catch (err) {
     console.error(err);
@@ -1143,7 +1164,7 @@ async function refreshWorkBadge() {
   const badge = document.getElementById('workNavBadge');
   if (!badge) return;
   try {
-    const admin = getRole() === 'admin';
+    const admin = isWorkManager();
     const res = await apiFetch(admin ? '/work/all' : '/work/mine');
     if (!res.ok) return;
     const data = await res.json();
@@ -1159,7 +1180,7 @@ async function refreshWorkBadge() {
 function injectWorkSidebarLink() {
   const ul = document.querySelector('.sidebar ul');
   if (!ul || ul.querySelector('a[data-work-link]')) return;
-  const admin = getRole() === 'admin';
+  const admin = isWorkManager();
   const file = admin ? 'work.html' : 'work_report.html';
   const href = location.pathname.includes('/pages/') ? file : `pages/${file}`;
   const li = document.createElement('li');
@@ -1173,7 +1194,7 @@ function initWorkPopup() {
   injectWorkSidebarLink();
   refreshWorkBadge();
   setInterval(refreshWorkBadge, 15000);
-  if (getRole() === 'admin') return;
+  if (isWorkManager()) return;
   pollWorkPopup();
   setInterval(pollWorkPopup, 5000);
 }

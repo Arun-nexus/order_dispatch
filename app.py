@@ -331,7 +331,7 @@ class InventoryUpdateRequest(BaseModel):
     new_hologram_numbers: list[str] = []      # serial-wise hologram numbers to add (spare_parts / service_parts only)
     remove_hologram_numbers: list[str] = []
     source_product_type: Optional[str] = None  # type of the lot being edited (product / damaged / ...)
-    model_no: Optional[str] = None   # disambiguates which lot-document to touch when a product_id has multiple model_no variants
+    model_no: Optional[str] = None
 
 
 class ShipmentPart(BaseModel):
@@ -2495,8 +2495,9 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
     try:
         run_in_background("migrate_dispatch_media", migrate_stale_dispatch_media, 600)
         odb = order_manager()
-        # "dispatched" orders must stay in this queue's dispatched list, so fetch both statuses
-        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": {"$in": ["processing", "dispatched"]}})
+        # dispatched orders must stay in this queue's dispatched list even after they are marked
+        # "delivered", so fetch all three statuses
+        all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": {"$in": ["processing", "dispatched", "delivered"]}})
         pending_orders = [o for o in all_orders if o.get("status") == "processing" and not o.get("dispatch")]
 
         adb = allocation_manager()
@@ -2511,6 +2512,24 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
         dispatched_spare = [a for a in all_spare if a.get("dispatch")]
         dispatched_product_alloc = [a for a in all_product_alloc if a.get("dispatch")]
 
+        # Manufacturing date on the dispatch form = assembling date of each serial number.
+        # Serials that were never assembled in-house simply get no date.
+        assembly_dates = {}
+        try:
+            serial_nos = {sn for rec in (all_orders + all_product_alloc)
+                          for it in (rec.get("items") or []) for sn in (it.get("serial_numbers") or []) if sn}
+            if serial_nos:
+                for asm in assembly_manager().get_data(collection_name=ASSEMBLY_COLLECTION,
+                                                       query={"serials.serial_number": {"$in": list(serial_nos)}}):
+                    when = asm.get("completed_at") or asm.get("assembly_date") or asm.get("created_at")
+                    if not when:
+                        continue
+                    for s in asm.get("serials", []):
+                        if s.get("serial_number") in serial_nos:
+                            assembly_dates[s["serial_number"]] = when
+        except Exception:
+            logging.error("assembly dates for the dispatch form could not be fetched")
+
         logging.info("dispatch queue was fetched successfully")
         return {
             "message": "dispatch queue",
@@ -2519,7 +2538,8 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
             "pending_product_allocations": pending_product_alloc,
             "dispatched_orders": dispatched_orders,
             "dispatched_spare_parts": dispatched_spare,
-            "dispatched_product_allocations": dispatched_product_alloc
+            "dispatched_product_allocations": dispatched_product_alloc,
+            "assembly_dates": assembly_dates
         }
     except Exception as e:
         logging.error("dispatch queue could not be fetched")
@@ -3603,24 +3623,19 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/inventory/update/{product_id}")
-def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
-    if product_id == "__blank_id__":
-        product_id = ""
-    elif product_id == "__space_id__":
-        product_id = " "
+@app.post("/inventory/update/{item_id}")
+def update_inventory(item_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
+    try:
+        oid = ObjectId(item_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid id")
     try:
         db = inventory_manager()
-        match_query = {"product_id": product_id}
-        if request.model_no is not None:
-            match_query["model_no"] = request.model_no if request.model_no else {"$in": [None, ""]}
-        if request.source_product_type == "product":
-            match_query["product_type"] = {"$in": ["product", None]}
-        elif request.source_product_type:
-            match_query["product_type"] = request.source_product_type
+        match_query = {"_id": oid}
         existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
         if not existing:
             raise HTTPException(status_code=404, detail="product not found")
+        product_id = existing[0].get("product_id", "")
         current_serials = existing[0].get("serial_numbers") or []
         current_type = existing[0].get("product_type", "product")
 
@@ -3806,6 +3821,7 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
         logging.info("inventory was updated")
         return {
             "message": "inventory was updated successfully",
+            "id": item_id,
             "product_id": product_id,
             "hologram_added": hologram_added,
             "hologram_leftover": hologram_leftover
@@ -3817,23 +3833,19 @@ def update_inventory(product_id: str, request: InventoryUpdateRequest, user: dic
         raise HTTPException(status_code=500, detail="inventory cannot be updated")
 
 
-@app.post("/inventory/delete/{product_id}")
-def delete_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("admin"))):
-    if product_id == "__blank_id__":
-        product_id = ""
-    elif product_id == "__space_id__":
-        product_id = " "
+@app.post("/inventory/delete/{item_id}")
+def delete_product(item_id: str, user: dict = Depends(require_role("admin"))):
     try:
-        db = inventory_manager(product_id=product_id)
-        if model_no is not None:
-            existing = db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_id": product_id, "model_no": model_no})
-            if not existing:
-                raise HTTPException(status_code=404, detail="product not found")
-            db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(existing[0]["_id"])})
-        else:
-            db.delete(collection_name=INVENTORY_COLLECTION)
-        logging.info(f"product was deleted successfully from the inventory {product_id}")
-        return {"message": "product deletion was successful", "product_id": product_id}
+        oid = ObjectId(item_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid id")
+    try:
+        db = inventory_manager()
+        if not db.get_data(collection_name=INVENTORY_COLLECTION, query={"_id": oid}):
+            raise HTTPException(status_code=404, detail="product not found")
+        db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": oid})
+        logging.info(f"product was deleted successfully from the inventory {item_id}")
+        return {"message": "product deletion was successful", "id": item_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -3841,12 +3853,8 @@ def delete_product(product_id: str, model_no: Optional[str] = None, user: dict =
         raise HTTPException(status_code=500, detail="product cannot be deleted")
 
 
-@app.post("/inventory/repair/{product_id}")
-def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
-    if product_id == "__blank_id__":
-        product_id = ""
-    elif product_id == "__space_id__":
-        product_id = " "
+@app.post("/inventory/repair/{item_id}")
+def repair_damaged_product(item_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,
@@ -3859,10 +3867,12 @@ def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user
       Status column as "Send to Parent Company" instead.
     """
     try:
+        oid = ObjectId(item_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid id")
+    try:
         db = inventory_manager()
-        match_query = {"product_id": product_id, "product_type": "damaged"}
-        if model_no is not None:
-            match_query["model_no"] = model_no
+        match_query = {"_id": oid, "product_type": "damaged"}
         existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
         if not existing:
             raise HTTPException(status_code=404, detail="damaged product not found")
@@ -3886,12 +3896,12 @@ def repair_damaged_product(product_id: str, model_no: Optional[str] = None, user
             )
             db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
                       update_values={"damage_status": "Sent for Repair (Inhouse Warranty)"})
-            logging.info(f"damaged product {product_id} sent for in-house repair, service {svc.service_id} created")
+            logging.info(f"damaged product {item_id} sent for in-house repair, service {svc.service_id} created")
             return {"message": "sent for in-house warranty repair", "mode": "product", "service_id": svc.service_id}
         else:
             db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
                       update_values={"damage_status": "Send to Parent Company"})
-            logging.info(f"damaged part {product_id} marked to send to parent company")
+            logging.info(f"damaged part {item_id} marked to send to parent company")
             return {"message": "marked to send to parent company", "mode": "part"}
     except HTTPException:
         raise
@@ -5623,6 +5633,41 @@ WORK_COLLECTION = params.get("work_collection_name", "work_assignments")
 WORK_STATUSES = {"open": "Open", "in_progress": "In Progress", "done": "Done"}
 WORK_PRIORITIES = {"low", "normal", "high", "urgent"}
 
+# Only these two usernames may assign / manage work (whatever their role is, even admin).
+# Everybody else can only receive work, reply and update its status.
+WORK_MANAGERS = {"prashant", "arun"}
+# an unfinished work pops up again on the assignee's screen after this many hours,
+# and keeps coming back every time this many hours pass, until it is marked Done
+WORK_REMIND_HOURS = 24
+
+
+def _is_work_manager(user) -> bool:
+    return str((user or {}).get("username") or "").strip().lower() in WORK_MANAGERS
+
+
+def require_work_manager(user: dict = Depends(get_current_user)):
+    if not _is_work_manager(user):
+        raise HTTPException(status_code=403, detail="only Prashant and Arun can assign work")
+    return user
+
+
+def _work_parse_time(value):
+    try:
+        t = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _work_popup_due(work, now) -> bool:
+    """True when the assignee must be shown this work's window right now."""
+    if work.get("status") == "done":
+        return False
+    if work.get("popup_pending"):
+        return True
+    last = _work_parse_time(work.get("last_popup_at") or work.get("seen_at") or work.get("created_at"))
+    return last is None or (now - last) >= timedelta(hours=WORK_REMIND_HOURS)
+
 
 class WorkAssignRequest(BaseModel):
     assigned_to: str
@@ -5653,12 +5698,12 @@ def _work_user_name(db, username: str) -> str:
 def _work_check_access(work, user):
     if not work:
         raise HTTPException(status_code=404, detail="work not found")
-    if user["role"] != "admin" and work.get("assigned_to") != user["username"]:
+    if not _is_work_manager(user) and work.get("assigned_to") != user["username"]:
         raise HTTPException(status_code=403, detail="you do not have permission for this action")
 
 
 @app.post("/work/assign")
-def work_assign(request: WorkAssignRequest, user: dict = Depends(require_role("admin"))):
+def work_assign(request: WorkAssignRequest, user: dict = Depends(require_work_manager)):
     title = (request.title or "").strip()
     description = (request.description or "").strip()
     if not title:
@@ -5673,6 +5718,8 @@ def work_assign(request: WorkAssignRequest, user: dict = Depends(require_role("a
         target = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": request.assigned_to})
         if not target:
             raise HTTPException(status_code=404, detail="user not found")
+        if str(request.assigned_to).strip().lower() in WORK_MANAGERS:
+            raise HTTPException(status_code=400, detail="work cannot be assigned to a work manager")
         now = datetime.now(timezone.utc).isoformat()
         work_id = uuid.uuid4().hex
         db.add(collection_name=WORK_COLLECTION, dictionary={
@@ -5691,6 +5738,7 @@ def work_assign(request: WorkAssignRequest, user: dict = Depends(require_role("a
             "assignee_unread": True,
             "admin_unread": False,
             "seen_at": None,
+            "last_popup_at": None,
             "replies": [],
             "created_at": now,
             "updated_at": now,
@@ -5705,7 +5753,7 @@ def work_assign(request: WorkAssignRequest, user: dict = Depends(require_role("a
 
 
 @app.get("/work/all")
-def work_all(user: dict = Depends(require_role("admin"))):
+def work_all(user: dict = Depends(require_work_manager)):
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=WORK_COLLECTION, query={}, projection={"_id": 0})
@@ -5732,10 +5780,19 @@ def work_mine(user: dict = Depends(get_current_user)):
 def work_popup(user: dict = Depends(get_current_user)):
     try:
         db = mongodbclient()
+        if _is_work_manager(user):
+            return {"message": "work popup", "dataset": []}
+        now = datetime.now(timezone.utc)
         dataset = db.get_data(collection_name=WORK_COLLECTION,
-                              query={"assigned_to": user["username"], "popup_pending": True}, projection={"_id": 0})
-        dataset.sort(key=lambda w: w.get("updated_at") or w.get("created_at") or "")
-        return {"message": "work popup", "dataset": dataset}
+                              query={"assigned_to": user["username"], "status": {"$ne": "done"}}, projection={"_id": 0})
+        due = []
+        for w in dataset:
+            if _work_popup_due(w, now):
+                # "reminder" = this window was already shown before and the work is still not done
+                w["popup_kind"] = "reminder" if w.get("last_popup_at") and not w.get("popup_pending") else "new"
+                due.append(w)
+        due.sort(key=lambda w: w.get("updated_at") or w.get("created_at") or "")
+        return {"message": "work popup", "dataset": due}
     except Exception:
         logging.error("work popup cannot be fetched")
         raise HTTPException(status_code=500, detail="work popup cannot be fetched")
@@ -5747,9 +5804,11 @@ def work_seen(work_id: str, user: dict = Depends(get_current_user)):
         db = mongodbclient()
         work = _work_get(db, work_id)
         _work_check_access(work, user)
-        if user["role"] != "admin":
+        if not _is_work_manager(user):
+            now_iso = datetime.now(timezone.utc).isoformat()
             db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id},
-                           update_values={"popup_pending": False, "seen_at": work.get("seen_at") or datetime.now(timezone.utc).isoformat()})
+                           update_values={"popup_pending": False, "last_popup_at": now_iso,
+                                          "seen_at": work.get("seen_at") or now_iso})
         return {"message": "work seen"}
     except HTTPException:
         raise
@@ -5764,7 +5823,7 @@ def work_detail(work_id: str, user: dict = Depends(get_current_user)):
         db = mongodbclient()
         work = _work_get(db, work_id)
         _work_check_access(work, user)
-        if user["role"] == "admin":
+        if _is_work_manager(user):
             if work.get("admin_unread"):
                 db.update_data(collection_name=WORK_COLLECTION, query={"work_id": work_id}, update_values={"admin_unread": False})
                 work["admin_unread"] = False
@@ -5805,7 +5864,7 @@ def work_reply(work_id: str, request: WorkReplyRequest, user: dict = Depends(get
             "created_at": now,
         })
         update = {"replies": replies, "updated_at": now}
-        if user["role"] == "admin":
+        if _is_work_manager(user):
             update["popup_pending"] = True
             update["assignee_unread"] = True
         else:
@@ -5842,7 +5901,9 @@ def work_status(work_id: str, request: WorkStatusRequest, user: dict = Depends(g
             "created_at": now,
         })
         update = {"status": request.status, "replies": replies, "updated_at": now}
-        if user["role"] == "admin":
+        if work.get("status") == "done" and request.status != "done":
+            update["last_popup_at"] = now      # reopened: the 24 hour reminder clock starts again
+        if _is_work_manager(user):
             update["assignee_unread"] = True
         else:
             update["admin_unread"] = True

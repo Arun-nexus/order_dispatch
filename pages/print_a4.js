@@ -141,26 +141,27 @@ const A4Print = (() => {
   //  ORDER DISPATCH FORM  (mirrors ORDER_DISPATCH_FORM.xlsx cell-for-cell)
   //  Columns: A 5.66 | B-F 18.66 each      Rows 2..23 (heights from Excel)
   // =====================================================================
-  const MM = 0.335;                       // Excel pt -> mm (fits A4 height)
+  const MM = 0.315;                       // Excel pt -> mm : base form fits one A4 page
+  // Excel row heights (pt) are only the MINIMUM height: a row grows when its text needs more room.
   const ROW_PT = { 2: 30, 3: 30, 4: 30, 5: 170.25, 6: 45, 7: 20.1, 8: 20.1, 9: 20.1, 10: 30, 11: 30,
-    12: 20.1, 13: 20.1, 14: 20.1, 15: 20.1, 16: 30, 17: 110.1, 18: 30, 19: 30, 20: 20.1, 21: 20.1, 22: 20.1, 23: 60 };
+    12: 20.1, 13: 20.1, 14: 20.1, 15: 20.1, 16: 30, 17: 30.6, 18: 110.1, 19: 30, 20: 30, 21: 20.1, 22: 20.1, 23: 20.1, 24: 60 };
 
+  // width is fixed (194mm); height is free
   const FORM_CSS = `
     .odf-sheet{width:194mm;background:#fff;color:#000;font-family:Cambria,Georgia,'Times New Roman',serif;font-size:10pt;box-sizing:border-box}
     .odf-sheet table{width:194mm;border-collapse:collapse;table-layout:fixed;border:2.4px solid #000}
-    .odf-sheet td{border:1.3px solid #000;padding:0;position:relative;overflow:hidden;line-height:1.15}
+    .odf-sheet td{border:1.3px solid #000;padding:0.3mm 1.2mm;vertical-align:middle;line-height:1.12;word-break:break-word;overflow-wrap:anywhere}
+    .odf-sheet td.t{vertical-align:top}
+    .odf-sheet td.a{padding:0;text-align:center;vertical-align:middle}
     .odf-sheet tr.sec td{border-top:2.4px solid #000}
-    .odf-sheet .cw{position:absolute;top:0;left:0;right:0;bottom:0;padding:1.2mm 1.2mm;box-sizing:border-box;overflow:hidden}
-    .odf-sheet .cw.c{display:flex;align-items:center}
-    .odf-sheet .cw.t{display:flex;align-items:flex-start}
-    .odf-sheet .in{width:100%}
     .odf-sheet .r{text-align:right}
     .odf-sheet .ctr{text-align:center}
     .odf-sheet .l{font-weight:700}
-    .odf-sheet .ttl{font-size:17pt}
-    .odf-sheet .v{font-weight:400;outline:none;white-space:pre-wrap;word-break:break-word}
-    .odf-sheet .v.vb{display:block;width:100%;height:100%;overflow:hidden}
-    .odf-sheet .vt{writing-mode:vertical-rl;text-orientation:upright;font-weight:700;margin:0 auto;line-height:1;font-size:10pt;white-space:nowrap}
+    .odf-sheet .ttl{font-size:13pt}
+    .odf-sheet .big{font-size:12.5pt}
+    .odf-sheet .v{font-weight:400;outline:none;white-space:pre-wrap}
+    .odf-sheet .v.vb{display:block;min-height:1.2em}
+    .odf-sheet .vt{display:inline-block;writing-mode:vertical-rl;text-orientation:upright;font-weight:700;line-height:1;font-size:10pt;white-space:nowrap}
     .odf-sheet .vt.sm{font-size:7pt}`;
 
   const EDIT_CSS = `
@@ -173,52 +174,48 @@ const A4Print = (() => {
     .odf-wrap{display:flex;justify-content:center;padding:18px 10px}
     .odf-wrap .odf-sheet{box-shadow:0 4px 24px rgba(0,0,0,.35)}
     .odf-sheet .v{background:rgba(255,236,150,.28)}
+    .odf-sheet .v.vb{min-height:1.4em}
     .odf-sheet .v:hover,.odf-sheet .v:focus{background:rgba(255,236,150,.7)}
     .odf-sheet span.v{display:inline-block;min-width:22px;min-height:12px;border-bottom:1px dotted #94a3b8}`;
 
   function formHtml() {
-    const td = (rs, cs, body) => `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''}>${body}</td>`;
-    const lab = (t, al, extra) => `<div class="cw c"><div class="in ${al || ''}"><span class="l ${extra || ''}">${t}</span></div></div>`;
-    const val = k => `<div class="cw"><div class="v vb" data-k="${k}" contenteditable="plaintext-only"></div></div>`;
-    const lv = (t, k, pos) => `<div class="cw ${pos || 'c'}"><div class="in"><span class="l">${t}</span> <span class="v" data-k="${k}" contenteditable="plaintext-only"></span></div></div>`;
-    const vert = (t, cls) => `<div class="cw c"><div class="vt ${cls || ''}">${t}</div></div>`;
+    const td = (rs, cs, body, cls) => `<td${rs > 1 ? ` rowspan="${rs}"` : ''}${cs > 1 ? ` colspan="${cs}"` : ''}${cls ? ` class="${cls}"` : ''}>${body}</td>`;
+    const lab = (t, al, extra) => `<div class="${al || ''}"><span class="l ${extra || ''}">${t}</span></div>`;
+    const val = k => `<div class="v vb" data-k="${k}" contenteditable="plaintext-only"></div>`;
+    const lv = (t, k, extra) => `<span class="l ${extra || ''}">${t}</span> <span class="v" data-k="${k}" contenteditable="plaintext-only"></span>`;
+    const vert = (t, cls) => `<div class="vt ${cls || ''}">${t}</div>`;
     const tr = (n, inner, sec) => `<tr${sec ? ' class="sec"' : ''} style="height:${(ROW_PT[n] * MM).toFixed(2)}mm">${inner}</tr>`;
 
     return `<div class="odf-sheet"><table>
       <colgroup><col style="width:11mm"><col style="width:36.6mm"><col style="width:36.6mm"><col style="width:36.6mm"><col style="width:36.6mm"><col style="width:36.6mm"></colgroup>
-      ${tr(2, td(1, 3, lab('ORDER DISPATCH FORM', 'ctr', 'ttl')) + td(1, 2, lv('REF:', 'ref')) + td(1, 1, lv('Date:', 'date')))}
-      ${tr(3, td(8, 1, vert('ACCOUNTS DEPARTMENT')) + td(1, 1, lab('COMPANY NAME :- ')) + td(1, 4, val('company')), true)}
+      ${tr(2, td(1, 3, lv('Invoice No.', 'inv', 'ttl')) + td(1, 2, lv('REF:', 'ref')) + td(1, 1, lv('Date:', 'date')))}
+      ${tr(3, td(8, 1, vert('ACCOUNTS DEPARTMENT'), 'a') + td(1, 1, lab('PARTY NAME :- ')) + td(1, 4, val('party')), true)}
       ${tr(4, td(1, 1, lab('ADDRESS :- ')) + td(1, 4, val('address')))}
-      ${tr(5, td(1, 1, lab('ORDER DETAILS :-')) + td(1, 4, val('details')))}
-      ${tr(6, td(1, 1, lab('MODE OF DISPATCH')) + td(1, 1, lv('BY HAND - NA', 'hand', 't')) + td(1, 1, lv('BY PORTER -', 'porter', 't')) + td(1, 1, lv('BY COURIER', 'courier', 't')) + td(1, 1, lv('OTHERS -', 'others', 't')))}
-      ${tr(7, td(3, 1, lab('ACCOUNTS APPROVAL  - ')) + td(1, 2, lv('Approved-', 'appr', 't')) + td(3, 1, lv('TIME IN -', 'ain', 't')) + td(3, 1, lv('TIME OUT -', 'aout', 't')))}
-      ${tr(8, td(1, 2, lv('Hold-', 'hold', 't')))}
-      ${tr(9, td(1, 2, lv('Reason-', 'reason', 't')))}
+      ${tr(5, td(1, 1, lab('ORDER DETAILS :-')) + td(1, 4, val('details'), 't'))}
+      ${tr(6, td(1, 1, lab('MODE OF DISPATCH')) + td(1, 1, lv('BY HAND - NA', 'hand'), 't') + td(1, 1, lv('BY PORTER -', 'porter'), 't') + td(1, 1, lv('BY COURIER', 'courier'), 't') + td(1, 1, lv('OTHERS -', 'others'), 't'))}
+      ${tr(7, td(3, 1, lab('ACCOUNTS APPROVAL  - ')) + td(1, 2, lv('Approved-', 'appr'), 't') + td(3, 1, lv('TIME IN - ', 'ain'), 't') + td(3, 1, lv('TIME OUT - ', 'aout'), 't'))}
+      ${tr(8, td(1, 2, lv('Hold-', 'hold'), 't'))}
+      ${tr(9, td(1, 2, lv('Reason-', 'reason'), 't'))}
       ${tr(10, td(1, 1, lab('TIME LINE:- ')) + td(1, 1, lab('ORDER RECEIVED ', 'r')) + td(1, 1, val('recv')) + td(1, 1, lab('ORDER SEND FOR DISPATCH', 'r')) + td(1, 1, val('sentdisp')))}
-      ${tr(11, td(8, 1, vert('QC DEPARTMENT')) + td(1, 1, lab('SEND FOR Q.C (TIME) :-')) + td(1, 1, lab('TIME IN', 'r')) + td(1, 1, val('qcin')) + td(1, 1, lab('TIME OUT', 'r')) + td(1, 1, val('qcout')), true)}
-      ${tr(12, td(5, 1, lab('Q.C DONE BY :-')) + td(5, 2, val('qcby')) + td(1, 1, lab('MANUAL', 'r')) + td(1, 1, val('manual')))}
+      ${tr(11, td(9, 1, vert('QC DEPARTMENT'), 'a') + td(1, 1, lab('SEND FOR Q.C (TIME) :-')) + td(1, 1, lab('TIME IN', 'r')) + td(1, 1, val('qcin')) + td(1, 1, lab('TIME OUT', 'r')) + td(1, 1, val('qcout')), true)}
+      ${tr(12, td(5, 1, lab('Q.C DONE BY :-')) + td(5, 2, val('qcby'), 't') + td(1, 1, lab('MANUAL', 'r')) + td(1, 1, val('manual')))}
       ${tr(13, td(1, 1, lab('ACESSORIES', 'r')) + td(1, 1, val('acc')))}
       ${tr(14, td(1, 1, lab('PACKING LIST ', 'r')) + td(1, 1, val('plist')))}
       ${tr(15, td(1, 1, lab('STICKERS', 'r')) + td(1, 1, val('stick')))}
       ${tr(16, td(1, 1, lab('Physical Appearance', 'r')) + td(1, 1, val('phys')))}
-      ${tr(17, td(1, 1, lab('S.NO. OF MACHINE &amp; ACCESSORIES ')) + td(1, 4, val('serials')))}
-      ${tr(18, td(1, 1, lab('SEND FOR BILLLING ')) + td(1, 1, lab('TIME IN', 'r')) + td(1, 1, val('bilin')) + td(1, 1, lab('TIME OUT', 'r')) + td(1, 1, val('bilout')))}
-      ${tr(19, td(5, 1, vert('DISPATCH DEPARTMENT', 'sm')) + td(1, 1, lab('BILLED BY &amp; CHECKED BY')) + td(1, 1, lab('BILLED BY', 'r')) + td(1, 1, val('billedby')) + td(1, 1, lab('CHECKED BY', 'r')) + td(1, 1, val('checkedby')), true)}
-      ${tr(20, td(3, 1, lab('FINAL PACKING CHECKED BY ')) + td(3, 1, val('packby')) + td(1, 2, lab('Video of Machine &amp; Accessories', 'r')) + td(1, 1, val('vid1')))}
-      ${tr(21, td(1, 2, lab('Video of Packing', 'r')) + td(1, 1, val('vid2')))}
-      ${tr(22, td(1, 2, lab('Stickers Pasting', 'r')) + td(1, 1, val('vid3')))}
-      ${tr(23, td(1, 1, lab('HANDOVER TO COURIER  PERSON WITH DIMENSIONS ')) + td(1, 1, val('handover')) + td(1, 2, lab('NEXT DAY BILL CHECKED BY ORDER DISPATCH FORM', 'r')) + td(1, 1, val('nextday')))}
+      ${tr(17, td(2, 1, lab('S.NO. OF MACHINE &amp; ACCESSORIES ', 'ctr')) + td(2, 2, val('serials'), 't') + td(1, 2, lab('Manufacturing Date', 'r', 'big')))}
+      ${tr(18, td(1, 2, val('mfg'), 't'))}
+      ${tr(19, td(1, 1, lab('SEND FOR BILLLING ')) + td(1, 1, lab('TIME IN', 'r')) + td(1, 1, val('bilin')) + td(1, 1, lab('TIME OUT', 'r')) + td(1, 1, val('bilout')))}
+      ${tr(20, td(5, 1, vert('DISPATCH DEPARTMENT', 'sm'), 'a') + td(1, 1, lab('BILLED BY &amp; CHECKED BY')) + td(1, 1, lab('BILLED BY', 'r')) + td(1, 1, val('billedby')) + td(1, 1, lab('CHECKED BY', 'r')) + td(1, 1, val('checkedby')), true)}
+      ${tr(21, td(3, 1, lab('FINAL PACKING CHECKED BY ')) + td(3, 1, val('packby'), 't') + td(1, 2, lab('Video of Machine &amp; Accessories', 'r')) + td(1, 1, val('vid1')))}
+      ${tr(22, td(1, 2, lab('Video of Packing', 'r')) + td(1, 1, val('vid2')))}
+      ${tr(23, td(1, 2, lab('Stickers Pasting', 'r')) + td(1, 1, val('vid3')))}
+      ${tr(24, td(1, 1, lab('HANDOVER TO COURIER  PERSON WITH DIMENSIONS ')) + td(1, 1, val('handover'), 't') + td(1, 2, lab('NEXT DAY BILL CHECKED BY ORDER DISPATCH FORM', 'r')) + td(1, 1, val('nextday')))}
     </table></div>`;
   }
 
-  // shrink long text so it always stays inside its (fixed-size) cell
-  function fit(root) {
-    root.querySelectorAll('.vb').forEach(el => {
-      let s = 11;
-      el.style.fontSize = s + 'pt';
-      while (el.scrollHeight > el.clientHeight + 1 && s > 4.5) { s -= 0.5; el.style.fontSize = s + 'pt'; }
-    });
-  }
+  // rows grow with their text, so nothing has to be shrunk
+  function fit() { /* intentionally empty: height is flexible, width is fixed */ }
 
   function form(id, defaults, opts) {
     opts = opts || {};
@@ -230,7 +227,7 @@ const A4Print = (() => {
       st.textContent = FORM_CSS + EDIT_CSS;
       document.head.appendChild(st);
     }
-    const storeKey = 'odf:' + id;
+    const storeKey = 'odf2:' + id;
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(storeKey) || '{}') || {}; } catch (e) { saved = {}; }
 
@@ -240,7 +237,7 @@ const A4Print = (() => {
     ovl.innerHTML = `
       <div class="odf-bar">
         <b><i class="fa-solid fa-file-lines"></i> Order Dispatch Form</b>
-        <span class="hint">Yellow fields are editable — add/edit details before the print. Changes was stored to the computer. Print: A4 portrait.</span>
+        <span class="hint">Yellow fields are editable. Boxes grow downward on their own when there is more text (width stays fixed). Changes stay saved on this computer.</span>
         <button class="pr"><i class="fa-solid fa-print"></i> Print (A4)</button>
         <button class="rs"><i class="fa-solid fa-rotate-left"></i> Reset to system data</button>
         <button class="cl">Close</button>
