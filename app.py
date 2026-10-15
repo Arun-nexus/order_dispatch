@@ -31,6 +31,8 @@ from datetime import datetime, timezone, timedelta
 import io
 import time
 import threading
+import hashlib
+import json
 from html.parser import HTMLParser
 try:
     from twilio.rest import Client as TwilioClient  
@@ -3531,8 +3533,105 @@ def _assert_unique_product_serials(serials, exclude_lot_id=None, ignore_on_lot=N
                             detail=f"serial number(s) already exist in inventory: {', '.join(shown[:10])}{more}")
 
 
+_ONCE_LOCK = threading.Lock()
+_ONCE_DONE = {}
+_ONCE_INFLIGHT = {}
+
+
+def _run_once(scope, user, payload, fn, ttl=60):
+    try:
+        body = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+    except Exception:
+        body = str(payload)
+    raw = json.dumps([scope, (user or {}).get("username"), body], sort_keys=True, default=str)
+    key = hashlib.sha1(raw.encode()).hexdigest()
+    now = time.time()
+    with _ONCE_LOCK:
+        for k in [k for k, v in _ONCE_DONE.items() if now - v[0] > ttl]:
+            del _ONCE_DONE[k]
+        hit = _ONCE_DONE.get(key)
+        if hit:
+            return hit[1]
+        ev = _ONCE_INFLIGHT.get(key)
+        owner = ev is None
+        if owner:
+            ev = threading.Event()
+            _ONCE_INFLIGHT[key] = ev
+    if not owner:
+        ev.wait(60)
+        with _ONCE_LOCK:
+            hit = _ONCE_DONE.get(key)
+        if hit:
+            return hit[1]
+        raise HTTPException(status_code=409, detail="same request was already in progress, check inventory before retrying")
+    try:
+        result = fn()
+        with _ONCE_LOCK:
+            _ONCE_DONE.clear()
+            _ONCE_DONE[key] = (time.time(), result)
+        return result
+    finally:
+        with _ONCE_LOCK:
+            _ONCE_INFLIGHT.pop(key, None)
+        ev.set()
+
+
+def _id_query(item_id):
+    try:
+        return {"_id": {"$in": [ObjectId(item_id), item_id]}}
+    except Exception:
+        return {"_id": item_id}
+
+
+def _type_group(product_type):
+    return {"$in": ["product", None]} if (product_type or "product") == "product" else product_type
+
+
+def _assert_model_free(model_no, product_name, product_type, exclude_id=None):
+    model = str(model_no or "").strip()
+    if not model:
+        return
+    q = {"model_no": {"$regex": f"^{re.escape(model)}$", "$options": "i"}, "product_type": _type_group(product_type)}
+    if exclude_id is not None:
+        q["_id"] = {"$ne": exclude_id}
+    hit = mongodbclient().database[INVENTORY_COLLECTION].find_one(q, {"product_name": 1})
+    if hit:
+        raise HTTPException(status_code=409,
+                            detail=f"model no '{model}' already exists in inventory (product: {hit.get('product_name', '')})")
+
+
+def _assert_serials_free(serials, product_type, exclude_id=None):
+    cleaned = [str(s).strip() for s in (serials or []) if s is not None and str(s).strip()]
+    if not cleaned:
+        return
+    keys = [_norm_serial(c) for c in cleaned]
+    if len(set(keys)) != len(keys):
+        raise HTTPException(status_code=400, detail="duplicate serial numbers in this request")
+    variants = list({v for c in cleaned for v in (c, c.lower(), c.upper())})
+    q = {"serial_numbers": {"$in": variants}}
+    if exclude_id is not None:
+        q["_id"] = {"$ne": exclude_id}
+    new_type = (product_type or "product")
+    clashes = []
+    for lot in mongodbclient().database[INVENTORY_COLLECTION].find(q, {"serial_numbers": 1, "product_type": 1}):
+        holder = lot.get("product_type") or "product"
+        if holder != new_type and (holder == "damaged" or new_type == "damaged"):
+            continue
+        for sn in lot.get("serial_numbers") or []:
+            if _norm_serial(sn) in keys:
+                clashes.append(str(sn).strip())
+    if clashes:
+        shown = list(dict.fromkeys(clashes))
+        raise HTTPException(status_code=409,
+                            detail=f"serial number(s) already exist in inventory: {', '.join(shown[:10])}")
+
+
 @app.post("/inventory/create")
 def create_inventory(request: InventoryRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
+    return _run_once("create", user, request, lambda: _create_inventory_impl(request, user))
+
+
+def _create_inventory_impl(request: InventoryRequest, user: dict):
     try:
         _validate_payment(request.payment_mode,
                           round(_unit_price(request) * int(request.quantity or 0) * (1 + float(request.tax_rate or 0) / 100), 2),
@@ -3552,6 +3651,10 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
             raise HTTPException(status_code=400, detail="serial numbers must be unique")
         if request.product_type == "product":
             _assert_unique_product_serials(request.serial_numbers)
+        if request.product_type in ("product", "accessories"):
+            _assert_model_free(request.model_no, request.product_name, request.product_type)
+        if request.product_type not in ("spare_parts", "service_parts"):
+            _assert_serials_free(request.serial_numbers, request.product_type)
 
         if request.product_type in ("spare_parts", "service_parts"):
             if not request.parent_product_name.strip():
@@ -3625,16 +3728,16 @@ def create_inventory(request: InventoryRequest, user: dict = Depends(require_rol
 
 @app.post("/inventory/update/{item_id}")
 def update_inventory(item_id: str, request: InventoryUpdateRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
-    try:
-        oid = ObjectId(item_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid id")
+    return _run_once("update:" + item_id, user, request, lambda: _update_inventory_impl(item_id, request, user))
+
+
+def _update_inventory_impl(item_id: str, request: InventoryUpdateRequest, user: dict):
     try:
         db = inventory_manager()
-        match_query = {"_id": oid}
-        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
+        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=_id_query(item_id))
         if not existing:
             raise HTTPException(status_code=404, detail="product not found")
+        match_query = {"_id": existing[0]["_id"]}
         product_id = existing[0].get("product_id", "")
         current_serials = existing[0].get("serial_numbers") or []
         current_type = existing[0].get("product_type", "product")
@@ -3660,6 +3763,20 @@ def update_inventory(item_id: str, request: InventoryUpdateRequest, user: dict =
         # for that part. Kept as two separate request fields so the faulty
         # ones can still be told apart afterwards for the damaged-category push.
         pulled_off_serials = set(request.remove_serial_numbers or []) | set(request.faulty_serial_numbers or [])
+
+        _final_name = updated_values.get("product_name", existing[0].get("product_name", ""))
+        _final_model = updated_values.get("model_no", existing[0].get("model_no", "")) or ""
+        _cur_type = str(current_type or "product").strip().lower()
+        if effective_type in ("product", "accessories") and str(_final_model).strip() and (
+            _norm_serial(_final_model) != _norm_serial(existing[0].get("model_no"))
+            or _norm_serial(_final_name) != _norm_serial(existing[0].get("product_name"))
+            or effective_type != _cur_type
+        ):
+            _assert_model_free(_final_model, _final_name, effective_type, exclude_id=existing[0]["_id"])
+        _explicit_serials = updated_values.get("serial_numbers")
+        _incoming = list(request.new_serial_numbers or []) + (list(_explicit_serials) if isinstance(_explicit_serials, list) else [])
+        if _incoming and effective_type not in ("spare_parts", "service_parts"):
+            _assert_serials_free(_incoming, effective_type, exclude_id=existing[0]["_id"])
 
         # ---- backend duplicate-serial guard (product category only) ----
         # Any serial that would end up on a "product" lot — newly added ones,
@@ -3835,15 +3952,16 @@ def update_inventory(item_id: str, request: InventoryUpdateRequest, user: dict =
 
 @app.post("/inventory/delete/{item_id}")
 def delete_product(item_id: str, user: dict = Depends(require_role("admin"))):
-    try:
-        oid = ObjectId(item_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid id")
+    return _run_once("delete:" + item_id, user, {"id": item_id}, lambda: _delete_product_impl(item_id))
+
+
+def _delete_product_impl(item_id: str):
     try:
         db = inventory_manager()
-        if not db.get_data(collection_name=INVENTORY_COLLECTION, query={"_id": oid}):
+        existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=_id_query(item_id))
+        if not existing:
             raise HTTPException(status_code=404, detail="product not found")
-        db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": oid})
+        db.delete_data(collection_name=INVENTORY_COLLECTION, query={"_id": existing[0]["_id"]})
         logging.info(f"product was deleted successfully from the inventory {item_id}")
         return {"message": "product deletion was successful", "id": item_id}
     except HTTPException:
@@ -3855,6 +3973,10 @@ def delete_product(item_id: str, user: dict = Depends(require_role("admin"))):
 
 @app.post("/inventory/repair/{item_id}")
 def repair_damaged_product(item_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts", "inventory_manager"))):
+    return _run_once("repair:" + item_id, user, {"id": item_id}, lambda: _repair_damaged_product_impl(item_id, user))
+
+
+def _repair_damaged_product_impl(item_id: str, user: dict):
     """Action button on the Damaged Product row (replaces Delete there).
 
     - If the damaged entry is a full PRODUCT (it carries serial numbers,
@@ -3867,12 +3989,8 @@ def repair_damaged_product(item_id: str, user: dict = Depends(require_role("serv
       Status column as "Send to Parent Company" instead.
     """
     try:
-        oid = ObjectId(item_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid id")
-    try:
         db = inventory_manager()
-        match_query = {"_id": oid, "product_type": "damaged"}
+        match_query = {**_id_query(item_id), "product_type": "damaged"}
         existing = db.get_data(collection_name=INVENTORY_COLLECTION, query=match_query)
         if not existing:
             raise HTTPException(status_code=404, detail="damaged product not found")
@@ -3894,12 +4012,12 @@ def repair_damaged_product(item_id: str, user: dict = Depends(require_role("serv
                 spare_parts="",
                 created_by=user["username"]
             )
-            db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
+            db.update(collection_name=INVENTORY_COLLECTION, query={"_id": item["_id"]},
                       update_values={"damage_status": "Sent for Repair (Inhouse Warranty)"})
             logging.info(f"damaged product {item_id} sent for in-house repair, service {svc.service_id} created")
             return {"message": "sent for in-house warranty repair", "mode": "product", "service_id": svc.service_id}
         else:
-            db.update(collection_name=INVENTORY_COLLECTION, query={"_id": ObjectId(item["_id"])},
+            db.update(collection_name=INVENTORY_COLLECTION, query={"_id": item["_id"]},
                       update_values={"damage_status": "Send to Parent Company"})
             logging.info(f"damaged part {item_id} marked to send to parent company")
             return {"message": "marked to send to parent company", "mode": "part"}
@@ -5647,7 +5765,7 @@ def _is_work_manager(user) -> bool:
 
 def require_work_manager(user: dict = Depends(get_current_user)):
     if not _is_work_manager(user):
-        raise HTTPException(status_code=403, detail="only Directors can assign work")
+        raise HTTPException(status_code=403, detail="Only Director can assign the work")
     return user
 
 

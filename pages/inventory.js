@@ -29,6 +29,20 @@ function urlProductId(id) {
   return encodeURIComponent(v ? v : EMPTY_PRODUCT_ID_SENTINEL);
 }
 
+function lockOnce(fn) {
+  let busy = false;
+  return async function (ev) {
+    if (busy) { if (ev && ev.preventDefault) ev.preventDefault(); return; }
+    busy = true;
+    const root = ev && ev.target && ev.target.querySelectorAll ? ev.target : null;
+    const btns = root ? [...root.querySelectorAll('button[type="submit"],input[type="submit"],button:not([type])')] : [];
+    if (ev && ev.currentTarget && ev.currentTarget.tagName === 'BUTTON') btns.push(ev.currentTarget);
+    btns.forEach(b => { b.disabled = true; });
+    try { return await fn.apply(this, arguments); }
+    finally { busy = false; btns.forEach(b => { b.disabled = false; }); }
+  };
+}
+
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
   if (totalPages <= 1) { container.innerHTML = ''; return; }
@@ -1025,14 +1039,16 @@ function rowProduct(e) {
 // - no serial numbers -> it's a part (e.g. swapped out during a service) ->
 //   not serviceable in-house, so it's just flagged "Send to Parent Company"
 //   in this row's Status column instead
+let repairBusy = false;
 async function handleRepairClick(p) {
-  if (!p) return;
+  if (!p || repairBusy) return;
   const isProduct = Array.isArray(p.serial_numbers) && p.serial_numbers.length > 0;
   const confirmMsg = isProduct
     ? 'Send this product for in-house warranty repair? A service record will be created for it.'
     : 'Mark this part to be sent back to the parent company?';
   if (!confirm(confirmMsg)) return;
 
+  repairBusy = true;
   try {
     const res = await apiFetch(`/inventory/repair/${p._id}`, { method: 'POST' });
     const data = await res.json();
@@ -1043,6 +1059,8 @@ async function handleRepairClick(p) {
     await loadInventory();
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  } finally {
+    repairBusy = false;
   }
 }
 
@@ -1593,7 +1611,10 @@ function renderHologramUI() {
 // Sends a hologram add/remove to the server immediately (independent of the
 // main "Save" button) so the partial/leftover logic can be validated against
 // the quantity that's actually on record right now.
+let hologramBusy = false;
 async function submitHologramChange({ add = [], remove = [] }) {
+  if (hologramBusy) return;
+  hologramBusy = true;
   try {
     const res = await apiFetch(`/inventory/update/${invState.activeId}`, {
       method: 'POST',
@@ -1617,6 +1638,8 @@ async function submitHologramChange({ add = [], remove = [] }) {
     }
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Hologram update failed', err.message, false);
+  } finally {
+    hologramBusy = false;
   }
 }
 
@@ -2148,7 +2171,7 @@ function renderPartDetailsStep() {
   initSupplierPicker(partFormEl, false);
   wirePaymentBlock(partFormEl, 'partPaymentMode', 'partPaymentHint');
 
-  document.getElementById('partForm').addEventListener('submit', async e => {
+  document.getElementById('partForm').addEventListener('submit', lockOnce(async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     const quantity = Math.max(1, Number(fd.get('quantity')) || 1);
@@ -2192,7 +2215,7 @@ function renderPartDetailsStep() {
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
-  });
+  }));
 }
 
 // Step 3: lot no, quantity, serial numbers (auto/manual), supplier + pricing
@@ -2373,7 +2396,7 @@ function renderLotDetailsStep() {
   firstSerialInput.addEventListener('input', refreshSerialUI);
   form.querySelectorAll('[name="serial_mode"]').forEach(r => r.addEventListener('change', refreshSerialUI));
 
-  form.addEventListener('submit', async e => {
+  form.addEventListener('submit', lockOnce(async e => {
     e.preventDefault();
     const fd = new FormData(form);
     const productType = fd.get('product_type') || 'product';
@@ -2452,7 +2475,7 @@ function renderLotDetailsStep() {
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
-  });
+  }));
 }
 
 function wireModals() {
@@ -2460,7 +2483,7 @@ function wireModals() {
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
   const editForm = document.querySelector('#editModal form');
-  if (editForm) editForm.addEventListener('submit', async e => {
+  if (editForm) editForm.addEventListener('submit', lockOnce(async e => {
     e.preventDefault();
     const form = e.target;
     const targetQuantity = Number(form.elements['quantity'].value);
@@ -2539,10 +2562,10 @@ function wireModals() {
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
     }
-  });
+  }));
 
   const deleteBtn = document.querySelector('#deleteModal .delete-btn');
-  if (deleteBtn) deleteBtn.addEventListener('click', async () => {
+  if (deleteBtn) deleteBtn.addEventListener('click', lockOnce(async () => {
     try {
       const res = await apiFetch(`/inventory/delete/${invState.activeId}`, { method: 'POST' });
       const data = await res.json();
@@ -2552,5 +2575,5 @@ function wireModals() {
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
-  });
+  }));
 }
