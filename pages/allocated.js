@@ -364,10 +364,137 @@ function rowRequestId(e) {
   return e.target.closest('.order-item').dataset.id;
 }
 
+// ---------- payment block for turning a demo unit into an order ----------
+// Same payment modes as the Orders page (Credit / Partial / Net Banking / UPI / Cheque / DD / Cash),
+// so a converted order carries a real payment mode instead of a "Demo Conversion" label.
+const CONV_PAY_MODES = [
+  ['Credit', 'Credit'], ['Partial', 'Partial (part now, rest later)'], ['NetBanking', 'Net Banking'],
+  ['UPI', 'UPI'], ['Cheque', 'Cheque'], ['DemandDraft', 'Demand Draft'], ['Cash', 'Cash'],
+];
+const CONV_PAY_INP = 'width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;';
+
+function convPayHtml(selected) {
+  return `
+    <select id="cvPayMode" style="${CONV_PAY_INP}">
+      <option value="">Select Payment Mode *</option>
+      ${CONV_PAY_MODES.map(([v, l]) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${l}</option>`).join('')}
+    </select>
+    <div id="cvPayExtra" style="display:flex;flex-direction:column;gap:8px;"></div>`;
+}
+
+function convPayDaysHtml(idPrefix, label) {
+  return `
+    <label style="font-size:12px;color:#64748b;">${label}</label>
+    <select id="${idPrefix}Days" style="${CONV_PAY_INP}">
+      <option value="15">15 days</option><option value="30">30 days</option>
+      <option value="45">45 days</option><option value="60">60 days</option>
+      <option value="manual">Other (enter days)</option>
+    </select>
+    <input id="${idPrefix}DaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;${CONV_PAY_INP}">`;
+}
+
+// getTotal() -> order total incl. tax, used for the Partial balance hint / check
+function convPayRender(mode, getTotal) {
+  const box = document.getElementById('cvPayExtra');
+  if (!box) return;
+  const f = (id, ph, type) => `<input id="${id}" ${type ? `type="${type}"` : ''} placeholder="${ph}" style="${CONV_PAY_INP}">`;
+  if (mode === 'Credit') {
+    box.innerHTML = convPayDaysHtml('cvpC', 'Credit period');
+  } else if (mode === 'Partial') {
+    box.innerHTML = `
+      <label style="font-size:12px;color:#64748b;">Amount paid now (₹)</label>
+      <input id="cvpPaid" type="number" min="0" step="any" placeholder="e.g. half of the total" style="${CONV_PAY_INP}">
+      ${convPayDaysHtml('cvpP', 'In how many days will the remaining payment be made?')}
+      <div id="cvpHint" style="font-size:12px;color:#b45309;background:#fffbeb;border-radius:8px;padding:8px 10px;"></div>`;
+    const paid = document.getElementById('cvpPaid'), hint = document.getElementById('cvpHint');
+    const refresh = () => {
+      const total = getTotal(), p = Number(paid.value) || 0;
+      const fmt = n => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+      hint.textContent = `Order total (incl. tax): ${fmt(total)} — paid now ${fmt(p)}, balance ${fmt(Math.max(total - p, 0))} on credit.`;
+    };
+    paid.addEventListener('input', refresh);
+    refresh();
+    // price / tax can change in the direct-convert form while this block is open
+    ['cvPrice', 'cvTax'].forEach(id => document.getElementById(id)?.addEventListener('input', refresh));
+  } else if (mode === 'Cheque') {
+    box.innerHTML = f('cvpChqNo', 'Cheque Number') + f('cvpChqDate', '', 'date') + f('cvpChqBank', 'Bank Name');
+  } else if (mode === 'DemandDraft') {
+    box.innerHTML = f('cvpDdNo', 'Demand Draft Number') + f('cvpDdDate', '', 'date') + f('cvpDdBank', 'Bank Name');
+  } else if (mode === 'UPI') {
+    box.innerHTML = f('cvpUpi', 'UPI ID (e.g. name@bank)');
+  } else if (mode === 'NetBanking') {
+    box.innerHTML = f('cvpNbBank', 'Bank Name') + f('cvpNbAcc', 'Account Number') + f('cvpNbIfsc', 'IFSC Code');
+  } else if (mode === 'Cash') {
+    box.innerHTML = f('cvpCash', 'Received By (Person Name)');
+  } else {
+    box.innerHTML = '';
+  }
+  box.querySelectorAll('select[id$="Days"]').forEach(sel => sel.addEventListener('change', () => {
+    document.getElementById(sel.id + 'Manual').style.display = sel.value === 'manual' ? 'block' : 'none';
+  }));
+}
+
+// wires the mode <select> built by convPayHtml()
+function convPayWire(getTotal) {
+  const sel = document.getElementById('cvPayMode');
+  if (!sel) return;
+  sel.addEventListener('change', () => convPayRender(sel.value, getTotal));
+  convPayRender(sel.value, getTotal);
+}
+
+// returns { payment_mode, payment_details } or throws an Error with a message for the user
+function convPayRead(getTotal) {
+  const mode = document.getElementById('cvPayMode')?.value || '';
+  if (!mode) throw new Error('Please select a payment mode.');
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const days = prefix => {
+    const sel = v(prefix + 'Days');
+    return Number(sel === 'manual' ? v(prefix + 'DaysManual') : sel);
+  };
+  if (mode === 'Credit') {
+    const d = days('cvpC');
+    if (!d || d < 1 || d > 60) throw new Error('Credit days must be between 1 and 60.');
+    return { payment_mode: mode, payment_details: { credit_days: d } };
+  }
+  if (mode === 'Partial') {
+    const paid = Number(v('cvpPaid')) || 0, d = days('cvpP'), total = getTotal();
+    if (paid <= 0) throw new Error('Enter the amount paid now for a partial payment.');
+    if (total > 0 && paid >= total) throw new Error('Partial payment must be less than the order total — choose another payment mode.');
+    if (!d || d < 1 || d > 60) throw new Error('Days for the remaining payment must be between 1 and 60.');
+    return { payment_mode: mode, payment_details: { paid_amount: paid, credit_days: d } };
+  }
+  if (mode === 'Cheque') {
+    if (!v('cvpChqNo') || !v('cvpChqDate')) throw new Error('Cheque number and date are required.');
+    return { payment_mode: mode, payment_details: { cheque_number: v('cvpChqNo'), cheque_date: v('cvpChqDate'), bank_name: v('cvpChqBank') } };
+  }
+  if (mode === 'DemandDraft') {
+    if (!v('cvpDdNo') || !v('cvpDdDate')) throw new Error('Demand draft number and date are required.');
+    return { payment_mode: mode, payment_details: { dd_number: v('cvpDdNo'), dd_date: v('cvpDdDate'), bank_name: v('cvpDdBank') } };
+  }
+  if (mode === 'UPI') {
+    if (!v('cvpUpi')) throw new Error('UPI ID is required.');
+    return { payment_mode: mode, payment_details: { upi_id: v('cvpUpi') } };
+  }
+  if (mode === 'NetBanking') {
+    if (!v('cvpNbBank') || !v('cvpNbAcc') || !v('cvpNbIfsc')) throw new Error('Bank name, account number and IFSC code are required.');
+    return { payment_mode: mode, payment_details: { bank_name: v('cvpNbBank'), account_number: v('cvpNbAcc'), ifsc_code: v('cvpNbIfsc') } };
+  }
+  if (mode === 'Cash') {
+    if (!v('cvpCash')) throw new Error('Received-by person name is required.');
+    return { payment_mode: mode, payment_details: { received_by: v('cvpCash') } };
+  }
+  throw new Error('Invalid payment mode.');
+}
+
 function openInvoiceModal(r) {
   const modal = document.getElementById('viewAllocationModal');
   const content = modal.querySelector('.modal-content');
+  content.style.maxHeight = '86vh'; content.style.overflowY = 'auto';
   const d = r.details || {};
+  const getTotal = () => Math.round((d.items || []).reduce((s, i) => {
+    const line = (Number(i.price) || 0) * (Number(i.quantity) || 0);
+    return s + line + line * (Number(i.tax_rate) || 0) / 100;
+  }, 0) * 100) / 100;
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <h3>Invoice Details</h3>
@@ -378,6 +505,7 @@ function openInvoiceModal(r) {
     <form id="invoiceForm" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
       <input name="invoice_no" placeholder="Invoice Number" required>
       <input name="invoice_date" type="date" required>
+      ${convPayHtml('')}
       <div style="display:flex;justify-content:space-between;margin-top:6px;">
         <button type="button" id="invoiceCancel" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
         <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Approve &amp; Create Order</button>
@@ -386,10 +514,13 @@ function openInvoiceModal(r) {
   const close = () => modal.style.display = 'none';
   content.querySelector('.close').addEventListener('click', close);
   document.getElementById('invoiceCancel').addEventListener('click', close);
+  convPayWire(getTotal);
   document.getElementById('invoiceForm').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    await approveRequest(r.request_id, { invoice_no: fd.get('invoice_no'), invoice_date: fd.get('invoice_date') });
+    let pay;
+    try { pay = convPayRead(getTotal); } catch (err) { alert(err.message); return; }
+    await approveRequest(r.request_id, { invoice_no: fd.get('invoice_no'), invoice_date: fd.get('invoice_date'), ...pay });
     close();
   });
   modal.style.display = 'flex';
@@ -1065,6 +1196,7 @@ async function openConvertAllocationModal(a) {
         <input id="cvTax" type="number" min="0" step="any" placeholder="Tax Rate (%)" value="${esc(st.tax)}" style="${inp}">
         <input id="cvInvNo" placeholder="Invoice Number *" value="${esc(st.invNo)}" style="${inp}">
         <input id="cvInvDate" type="date" value="${esc(st.invDate)}" style="${inp}">
+        ${convPayHtml(st.payMode)}
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:14px;">
         <button type="button" id="cvCancel" style="padding:10px 16px;border:none;border-radius:8px;background:#e5e7eb;cursor:pointer;">Cancel</button>
@@ -1076,16 +1208,25 @@ async function openConvertAllocationModal(a) {
   // keep what was typed when the company choice switches between "existing" and "new"
   const readFields = () => {
     const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
-    for (const [key, id] of [['company', 'cvCompany'], ['address', 'cvAddress'], ['gst', 'cvGst'], ['price', 'cvPrice'], ['tax', 'cvTax'], ['invNo', 'cvInvNo'], ['invDate', 'cvInvDate']]) {
+    for (const [key, id] of [['company', 'cvCompany'], ['address', 'cvAddress'], ['gst', 'cvGst'], ['price', 'cvPrice'], ['tax', 'cvTax'], ['invNo', 'cvInvNo'], ['invDate', 'cvInvDate'], ['payMode', 'cvPayMode']]) {
       const val = v(id);
       if (val !== null) st[key] = val;
     }
+  };
+
+  // order total (incl. tax) from the price / tax currently typed in the form and this unit's quantities
+  const getTotal = () => {
+    const price = Number(document.getElementById('cvPrice')?.value) || 0;
+    const tax = Number(document.getElementById('cvTax')?.value) || 0;
+    const qty = (a.items || []).reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+    return Math.round(price * qty * (1 + tax / 100) * 100) / 100;
   };
 
   const wire = () => {
     const close = () => modal.style.display = 'none';
     content.querySelector('.close').addEventListener('click', close);
     document.getElementById('cvCancel').addEventListener('click', close);
+    convPayWire(getTotal);
     document.getElementById('cvPick').addEventListener('change', e => { readFields(); st.customerId = e.target.value; draw(); });
     document.getElementById('cvSave').addEventListener('click', async () => {
       readFields();
@@ -1101,6 +1242,7 @@ async function openConvertAllocationModal(a) {
       if (!picked && (!body.company_name || !body.company_address)) return alert('Select a company, or enter the new company name and address.');
       if (body.price <= 0) return alert('Enter a valid price.');
       if (!body.invoice_no || !body.invoice_date) return alert('Invoice number and date are required.');
+      try { Object.assign(body, convPayRead(getTotal)); } catch (err) { return alert(err.message); }
       try {
         const res = await apiFetch(`/allocation/convert_to_order_direct/${a.allocation_id}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

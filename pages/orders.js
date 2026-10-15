@@ -372,7 +372,8 @@ function openEditOrderModal(o) {
         <input name="gst_number" placeholder="GST Number" value="${customer.gst_number ?? ''}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
         <input name="discount" type="number" min="0" placeholder="Discount" value="${o.discount ?? 0}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
         <select name="payment_mode" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
-          ${PAYMENT_MODES.map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
+          ${PAYMENT_MODES.filter(m => m.value !== 'Partial' || o.payment_mode === 'Partial')
+            .map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
         </select>
         <textarea name="remark" class="edit-remark" placeholder="Remark for this edit (required)" rows="2" required
           style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;resize:vertical;"></textarea>
@@ -973,6 +974,10 @@ function paymentDetailsLabel(o) {
   const mode = o.payment_mode;
   const d = o.payment_details || {};
   if (mode === 'Credit') return `Credit — ${d.credit_days ?? '-'} days`;
+  if (mode === 'Partial') {
+    const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    return `Partial — ${inr(d.paid_amount)} paid, ${inr(d.balance_amount)} due in ${d.credit_days ?? '-'} days${d.due_date ? ' (by ' + d.due_date + ')' : ''}`;
+  }
   if (mode === 'Cheque') return `Cheque #${d.cheque_number ?? '-'} (${d.cheque_date ?? '-'})${d.bank_name ? ', ' + d.bank_name : ''}`;
   if (mode === 'DemandDraft') return `DD #${d.dd_number ?? '-'} (${d.dd_date ?? '-'})${d.bank_name ? ', ' + d.bank_name : ''}`;
   if (mode === 'UPI') return `UPI — ${d.upi_id ?? '-'}`;
@@ -1177,6 +1182,7 @@ const wiz = {
 
 const PAYMENT_MODES = [
   { value: 'Credit', label: 'Credit' },
+  { value: 'Partial', label: 'Partial (part now, rest later)' },
   { value: 'NetBanking', label: 'Net Banking' },
   { value: 'UPI', label: 'UPI' },
   { value: 'Cheque', label: 'Cheque' },
@@ -1709,6 +1715,9 @@ function renderPaymentStep() {
     if (subEl) subEl.textContent = `Subtotal: ₹${subtotal.toFixed(2)}`;
     const total = subtotal - (wiz.discount || 0) + (wiz.warrantyCharge || 0);
     document.getElementById('grandTotalBox').textContent = `Grand Total (excl. tax): ₹${total.toFixed(2)}`;
+    // keep the Partial payment hint (balance) in step with discount / price / warranty changes
+    const partialPaid = document.getElementById('partialPaid');
+    if (partialPaid) partialPaid.dispatchEvent(new Event('input'));
   }
 
   document.querySelectorAll('.wizPrice').forEach(inp => inp.addEventListener('input', () => {
@@ -1946,6 +1955,34 @@ function renderPaymentExtra(mode, extraBox) {
     const sel = document.getElementById('creditDaysSelect');
     const manual = document.getElementById('creditDaysManual');
     sel.addEventListener('change', () => manual.style.display = sel.value === 'manual' ? 'block' : 'none');
+  } else if (mode === 'Partial') {
+    // part of the amount is paid now, the remaining balance is due after the chosen number of days
+    extraBox.innerHTML = `
+      <label style="font-size:13px;color:var(--text-muted);">Amount paid now (₹)</label>
+      <input id="partialPaid" type="number" min="0" step="any" placeholder="e.g. half of the total" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+      <label style="font-size:13px;color:var(--text-muted);">In how many days will the remaining payment be made?</label>
+      <select id="partialDaysSelect" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
+        <option value="15">15 days</option>
+        <option value="30">30 days</option>
+        <option value="45">45 days</option>
+        <option value="60">60 days</option>
+        <option value="manual">Other (enter days)</option>
+      </select>
+      <input id="partialDaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
+      <div id="partialHint" style="font-size:12px;color:var(--warning-dark);background:var(--warning-bg);border-radius:8px;padding:8px 10px;margin-top:6px;"></div>`;
+    const sel = document.getElementById('partialDaysSelect');
+    const manual = document.getElementById('partialDaysManual');
+    const paid = document.getElementById('partialPaid');
+    const hint = document.getElementById('partialHint');
+    const refreshHint = () => {
+      const total = wizOrderTotal();
+      const p = Number(paid.value) || 0;
+      const fmt = n => '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+      hint.textContent = `Order total (incl. tax): ${fmt(total)} — paid now ${fmt(p)}, balance ${fmt(Math.max(total - p, 0))} on credit.`;
+    };
+    sel.addEventListener('change', () => manual.style.display = sel.value === 'manual' ? 'block' : 'none');
+    paid.addEventListener('input', refreshHint);
+    refreshHint();
   } else if (mode === 'Cheque') {
     extraBox.innerHTML = `
       <input id="chequeNumber" placeholder="Cheque Number" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
@@ -1972,6 +2009,15 @@ function renderPaymentExtra(mode, extraBox) {
   }
 }
 
+// order total as the backend works it out: price x qty + tax per line, minus discount, plus extended-warranty charge
+function wizOrderTotal() {
+  const lines = Object.values(wiz.cart).reduce((s, i) => {
+    const line = (Number(i.price) || 0) * (Number(i.quantity) || 0);
+    return s + line + line * (Number(i.tax_rate) || 0) / 100;
+  }, 0);
+  return Math.round((lines - (Number(wiz.discount) || 0) + (Number(wiz.warrantyCharge) || 0)) * 100) / 100;
+}
+
 function buildPaymentDetails(mode) {
   if (mode === 'Credit') {
     const sel = document.getElementById('creditDaysSelect');
@@ -1979,6 +2025,17 @@ function buildPaymentDetails(mode) {
     const days = sel.value === 'manual' ? Number(manual.value) : Number(sel.value);
     if (!days || days < 1 || days > 60) throw new Error('Credit days must be between 1 and 60.');
     return { credit_days: days };
+  }
+  if (mode === 'Partial') {
+    const paid = Number(document.getElementById('partialPaid').value) || 0;
+    const sel = document.getElementById('partialDaysSelect');
+    const manual = document.getElementById('partialDaysManual');
+    const days = sel.value === 'manual' ? Number(manual.value) : Number(sel.value);
+    const total = wizOrderTotal();
+    if (paid <= 0) throw new Error('Enter the amount paid now for a partial payment.');
+    if (total > 0 && paid >= total) throw new Error('Partial payment must be less than the order total — choose another payment mode.');
+    if (!days || days < 1 || days > 60) throw new Error('Days for the remaining payment must be between 1 and 60.');
+    return { paid_amount: paid, credit_days: days };
   }
   if (mode === 'Cheque') {
     const cheque_number = document.getElementById('chequeNumber').value.trim();

@@ -632,7 +632,71 @@ def update_account(username: str, updated_values: UpdateAccountRequest, user: di
         raise HTTPException(status_code=500, detail="account details updation was unsuccessful")
 
 
-VALID_PAYMENT_MODES = {"Credit", "NetBanking", "UPI", "Cheque", "DemandDraft", "Cash"}
+VALID_PAYMENT_MODES = {"Credit", "Partial", "NetBanking", "UPI", "Cheque", "DemandDraft", "Cash"}
+
+
+def _order_grand_total(items: list, discount: float = 0, warranty_charge: float = 0) -> float:
+    """price x qty + tax per line, minus discount, plus extended-warranty charge (same maths as order_manager.add)."""
+    total = 0.0
+    for it in items or []:
+        line = float(it.get("price", 0) or 0) * float(it.get("quantity", 0) or 0)
+        total += line + line * float(it.get("tax_rate", 0) or 0) / 100
+    return round(total - float(discount or 0) + float(warranty_charge or 0), 2)
+
+
+def _validate_order_payment(payment_mode: str, payment_details: dict, grand_total: float = 0) -> dict:
+    """Checks the payment mode + its details (shared by order creation and demo-unit conversion)
+    and returns the details to store. "Partial" = part paid now, the rest (balance) due after
+    credit_days; paid_amount / credit_days come in, balance_amount / due_date are added here."""
+    details = dict(payment_details or {})
+
+    if not payment_mode:
+        raise HTTPException(status_code=400, detail="select a payment mode")
+    if payment_mode not in VALID_PAYMENT_MODES:
+        raise HTTPException(status_code=400, detail="invalid payment mode")
+
+    if payment_mode == "Credit":
+        credit_days = details.get("credit_days")
+        if not credit_days or not (0 < int(credit_days) <= 60):
+            raise HTTPException(status_code=400, detail="credit days must be between 1 and 60")
+
+    if payment_mode == "Partial":
+        try:
+            paid = float(details.get("paid_amount") or 0)
+            days = int(details.get("credit_days") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid partial payment details")
+        if paid <= 0:
+            raise HTTPException(status_code=400, detail="enter the amount paid now for a partial payment")
+        if not (0 < days <= 60):
+            raise HTTPException(status_code=400, detail="days for the remaining payment must be between 1 and 60")
+        if grand_total > 0 and paid >= grand_total:
+            raise HTTPException(status_code=400, detail="partial payment must be less than the order total - choose another payment mode")
+        details["paid_amount"] = round(paid, 2)
+        details["credit_days"] = days
+        details["balance_amount"] = round(max(grand_total - paid, 0), 2)
+        details["due_date"] = (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat()
+
+    if payment_mode == "Cheque" and not details.get("cheque_number"):
+        raise HTTPException(status_code=400, detail="cheque number is required")
+
+    if payment_mode == "DemandDraft" and not details.get("dd_number"):
+        raise HTTPException(status_code=400, detail="demand draft number is required")
+
+    if payment_mode == "UPI" and not details.get("upi_id"):
+        raise HTTPException(status_code=400, detail="UPI ID is required")
+
+    if payment_mode == "NetBanking" and not (
+        details.get("bank_name")
+        and details.get("account_number")
+        and details.get("ifsc_code")
+    ):
+        raise HTTPException(status_code=400, detail="bank name, account number and IFSC code are required")
+
+    if payment_mode == "Cash" and not details.get("received_by"):
+        raise HTTPException(status_code=400, detail="received-by person name is required")
+
+    return details
 
 
 def _raise_media_review_request(service_id: str, raised_by: str):
@@ -752,32 +816,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product to the order")
 
-    if payment_mode not in VALID_PAYMENT_MODES:
-        raise HTTPException(status_code=400, detail="invalid payment mode")
-
-    if payment_mode == "Credit":
-        credit_days = payment_details.get("credit_days")
-        if not credit_days or not (0 < int(credit_days) <= 60):
-            raise HTTPException(status_code=400, detail="credit days must be between 1 and 60")
-
-    if payment_mode == "Cheque" and not payment_details.get("cheque_number"):
-        raise HTTPException(status_code=400, detail="cheque number is required")
-
-    if payment_mode == "DemandDraft" and not payment_details.get("dd_number"):
-        raise HTTPException(status_code=400, detail="demand draft number is required")
-
-    if payment_mode == "UPI" and not payment_details.get("upi_id"):
-        raise HTTPException(status_code=400, detail="UPI ID is required")
-
-    if payment_mode == "NetBanking" and not (
-        payment_details.get("bank_name")
-        and payment_details.get("account_number")
-        and payment_details.get("ifsc_code")
-    ):
-        raise HTTPException(status_code=400, detail="bank name, account number and IFSC code are required")
-
-    if payment_mode == "Cash" and not payment_details.get("received_by"):
-        raise HTTPException(status_code=400, detail="received-by person name is required")
+    payment_details = _validate_order_payment(payment_mode, payment_details, _order_grand_total(items, discount, warranty_charge))
 
     customer_db = customer_manager()
     customer_snapshot = dict(customer or {})
@@ -4626,6 +4665,8 @@ class RequestApproveModel(BaseModel):
     # only used when approving a convert_to_order request
     invoice_no: str = ""
     invoice_date: str = ""
+    payment_mode: str = ""          # same modes as a normal order (Credit / Partial / UPI ...)
+    payment_details: dict = {}
 
 
 class ReturnRequestModel(BaseModel):
@@ -4770,10 +4811,17 @@ def raise_demo_return_request(allocation_id: str, request: ReturnRequestModel, u
         raise HTTPException(status_code=500, detail="return request could not be raised")
 
 
-def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver: str, invoice_no: str, invoice_date: str):
+def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver: str, invoice_no: str, invoice_date: str,
+                           payment_mode: str = "", payment_details: dict = None):
     """Moves an approved demo unit into Orders: same products/serials/company/price, dispatch info
     carried over (with the entered invoice details), and the allocation entry is removed.
-    Stock is NOT touched — the units were already deducted when the demo was allotted."""
+    Stock is NOT touched — the units were already deducted when the demo was allotted.
+    The order gets a real payment mode (Credit / Partial / UPI ...) chosen at conversion time."""
+    # validate the payment first so a bad choice never leaves a half-created company behind
+    conv_items = [{"price": details.get("price", 0), "tax_rate": details.get("tax_rate", 0), "quantity": i.get("quantity", 1)}
+                  for i in alloc.get("items", [])]
+    payment_details = _validate_order_payment(payment_mode, payment_details, _order_grand_total(conv_items))
+
     cust = dict(details.get("customer") or {})
     existing = []
     if cust.get("customer_id"):
@@ -4812,7 +4860,7 @@ def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver:
 
     order = order_manager(
         customer=customer_snapshot, items=order_items,
-        payment_mode="Demo Conversion", payment_details={}, discount=0,
+        payment_mode=payment_mode, payment_details=payment_details, discount=0,
         creator={"type": "request", "raised_by": raised_by, "approved_by": approver}
     )
     order.add(collection_name=ORDERS_COLLECTION)
@@ -5038,7 +5086,8 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
             if not found:
                 raise HTTPException(status_code=404, detail="demo unit allocation no longer exists")
             order_id = _convert_demo_to_order(found[0], details, req["raised_by"], user["username"],
-                                              body.invoice_no.strip(), body.invoice_date.strip())
+                                              body.invoice_no.strip(), body.invoice_date.strip(),
+                                              body.payment_mode, body.payment_details)
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and demo unit converted to order", "order_id": order_id}
@@ -5525,6 +5574,8 @@ class AdminConvertRequest(BaseModel):
     tax_rate: float = 0
     invoice_no: str
     invoice_date: str
+    payment_mode: str = ""
+    payment_details: dict = {}
 
 
 @app.post("/allocation/convert_to_order_direct/{allocation_id}")
@@ -5566,7 +5617,8 @@ def convert_demo_to_order_direct(allocation_id: str, request: AdminConvertReques
                         "gst_number": request.gst_number.strip()}
         details = {"customer": customer, "price": request.price, "tax_rate": request.tax_rate}
         order_id = _convert_demo_to_order(alloc, details, alloc.get("allocated_by") or user["username"], user["username"],
-                                          request.invoice_no.strip(), request.invoice_date.strip())
+                                          request.invoice_no.strip(), request.invoice_date.strip(),
+                                          request.payment_mode, request.payment_details)
         return {"message": "demo unit converted to order", "order_id": order_id}
     except HTTPException:
         raise
