@@ -70,6 +70,7 @@ class assembly_manager(mongodbclient):
             entry = {
                 "serial_number": (s.get("serial_number") or "").strip(),
                 "hologram_number": (s.get("hologram_number") or "").strip(),
+                "lot_no": (s.get("lot_no") or "").strip(),
             }
             if s.get("replaced"):
                 entry["replaced"] = True
@@ -91,6 +92,10 @@ class assembly_manager(mongodbclient):
                 raise Exception("number of serial/hologram entries must match the assembly quantity")
             if any(not s["serial_number"] or not s["hologram_number"] for s in serials):
                 raise Exception("every unit needs both a serial number and a hologram number")
+            # lot_no is compulsory per unit; one batch may carry several lot numbers, so no
+            # uniqueness / consistency check is made on it (unlike serial / hologram numbers)
+            if any(not s["lot_no"] for s in serials):
+                raise Exception("every unit needs a lot number")
 
             serial_values = [s["serial_number"] for s in serials]
             hologram_values = [s["hologram_number"] for s in serials]

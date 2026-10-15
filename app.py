@@ -385,6 +385,7 @@ class AssemblyPartUsed(BaseModel):
 
 class AssemblySerialItem(BaseModel):
     serial_number: str
+    lot_no: str = ""      # compulsory per unit (checked in create_assembly); lots may repeat or differ within a batch
 
 
 class ApproveAssemblyRequest(BaseModel):
@@ -1934,6 +1935,11 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             raise HTTPException(status_code=400, detail="every unit needs a serial number")
         if len(set(serial_values)) != len(serial_values):
             raise HTTPException(status_code=400, detail="serial numbers must be unique within this batch")
+        # lot number is compulsory for every unit — but no guard on its value: one assembly can
+        # have several different lot numbers and the same lot can repeat across units
+        lot_values = [(s.lot_no or "").strip() for s in request.serials]
+        if any(not l for l in lot_values):
+            raise HTTPException(status_code=400, detail="every unit needs a lot number")
 
         # sum up everything sourced from inventory, merging duplicate part names
         needed_from_inventory: dict[tuple, int] = {}   # (part_name, belongs_to) -> qty
@@ -2023,7 +2029,7 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             raise HTTPException(status_code=500, detail="could not allocate a hologram number for every assembled unit")
 
         serials = [
-            {"serial_number": s.serial_number.strip(), "hologram_number": hologram_numbers[i]}
+            {"serial_number": s.serial_number.strip(), "hologram_number": hologram_numbers[i], "lot_no": lot_values[i]}
             for i, s in enumerate(request.serials)
         ]
 
@@ -2116,6 +2122,9 @@ def approve_assembly(assembly_id: str, request: ApproveAssemblyRequest, user: di
             quantity=len(new_serials),
             serial_numbers=new_serials,
             purchase_date=datetime.now(timezone.utc).date().isoformat(),
+            # the same lot numbers entered in the assembly go into inventory with their units
+            serial_lots=[{"serial_number": sv.get("serial_number"), "lot_no": sv.get("lot_no", "")}
+                         for sv in assembly.get("serials", []) if sv.get("serial_number") in set(new_serials)],
         )
 
         approved_all = list(already) + new_serials

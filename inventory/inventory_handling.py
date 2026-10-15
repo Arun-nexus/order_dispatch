@@ -781,10 +781,20 @@ class inventory_manager(mongodbclient):
             logging.error("unit allocation failed!")
             raise Exception(e)
 
+    @staticmethod
+    def _merge_lot_numbers(existing_lot_no, new_lots):
+        """Inventory keeps ONE lot_no text per entry: distinct lot numbers joined by ", " (old first,
+        then new ones in the order they arrive). An assembly can bring several lots into one entry."""
+        merged = []
+        for lot in [x.strip() for x in str(existing_lot_no or "").split(",")] + [str(x or "").strip() for x in new_lots]:
+            if lot and lot not in merged:
+                merged.append(lot)
+        return ", ".join(merged)
+
     def add_from_assembly(self, collection_name, product_name, product_id, model_no, quantity,
                            serial_numbers, price=0, tax_rate=0, purchase_date=None,
                            supplier="In-house Assembly", supplier_address="", lot_no="",
-                           product_type="product"):
+                           product_type="product", serial_lots=None):
         """
         Called right after an Assembly is marked completed, to push the
         freshly built units into inventory.
@@ -793,6 +803,10 @@ class inventory_manager(mongodbclient):
         product_id + model_no, the assembled serial numbers are appended to
         that entry and its quantity is increased by `quantity`. Otherwise a
         brand new inventory entry is created for this assembled batch.
+
+        serial_lots: list of {"serial_number", "lot_no"} for the units being added (from the assembly).
+        The lot numbers are stored on the entry — as distinct, comma-joined `lot_no` text plus a per-serial
+        `serial_lots` list — so the same lot numbers entered in the assembly show up in inventory.
 
         Returns {"mode": "merged" | "created", "product_id": ..., "quantity_added": ...}
         """
@@ -808,15 +822,23 @@ class inventory_manager(mongodbclient):
                        "model_no": self._model_query(model_no), "product_type": product_type}
             )
 
+            lot_entries = [{"serial_number": (x.get("serial_number") or ""), "lot_no": (x.get("lot_no") or "").strip()}
+                           for x in (serial_lots or []) if x.get("serial_number")]
+            new_lot_values = [x["lot_no"] for x in lot_entries]
+
             if existing:
                 entry = existing[0]
                 merged_serials = (entry.get("serial_numbers") or []) + list(serial_numbers)
                 new_quantity = int(entry.get("quantity", 0) or 0) + quantity
 
+                update_values = {"serial_numbers": merged_serials, "quantity": new_quantity}
+                if lot_entries:
+                    update_values["lot_no"] = self._merge_lot_numbers(entry.get("lot_no"), new_lot_values)
+                    update_values["serial_lots"] = (entry.get("serial_lots") or []) + lot_entries
                 self.update_data(
                     collection_name=collection_name,
                     query={"_id": ObjectId(entry["_id"])},
-                    update_values={"serial_numbers": merged_serials, "quantity": new_quantity}
+                    update_values=update_values
                 )
                 logging.info(f"merged {quantity} assembled unit(s) into existing inventory entry for {product_id}")
                 return {"mode": "merged", "product_id": product_id, "quantity_added": quantity}
@@ -824,7 +846,7 @@ class inventory_manager(mongodbclient):
             product_dic = {
                 "product_name": product_name,
                 "product_id": product_id,
-                "lot_no": lot_no,
+                "lot_no": self._merge_lot_numbers(lot_no, new_lot_values) if lot_entries else lot_no,
                 "supplier": supplier,
                 "supplier_address": supplier_address,
                 "price": price,
@@ -835,6 +857,8 @@ class inventory_manager(mongodbclient):
                 "serial_numbers": list(serial_numbers),
                 "product_type": product_type,
             }
+            if lot_entries:
+                product_dic["serial_lots"] = lot_entries
             super().add(collection_name=collection_name, dictionary=product_dic)
             logging.info(f"created new inventory entry for assembled product {product_id}")
             return {"mode": "created", "product_id": product_id, "quantity_added": quantity}
@@ -948,5 +972,3 @@ class inventory_manager(mongodbclient):
         except Exception as e:
             logging.error("pushing shipment parts into inventory failed!")
             raise Exception(e)
-
-        

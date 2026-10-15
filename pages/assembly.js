@@ -54,7 +54,7 @@ function fromServerShapeAssembly(a) {
     modelNumber: a.model_number,
     quantity: a.quantity,
     partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source, belongsTo: partBelongs(p) })),
-    serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number })),
+    serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number, lot: s.lot_no || '' })),
     status: a.status,
     approvedSerials: a.approved_serials || [],
     createdAt: a.created_at,
@@ -73,7 +73,7 @@ function toServerShapeAssembly(a) {
     parts_used: (a.partsUsed || []).map(p => ({
       part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source, belongs_to: p.belongsTo || '',
     })),
-    serials: (a.serials || []).map(s => ({ serial_number: s })),
+    serials: (a.serials || []).map((s, i) => ({ serial_number: s, lot_no: String((a.lots || [])[i] || '').trim() })),
   };
 }
 
@@ -466,9 +466,9 @@ function openViewAssemblyModal(id) {
     <h4 style="margin-bottom:8px;">Serial / Hologram Numbers</h4>
     <div style="max-height:220px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;">
-        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th>${a.status !== 'pending' ? '<th style="text-align:left;padding:8px;">Approval</th>' : ''}</tr></thead>
+        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th><th style="text-align:left;padding:8px;">Lot No.</th>${a.status !== 'pending' ? '<th style="text-align:left;padding:8px;">Approval</th>' : ''}</tr></thead>
         <tbody>
-          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:#16a34a;">✔ Received</span>' : '<span style="color:#d97706;">Not received</span>'}</td>` : ''}</tr>`).join('')}
+          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td><td style="padding:6px 8px;">${s.lot ? aesc(s.lot) : '—'}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:#16a34a;">✔ Received</span>' : '<span style="color:#d97706;">Not received</span>'}</td>` : ''}</tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -511,6 +511,7 @@ function openApproveAssemblyModal(id) {
           <th style="padding:8px;width:40px;"><input type="checkbox" id="apprAll"></th>
           <th style="text-align:left;padding:8px;">Serial No.</th>
           <th style="text-align:left;padding:8px;">Hologram No.</th>
+          <th style="text-align:left;padding:8px;">Lot No.</th>
           <th style="text-align:left;padding:8px;">Status</th>
         </tr></thead>
         <tbody>
@@ -518,6 +519,7 @@ function openApproveAssemblyModal(id) {
             <td style="padding:6px 8px;"><input type="checkbox" class="apprChk" value="${s.serial}" ${done.has(s.serial) ? 'checked disabled' : ''}></td>
             <td style="padding:6px 8px;">${s.serial}</td>
             <td style="padding:6px 8px;">${s.hologram}</td>
+            <td style="padding:6px 8px;">${s.lot ? aesc(s.lot) : '—'}</td>
             <td style="padding:6px 8px;">${done.has(s.serial) ? '<span style="color:#16a34a;">✔ Approved</span>' : '<span style="color:#d97706;">Not received</span>'}</td>
           </tr>`).join('')}
         </tbody>
@@ -595,7 +597,7 @@ function exportAssemblySerials(id) {
 }
 
 function exportSerialsToExcel(serials, productName) {
-  const rows = serials.map((s, i) => ({ 'Unit #': i + 1, 'Serial Number': s.serial, 'Hologram Number': s.hologram }));
+  const rows = serials.map((s, i) => ({ 'Unit #': i + 1, 'Serial Number': s.serial, 'Hologram Number': s.hologram, 'Lot No.': s.lot || '' }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Serials');
@@ -655,7 +657,7 @@ async function openAddAssemblyModal() {
   assemblyDraft = {
     mode: 'existing',   // 'existing' = pick from inventory, 'new' = type details
     productName: '', productId: DEFAULT_PRODUCT_ID, modelNumber: '', quantity: 1,
-    partsUsed: [], serials: [],
+    partsUsed: [], serials: [], lots: [],   // lots[i] = lot no. of unit i (compulsory, may differ per unit)
   };
   assemblyStep = 1;
   await Promise.all([loadAvailableParts(), loadInventoryProducts()]);   // refresh stock right before the wizard opens
@@ -935,6 +937,10 @@ function renderAStep3() {
     const suggestion = generateSerialNumbers(1, assemblyDraft.productId)[0];
     assemblyDraft.serials = Array.from({ length: assemblyDraft.quantity }, (_, i) => i === 0 ? suggestion : '');
   }
+  // one lot number per unit (compulsory). Different units may carry different lot numbers.
+  if (!Array.isArray(assemblyDraft.lots) || assemblyDraft.lots.length !== assemblyDraft.quantity) {
+    assemblyDraft.lots = Array.from({ length: assemblyDraft.quantity }, () => '');
+  }
 
   const hologramPart = (assemblyDraft.partsUsed || []).find(
     p => p.source === 'inventory' && Number(p.quantity) >= Number(assemblyDraft.quantity)
@@ -949,13 +955,18 @@ function renderAStep3() {
     ${stepDots(3)}
     <p style="font-size:13px;color:#64748b;margin-bottom:6px;">
       Enter (or adjust) Unit 1's serial number below, then generate the rest of the batch from it — or fill in / edit every unit by hand.
+      <strong>Lot No. is compulsory for every unit</strong> — one assembly can have more than one lot number.
     </p>
     <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <i class="fa-solid fa-circle-info"></i>
       Hologram numbers aren't entered here — each unit will automatically get the next hologram number on file for
       <strong>${hologramPart ? hologramPart.name : 'the inventory part'}</strong> when you save.
     </p>
-    <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="lotAllInput" placeholder="Lot No. for all units" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;width:170px;">
+      <button type="button" id="lotAllBtn" style="padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;">
+        <i class="fa-solid fa-tag"></i> Apply Lot No. to all
+      </button>
       <button type="button" id="genFromUnit1Btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;">
         <i class="fa-solid fa-arrow-down-9-1"></i> Generate Remaining From Unit 1
       </button>
@@ -966,7 +977,7 @@ function renderAStep3() {
     <div style="max-height:280px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         <thead style="position:sticky;top:0;background:#f8fafc;">
-          <tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial Number</th></tr>
+          <tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial Number</th><th style="text-align:left;padding:8px;">Lot No. <span style="color:#d62828;">*</span></th></tr>
         </thead>
         <tbody id="serialRows"></tbody>
       </table>
@@ -994,6 +1005,17 @@ function renderAStep3() {
     renderSerialRows();
   });
 
+  box.querySelector('#lotAllBtn').addEventListener('click', () => {
+    syncSerialsFromDom();
+    const lot = box.querySelector('#lotAllInput').value.trim();
+    if (!lot) {
+      showResponseModal('Enter a Lot No.', 'Type the Lot No. first, then apply it to all units. You can still change any unit\'s lot afterwards.', false);
+      return;
+    }
+    assemblyDraft.lots = assemblyDraft.lots.map(() => lot);
+    renderSerialRows();
+  });
+
   box.querySelector('#regenSerialsBtn').addEventListener('click', () => {
     assemblyDraft.serials = generateSerialNumbers(assemblyDraft.quantity, assemblyDraft.productId);
     renderSerialRows();
@@ -1009,6 +1031,7 @@ function renderSerialRows() {
     <tr data-serial-row="${i}">
       <td style="padding:6px 8px;">${i + 1}${i === 0 ? ' <span style="color:#94a3b8;font-size:11px;">(seed)</span>' : ''}</td>
       <td style="padding:6px 8px;"><input type="text" class="serialInput" placeholder="Serial Number" value="${s}" style="width:100%;"></td>
+      <td style="padding:6px 8px;"><input type="text" class="lotInput" placeholder="Lot No. (required)" value="${escAttr((assemblyDraft.lots || [])[i] || '')}" style="width:100%;"></td>
     </tr>
   `).join('');
 }
@@ -1019,6 +1042,8 @@ function syncSerialsFromDom() {
   tbody.querySelectorAll('[data-serial-row]').forEach(row => {
     const i = Number(row.dataset.serialRow);
     assemblyDraft.serials[i] = row.querySelector('.serialInput').value.trim();
+    if (!Array.isArray(assemblyDraft.lots)) assemblyDraft.lots = [];
+    assemblyDraft.lots[i] = row.querySelector('.lotInput').value.trim();
   });
 }
 
@@ -1028,6 +1053,13 @@ async function finalizeAssembly() {
 
   if (assemblyDraft.serials.some(s => !s)) {
     showResponseModal('Missing values', 'Every unit needs a serial number.', false);
+    return;
+  }
+  // Lot No. is compulsory for every unit. Deliberately NO uniqueness / consistency check on lots:
+  // one assembly may carry several lot numbers, and the same lot can repeat across units.
+  const lotMissing = (assemblyDraft.lots || []).findIndex(l => !String(l || '').trim());
+  if (lotMissing !== -1 || (assemblyDraft.lots || []).length !== assemblyDraft.serials.length) {
+    showResponseModal('Lot No. required', `Every unit needs a Lot No.${lotMissing !== -1 ? ' Unit ' + (lotMissing + 1) + ' is missing one.' : ''}`, false);
     return;
   }
   const serialSet = new Set(assemblyDraft.serials);
