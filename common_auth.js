@@ -1341,3 +1341,16 @@ function initWorkPopup() {
   pollWorkPopup();
   setInterval(pollWorkPopup, 5000);
 }
+(function installPwa() {
+  const head = document.head;
+  const add = (tag, attrs) => { const el = document.createElement(tag); Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v)); head.appendChild(el); };
+  const vp = document.querySelector('meta[name="viewport"]');
+  if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+  add('link', { rel: 'manifest', href: '/manifest.json' });
+  add('link', { rel: 'stylesheet', href: '/css/mobile-fold.css' });
+  add('link', { rel: 'apple-touch-icon', href: '/icons/icon-192.png' });
+  add('meta', { name: 'theme-color', content: '#1665ff' });
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+  }
+})();
