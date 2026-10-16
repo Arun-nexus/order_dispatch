@@ -1373,3 +1373,44 @@ function initWorkPopup() {
     window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
   }
 })();
+
+
+(function topTableScroll() {
+  const wrappers = [];
+  function setup(w) {
+    const bar = document.createElement('div');
+    bar.className = 'top-scroll';
+    const inner = document.createElement('div');
+    bar.appendChild(inner);
+    w.parentNode.insertBefore(bar, w);
+    const sync = () => {
+      inner.style.width = w.scrollWidth + 'px';
+      bar.style.display = w.scrollWidth > w.clientWidth + 1 ? 'block' : 'none';
+    };
+    bar.addEventListener('scroll', () => { if (w.scrollLeft !== bar.scrollLeft) w.scrollLeft = bar.scrollLeft; });
+    w.addEventListener('scroll', () => { if (bar.scrollLeft !== w.scrollLeft) bar.scrollLeft = w.scrollLeft; });
+    if (window.ResizeObserver) new ResizeObserver(sync).observe(w);
+    w._syncTop = sync;
+    wrappers.push(w);
+    sync();
+  }
+  function scan() {
+    document.querySelectorAll('.table-container, div[style*="overflow-x"]').forEach(w => {
+      if (w._syncTop || !w.parentNode || !w.querySelector('table')) return;
+      setup(w);
+    });
+    wrappers.forEach(w => { if (w.isConnected) w._syncTop(); });
+  }
+  let queued = false;
+  const queue = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; scan(); });
+  };
+  const start = () => {
+    scan();
+    new MutationObserver(queue).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', queue);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
