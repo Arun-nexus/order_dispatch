@@ -1347,7 +1347,7 @@ function initWorkPopup() {
   const vp = document.querySelector('meta[name="viewport"]');
   if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
   add('link', { rel: 'manifest', href: '/manifest.json' });
-  add('link', { rel: 'stylesheet', href: '/css/mobile-fold.css' });
+  add('link', { rel: 'stylesheet', href: '/css/mobile-fold.css?v=5' });
   add('link', { rel: 'apple-touch-icon', href: '/icons/icon-192.png' });
   add('meta', { name: 'theme-color', content: '#1665ff' });
   {
@@ -1377,27 +1377,71 @@ function initWorkPopup() {
 
 (function topTableScroll() {
   const wrappers = [];
+  const WRAP = '.table-container, .tbl-wrap, div[style*="overflow-x"]';
+  const ratio = () => Math.min(3, Math.max(1, window.innerWidth / (screen.width || window.innerWidth)));
   function setup(w) {
     const bar = document.createElement('div');
     bar.className = 'top-scroll';
-    const inner = document.createElement('div');
-    bar.appendChild(inner);
+    const thumb = document.createElement('div');
+    bar.appendChild(thumb);
     w.parentNode.insertBefore(bar, w);
-    const sync = () => {
-      inner.style.width = w.scrollWidth + 'px';
-      bar.style.display = w.scrollWidth > w.clientWidth + 1 ? 'block' : 'none';
+
+    const layout = () => {
+      const r = ratio();
+      bar.style.height = Math.round(18 * r) + 'px';
+      const sw = w.scrollWidth, cw = w.clientWidth, bw = bar.clientWidth;
+      if (sw <= cw + 1 || !bw) {
+        thumb.style.width = '100%';
+        thumb.style.transform = 'translateX(0)';
+        bar.classList.add('idle');
+        return;
+      }
+      bar.classList.remove('idle');
+      const tw = Math.max(bw * cw / sw, 40 * r);
+      thumb.style.width = tw + 'px';
+      thumb.style.transform = `translateX(${(w.scrollLeft / (sw - cw)) * (bw - tw)}px)`;
     };
-    bar.addEventListener('scroll', () => { if (w.scrollLeft !== bar.scrollLeft) w.scrollLeft = bar.scrollLeft; });
-    w.addEventListener('scroll', () => { if (bar.scrollLeft !== w.scrollLeft) bar.scrollLeft = w.scrollLeft; });
-    if (window.ResizeObserver) new ResizeObserver(sync).observe(w);
-    w._syncTop = sync;
+
+    const scrollToX = (clientX, grab) => {
+      const rect = bar.getBoundingClientRect();
+      const sw = w.scrollWidth, cw = w.clientWidth, bw = bar.clientWidth;
+      const tw = thumb.getBoundingClientRect().width;
+      const x = Math.min(Math.max(clientX - rect.left - grab, 0), bw - tw);
+      w.scrollLeft = (x / (bw - tw)) * (sw - cw);
+    };
+
+    let dragging = false, grab = 0;
+    bar.addEventListener('pointerdown', e => {
+      if (bar.classList.contains('idle')) return;
+      const tr = thumb.getBoundingClientRect();
+      grab = (e.clientX >= tr.left && e.clientX <= tr.right) ? e.clientX - tr.left : tr.width / 2;
+      dragging = true;
+      bar.setPointerCapture(e.pointerId);
+      scrollToX(e.clientX, grab);
+      e.preventDefault();
+    });
+    bar.addEventListener('pointermove', e => { if (dragging) scrollToX(e.clientX, grab); });
+    const stop = () => { dragging = false; };
+    bar.addEventListener('pointerup', stop);
+    bar.addEventListener('pointercancel', stop);
+    w.addEventListener('scroll', layout);
+    if (window.ResizeObserver) new ResizeObserver(layout).observe(w);
+    w._syncTop = layout;
     wrappers.push(w);
-    sync();
+    layout();
   }
   function scan() {
-    document.querySelectorAll('.table-container, div[style*="overflow-x"]').forEach(w => {
-      if (w._syncTop || !w.parentNode || !w.querySelector('table')) return;
-      setup(w);
+    document.querySelectorAll('table').forEach(t => {
+      if (t.closest('.top-scroll')) return;
+      let w = t.closest(WRAP);
+      if (!w) {
+        if (!t.parentNode) return;
+        w = document.createElement('div');
+        w.className = 'tbl-wrap';
+        t.parentNode.insertBefore(w, t);
+        w.appendChild(t);
+      }
+      if (!w._syncTop && w.parentNode) setup(w);
     });
     wrappers.forEach(w => { if (w.isConnected) w._syncTop(); });
   }
