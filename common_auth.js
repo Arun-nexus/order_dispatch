@@ -1350,6 +1350,25 @@ function initWorkPopup() {
   add('link', { rel: 'stylesheet', href: '/css/mobile-fold.css' });
   add('link', { rel: 'apple-touch-icon', href: '/icons/icon-192.png' });
   add('meta', { name: 'theme-color', content: '#1665ff' });
+  {
+    const mount = () => {
+      const sb = document.querySelector('.sidebar');
+      if (!sb || document.getElementById('navToggle')) return;
+      const btn = document.createElement('button');
+      btn.id = 'navToggle';
+      btn.type = 'button';
+      btn.setAttribute('aria-label', 'Menu');
+      btn.innerHTML = '<i class="fa-solid fa-bars"></i>';
+      const bd = document.createElement('div');
+      bd.className = 'sidebar-backdrop';
+      const toggle = open => document.body.classList.toggle('nav-open', open);
+      btn.addEventListener('click', () => toggle(!document.body.classList.contains('nav-open')));
+      bd.addEventListener('click', () => toggle(false));
+      sb.addEventListener('click', e => { if (e.target.closest('a') && !e.target.closest('a[onclick]')) toggle(false); });
+      document.body.append(btn, bd);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
+  }
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
   }
