@@ -5,7 +5,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard | Acer Biomedical</title>
-
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/css/mobile-fold.css">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <meta name="theme-color" content="#1665ff">
   <link rel="stylesheet" href="css/accure.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
   <link rel="stylesheet" href="css/dashboard_details.css" />
@@ -35,7 +38,7 @@
         <li>
           <a href="pages/service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a>
         </li>
-         <li>
+        <li>
           <a href="pages/technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a>
         </li>
         <li>
@@ -266,7 +269,8 @@
   <!-- Team Member Report Modal (populated dynamically by dashboard.js) -->
   <div id="teamReportModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:460px;max-height:86vh;overflow-y:auto;"></div>
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:460px;max-height:86vh;overflow-y:auto;"></div>
   </div>
   <!-- Generic details modal (cards, orders, inventory, services) -->
   <div id="ddModal" class="dd-overlay" aria-hidden="true">
