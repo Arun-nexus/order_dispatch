@@ -1345,9 +1345,9 @@ function initWorkPopup() {
   const head = document.head;
   const add = (tag, attrs) => { const el = document.createElement(tag); Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v)); head.appendChild(el); };
   const vp = document.querySelector('meta[name="viewport"]');
-  if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+  if (vp) vp.setAttribute('content', 'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover');
   add('link', { rel: 'manifest', href: '/manifest.json' });
-  add('link', { rel: 'stylesheet', href: '/css/mobile-fold.css?v=5' });
+  add('link', { rel: 'stylesheet', href: '/css/mobile-fold.css?v=6' });
   add('link', { rel: 'apple-touch-icon', href: '/icons/icon-192.png' });
   add('meta', { name: 'theme-color', content: '#1665ff' });
   {

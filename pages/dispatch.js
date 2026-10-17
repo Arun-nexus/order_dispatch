@@ -152,6 +152,19 @@ function dispCvCells(row) {
   ];
 }
 
+function dispCvExportRows(row) {
+  const d = row.data;
+  const head = [dispatchCardTypeLabel(row.kind), dateLabel(row)];
+  const tail = [cvPlain(billToLabel(row)), d.dispatch?.docket_no ?? '-', d.dispatch?.invoice_no ?? '-', cvPlain(dispatchStatusHtml(d))];
+  if ((row.kind === 'order' || row.kind === 'product_allocation') && (d.items || []).length) {
+    return d.items.map(i => {
+      const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
+      return [...head, `${i.product_name ?? ''}${meta ? ' (' + meta + ')' : ''}`, i.quantity ?? 0, ...tail];
+    });
+  }
+  return [[...head, d.spare_part?.part_name || '', d.spare_part?.quantity ?? '-', ...tail]];
+}
+
 function dispCvPaint() {
   const body = document.getElementById('cvBody');
   if (!body) return;
@@ -207,7 +220,7 @@ function openDispatchCardDetailModal(cardType) {
     dispCvPaint();
   });
   content.querySelector('#cvExport').addEventListener('click', () => {
-    cvDownloadCsv(DISP_CV_HEAD, dispCvFiltered().map(row => dispCvCells(row).map(cvPlain)),
+    cvDownloadCsv(DISP_CV_HEAD, dispCvFiltered().flatMap(dispCvExportRows),
       (DISPATCH_CARD_TITLES[cardType] || 'dispatch').toLowerCase().replace(/[^a-z0-9]+/g, '_'));
   });
   content.querySelector('#cvPrint').addEventListener('click', () => {
@@ -223,7 +236,7 @@ function dispatchPrintOpts(title, rows) {
     title: title + ' - Dispatch',
     subtitle: 'Dispatch queue',
     head: DISP_CV_HEAD,
-    rows: rows.map(row => dispCvCells(row).map(cvPlain))
+    rows: rows.flatMap(dispCvExportRows)
   };
 }
 
@@ -234,7 +247,7 @@ function wireDispatchExport() {
   btn.addEventListener('click', () => {
     const rows = getFilteredRows();
     if (!rows.length) { alert('Nothing to export for the current filters.'); return; }
-    cvDownloadCsv(DISP_CV_HEAD, rows.map(row => dispCvCells(row).map(cvPlain)), 'dispatch');
+    cvDownloadCsv(DISP_CV_HEAD, rows.flatMap(dispCvExportRows), 'dispatch');
   });
 }
 

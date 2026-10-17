@@ -45,11 +45,11 @@
   font-family: 'Poppins', sans-serif;
 }
 
-body{
-    background:var(--bg-main);
-    color:var(--text-secondary);
-    overflow-x:hidden;
-    width:100%;
+body {
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  overflow-x: hidden;
+  width: 100%;
 }
 
 /* Only enforce a desktop-style minimum width on screens that actually have
@@ -77,16 +77,20 @@ img {
   max-width: 100%;
   display: block;
 }
+
 ::-webkit-scrollbar {
   width: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: var(--bg-main);
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--primary);
   border-radius: 20px;
 }
+
 .container {
   display: flex;
   min-height: 100vh;
@@ -109,17 +113,17 @@ img {
   overflow: hidden;
 }
 
-.sidebar .logo{
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    margin-bottom:15px;
+.sidebar .logo {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 15px;
 }
 
-.sidebar .logo img{
-    width:120px;
-    height:120px;
-    object-fit:contain;
+.sidebar .logo img {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
 }
 
 .sidebar ul {
@@ -132,34 +136,34 @@ img {
   margin-bottom: 12px;
 }
 
-.sidebar ul li a{
-  display:flex;
-  align-items:center;
-  gap:18px;
-  width:100%;
-  padding:15px 18px;
-  border-radius:12px;
-  color:var(--text-secondary);
-  font-weight:500;
-  transition:.3s;
+.sidebar ul li a {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  padding: 15px 18px;
+  border-radius: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  transition: .3s;
 }
 
-.sidebar ul li i{
-    width:26px;
-    min-width:26px;
-    text-align:center;
-    font-size:19px;
+.sidebar ul li i {
+  width: 26px;
+  min-width: 26px;
+  text-align: center;
+  font-size: 19px;
 }
 
-.sidebar ul li a:hover{
-  background:var(--bg-hover);
-  color:var(--primary);
+.sidebar ul li a:hover {
+  background: var(--bg-hover);
+  color: var(--primary);
 }
 
-.sidebar ul li.active a{
-  background:var(--primary-gradient);
-  color:#fff;
-  box-shadow:0 15px 28px rgba(22,101,255,.28);
+.sidebar ul li.active a {
+  background: var(--primary-gradient);
+  color: #fff;
+  box-shadow: 0 15px 28px rgba(22, 101, 255, .28);
 }
 
 .sidebar-profile {
@@ -197,10 +201,10 @@ img {
   display: inline-block;
 }
 
-main{
-    margin-left:var(--sidebar-width);
-    width:calc(100% - var(--sidebar-width));
-    padding:2vw;
+main {
+  margin-left: var(--sidebar-width);
+  width: calc(100% - var(--sidebar-width));
+  padding: 2vw;
 }
 
 header,
@@ -883,10 +887,10 @@ form .save-btn {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.85), rgba(255,255,255,0.4));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.4));
 }
 
-.login-left > * {
+.login-left>* {
   position: relative;
   z-index: 2;
 }
@@ -1064,6 +1068,7 @@ form .save-btn {
     transform: translateY(-40px) scale(0.95);
     opacity: 0;
   }
+
   to {
     transform: translateY(0) scale(1);
     opacity: 1;
@@ -1074,11 +1079,11 @@ form .save-btn {
   .cards {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .filter-section {
     flex-wrap: wrap;
   }
-  
+
   .filter-box {
     min-width: 200px;
   }
@@ -1089,75 +1094,75 @@ form .save-btn {
     width: var(--sidebar-collapsed);
     padding: 15px;
   }
-  
+
   .sidebar .logo {
     margin: 0 0 30px 0;
     justify-content: center;
   }
-  
+
   .sidebar .logo img {
     width: 60px;
     height: 60px;
   }
-  
+
   .sidebar .logo h2,
   .sidebar .logo p,
   .sidebar ul li span,
   .sidebar-profile div {
     display: none;
   }
-  
+
   .sidebar ul li {
     justify-content: center;
     padding: 14px;
   }
-  
+
   .sidebar ul li i {
     font-size: 20px;
     width: auto;
   }
-  
+
   .sidebar-profile {
     justify-content: center;
     padding: 12px;
   }
-  
+
   .sidebar-profile img {
     width: 45px;
     height: 45px;
   }
-  
+
   main {
     margin-left: var(--sidebar-collapsed);
     width: calc(100% - var(--sidebar-collapsed));
     padding: 20px;
   }
-  
+
   header,
   .topbar {
     flex-direction: column;
     align-items: flex-start;
     gap: 20px;
   }
-  
+
   .right-header,
   .right {
     flex-wrap: wrap;
     width: 100%;
   }
-  
+
   .search {
     width: 100%;
   }
-  
+
   .details-grid {
     grid-template-columns: 1fr;
   }
-  
+
   form {
     grid-template-columns: 1fr;
   }
-  
+
   form .save-btn {
     grid-column: auto;
   }
@@ -1168,18 +1173,18 @@ form .save-btn {
     max-height: none;
     border-radius: 16px;
   }
-  
+
   .login-left {
     width: 100%;
     padding: 30px;
     min-height: 250px;
   }
-  
+
   .login-right {
     width: 100%;
     padding: 30px;
   }
-  
+
   .login-card {
     padding: 30px;
   }
@@ -1190,58 +1195,58 @@ form .save-btn {
     width: 60px;
     padding: 10px;
   }
-  
+
   .sidebar .logo img {
     width: 40px;
     height: 40px;
   }
-  
+
   .sidebar ul li {
     padding: 10px;
     margin-bottom: 6px;
   }
-  
+
   .sidebar ul li i {
     font-size: 16px;
   }
-  
+
   .sidebar-profile {
     padding: 8px;
   }
-  
+
   .sidebar-profile img {
     width: 35px;
     height: 35px;
   }
-  
+
   main {
     margin-left: 60px;
     width: calc(100% - 60px);
     padding: 15px;
   }
-  
+
   .cards {
     grid-template-columns: 1fr;
   }
-  
+
   .card {
     padding: 16px;
   }
-  
+
   .card h2 {
     font-size: 24px;
   }
-  
+
   .card i {
     width: 50px;
     height: 50px;
     font-size: 20px;
   }
-  
+
   .table-container {
     overflow-x: auto;
   }
-  
+
   .modal {
     padding: 12px;
   }
@@ -1252,33 +1257,33 @@ form .save-btn {
     padding: 20px;
     box-sizing: border-box;
   }
-  
+
   .top-actions {
     flex-direction: column;
   }
-  
+
   .top-actions button {
     width: 100%;
     justify-content: center;
   }
-  
+
   .filter-section {
     flex-direction: column;
   }
-  
+
   .filter-box {
     width: 100%;
   }
-  
+
   .filter-btn {
     width: 100%;
   }
-  
+
   .pagination {
     justify-content: center;
     flex-wrap: wrap;
   }
-  
+
   header h1,
   .topbar h1 {
     font-size: 28px;
@@ -1343,7 +1348,8 @@ form .save-btn {
   }
 
   table {
-    min-width: 640px; /* scrolls horizontally instead of crushing columns */
+    min-width: 640px;
+    /* scrolls horizontally instead of crushing columns */
   }
 
   thead th {
@@ -1366,12 +1372,13 @@ form .save-btn {
   }
 }
 
-@media(max-width:1200px){
-  .login-left{
-    margin:auto;
+@media(max-width:1200px) {
+  .login-left {
+    margin: auto;
   }
-  .login-right{
-    margin:auto;
+
+  .login-right {
+    margin: auto;
   }
 }
 
@@ -1379,20 +1386,20 @@ form .save-btn {
   .login-left {
     display: none;
   }
-  
+
   .login-right {
     padding: 20px;
     min-height: 100vh;
   }
-  
+
   .login-card {
     padding: 24px;
   }
-  
+
   .login-card h2 {
     font-size: 24px;
   }
-  
+
   .login-container {
     height: 100vh;
     max-height: none;
@@ -1405,48 +1412,52 @@ form .save-btn {
     width: 50px;
     padding: 8px;
   }
-  .sidebar ul li a{ margin-left:-1px;
-  padding-left: 0px;}
-  .sidebar ul li.active a{
-  background:var(--primary-gradient);
-  color:#fff;
-  box-shadow:0 15px 28px rgba(22,101,255,.28);
-  width: 30px;
-  height :30px;
-  padding:2px 2px 2px 2px;
-  border-radius:50%
+
+  .sidebar ul li a {
+    margin-left: -1px;
+    padding-left: 0px;
   }
-  
+
+  .sidebar ul li.active a {
+    background: var(--primary-gradient);
+    color: #fff;
+    box-shadow: 0 15px 28px rgba(22, 101, 255, .28);
+    width: 30px;
+    height: 30px;
+    padding: 2px 2px 2px 2px;
+    border-radius: 50%
+  }
+
   .sidebar .logo img {
     width: 32px;
     height: 32px;
   }
-  
+
   .sidebar ul li {
     padding: 8px;
   }
-  
+
   .sidebar ul li i {
     font-size: 14px;
   }
-  
+
   main {
     margin-left: 50px;
     width: calc(100% - 50px);
     padding: 10px;
   }
-  
+
   .profile {
     display: none;
   }
-  
+
   .right-header button,
   .topbar button {
     width: 40px;
     height: 40px;
     font-size: 14px;
   }
-  
+
   header h1,
   .topbar h1 {
     font-size: 22px;
@@ -1550,7 +1561,7 @@ form .save-btn {
   background: var(--bg-white);
   border-radius: var(--radius-lg);
   padding: 24px;
-  margin-top:20px;
+  margin-top: 20px;
   box-shadow: var(--shadow-sm);
 }
 
@@ -1714,7 +1725,7 @@ form .save-btn {
   .dashboard-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .dashboard-right {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1728,7 +1739,7 @@ form .save-btn {
     align-items: flex-start;
     gap: 15px;
   }
-  
+
   .dashboard-right {
     grid-template-columns: 1fr;
   }
@@ -1739,200 +1750,201 @@ form .save-btn {
     flex-wrap: wrap;
     gap: 10px;
   }
-  
+
   .order-item strong {
     margin-left: auto;
   }
-  
+
   .service-item {
     flex-wrap: wrap;
     gap: 10px;
   }
 }
+
 /* Logout Modal */
 
-.logout-modal{
-    position:fixed;
-    inset:0;
-    background:rgba(0,0,0,.45);
-    display:none;
-    justify-content:center;
-    align-items:center;
-    z-index:9999;
+.logout-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
 }
 
-.logout-modal.active{
-    display:flex;
+.logout-modal.active {
+  display: flex;
 }
 
-.logout-box{
+.logout-box {
 
-    width:380px;
+  width: 380px;
 
-    background:#fff;
+  background: #fff;
 
-    border-radius:20px;
+  border-radius: 20px;
 
-    padding:35px;
+  padding: 35px;
 
-    text-align:center;
+  text-align: center;
 
-    animation:popup .3s ease;
+  animation: popup .3s ease;
 }
 
-.logout-icon{
+.logout-icon {
 
-    width:75px;
+  width: 75px;
 
-    height:75px;
+  height: 75px;
 
-    border-radius:50%;
+  border-radius: 50%;
 
-    background:#edf4ff;
+  background: #edf4ff;
 
-    color:var(--primary);
+  color: var(--primary);
 
-    display:flex;
+  display: flex;
 
-    justify-content:center;
+  justify-content: center;
 
-    align-items:center;
+  align-items: center;
 
-    font-size:30px;
+  font-size: 30px;
 
-    margin:auto auto 20px;
+  margin: auto auto 20px;
 }
 
-.logout-box h2{
+.logout-box h2 {
 
-    color:var(--text-primary);
+  color: var(--text-primary);
 
-    margin-bottom:12px;
+  margin-bottom: 12px;
 }
 
-.logout-box p{
+.logout-box p {
 
-    color:var(--text-muted);
+  color: var(--text-muted);
 
-    line-height:1.6;
+  line-height: 1.6;
 }
 
-.logout-actions{
+.logout-actions {
 
-    margin-top:30px;
+  margin-top: 30px;
 
-    display:flex;
+  display: flex;
 
-    gap:15px;
+  gap: 15px;
 }
 
-.logout-actions button{
+.logout-actions button {
 
-    flex:1;
+  flex: 1;
 
-    padding:13px;
+  padding: 13px;
 
-    border:none;
+  border: none;
 
-    border-radius:12px;
+  border-radius: 12px;
 
-    font-weight:600;
+  font-weight: 600;
 
-    cursor:pointer;
+  cursor: pointer;
 
-    transition:.3s;
+  transition: .3s;
 }
 
-.cancel-btn{
+.cancel-btn {
 
-    background:#eef2f7;
+  background: #eef2f7;
 
-    color:#444;
+  color: #444;
 }
 
-.cancel-btn:hover{
+.cancel-btn:hover {
 
-    background:#dde5ef;
+  background: #dde5ef;
 }
 
-.confirm-btn{
+.confirm-btn {
 
-    background:#d62828;
+  background: #d62828;
 
-    color:#fff;
+  color: #fff;
 }
 
-.confirm-btn:hover{
+.confirm-btn:hover {
 
-    background:#b91c1c;
+  background: #b91c1c;
 }
 
-.action-box{
+.action-box {
 
-    width:360px;
-
-}
-
-.action-btn{
-
-    width:100%;
-
-    margin-bottom:15px;
-
-    border:none;
-
-    padding:13px;
-
-    border-radius:10px;
-
-    color:#fff;
-
-    cursor:pointer;
-
-    font-size:15px;
+  width: 360px;
 
 }
 
-.action-btn.blue{
+.action-btn {
 
-    background:#1665ff;
+  width: 100%;
+
+  margin-bottom: 15px;
+
+  border: none;
+
+  padding: 13px;
+
+  border-radius: 10px;
+
+  color: #fff;
+
+  cursor: pointer;
+
+  font-size: 15px;
 
 }
 
-.action-btn.green{
+.action-btn.blue {
 
-    background:#16a34a;
+  background: #1665ff;
 
 }
 
-.manager-box{
+.action-btn.green {
 
-    width:430px;
+  background: #16a34a;
+
+}
+
+.manager-box {
+
+  width: 430px;
 
 }
 
 .manager-box select,
 
-.manager-box textarea{
+.manager-box textarea {
 
-    width:100%;
+  width: 100%;
 
-    margin-top:8px;
+  margin-top: 8px;
 
-    margin-bottom:18px;
+  margin-bottom: 18px;
 
-    padding:10px;
+  padding: 10px;
 
-    border-radius:8px;
+  border-radius: 8px;
 
-    border:1px solid #ddd;
+  border: 1px solid #ddd;
 
-    font-size:14px;
+  font-size: 14px;
 
 }
 
-.manager-box label{
+.manager-box label {
 
-    font-weight:600;
+  font-weight: 600;
 
 }
