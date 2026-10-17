@@ -1458,3 +1458,12 @@ function initWorkPopup() {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
+
+window.addEventListener('load', () => {
+  if (typeof getRole === 'function' && getRole() === 'distributor') {
+    ['sidebarUserRole', 'headerUserRole'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = 'Sales';
+    });
+  }
+});

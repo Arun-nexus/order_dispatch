@@ -222,7 +222,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       const role = getRole() || '';
       const uname = getUsername() || 'User';
-      const label = role.charAt(0).toUpperCase() + role.slice(1);
+      const label = role === 'distributor' ? 'Sales' : role.charAt(0).toUpperCase() + role.slice(1).replace(/_/g, ' ');
       ['sidebarUserName', 'headerUserName'].forEach(id => document.getElementById(id).textContent = uname);
       ['sidebarUserRole', 'headerUserRole'].forEach(id => document.getElementById(id).textContent = label);
     });
