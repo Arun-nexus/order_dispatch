@@ -146,6 +146,8 @@ class UpdateAccountRequest(BaseModel):
 
 class ServiceRequest(BaseModel):
     product_id: str
+    product_name: str = ""
+    model_no: str = ""
     serial_no: str
     technician_id: str
     purchase_date: str
@@ -2955,7 +2957,9 @@ def create_service(request: ServiceRequest, user: dict = Depends(require_role("s
             technician_id=request.technician_id,
             location=request.location,
             spare_parts=request.spare_parts,
-            created_by=user["username"]
+            created_by=user["username"],
+            product_name=request.product_name,
+            model_no=request.model_no
         )
         logging.info(f"service creation was successful with service_id {service.service_id}!")
 
@@ -4071,7 +4075,9 @@ def _repair_damaged_product_impl(item_id: str, user: dict):
                 video="",
                 location="indoor",
                 spare_parts="",
-                created_by=user["username"]
+                created_by=user["username"],
+                product_name=item.get("product_name", ""),
+                model_no=item.get("model_no", "")
             )
             db.update(collection_name=INVENTORY_COLLECTION, query={"_id": item["_id"]},
                       update_values={"damage_status": "Sent for Repair (Inhouse Warranty)"})
@@ -4643,6 +4649,8 @@ class DemoUnitRequestModel(BaseModel):
 
 class ServiceRequestModel(BaseModel):
     product_id: str
+    product_name: str = ""
+    model_no: str = ""
     serial_no: str
     purchase_date: str
     issue: str
@@ -4989,6 +4997,8 @@ def raise_service_request(request: ServiceRequestModel, user: dict = Depends(req
             raised_by=user["username"],
             details={
                 "product_id": request.product_id,
+                "product_name": request.product_name,
+                "model_no": request.model_no,
                 "serial_no": request.serial_no,
                 "purchase_date": request.purchase_date,
                 "issue": request.issue,
@@ -5135,7 +5145,9 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                 technician_id=req["raised_by"],
                 location=details.get("location", "indoor"),
                 spare_parts=details.get("spare_parts", ""),
-                created_by=req["raised_by"]
+                created_by=req["raised_by"],
+                product_name=details.get("product_name", ""),
+                model_no=details.get("model_no", "")
             )
             if details.get("video"):
                 _raise_media_review_request(service.service_id, user["username"])

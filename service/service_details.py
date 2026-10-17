@@ -28,7 +28,7 @@ class service_detail(mongodbclient):
         self.spare_parts = ""
         self.service_id = str(uuid.uuid4())
 
-    def add_service(self, technician_id, purchase_date: str, issue: str, image: str, video: str, collection_name: str,location: str = "indoor", spare_parts: str = "", status="active", created_by: str = None):
+    def add_service(self, technician_id, purchase_date: str, issue: str, image: str, video: str, collection_name: str,location: str = "indoor", spare_parts: str = "", status="active", created_by: str = None, product_name: str = "", model_no: str = ""):
         try:
             self.spare_parts = spare_parts
             self.status = status
@@ -36,6 +36,8 @@ class service_detail(mongodbclient):
                 "technician_alloted": technician_id,
                 "service_id": self.service_id,
                 "product_id": self.product_id,
+                "product_name": (product_name or "").strip(),
+                "model_no": (model_no or "").strip(),
                 "serial_no": self.serial_no,
                 "purchase_date": purchase_date,
                 "issue": issue,

@@ -167,7 +167,7 @@ function openServiceCardDetailModal(type) {
   const list = serviceCardList(type);
   const th = 'style="text-align:left;padding:8px;"';
   const td = 'style="padding:8px;border-top:1px solid var(--border);"';
-  const head = ['Product Name', 'Product ID', 'Model No.', 'Serial No.', 'Technician', 'Status', 'Listed On'];
+  const head = ['Product Name', 'Model No.', 'Serial No.', 'Technician', 'Status', 'Listed On'];
   const box = document.querySelector('#serviceCardDetailModal .modal-content');
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
@@ -182,7 +182,6 @@ function openServiceCardDetailModal(type) {
             const info = serviceProductInfo(s);
             return `<tr>
               <td ${td}>${info.name}</td>
-              <td ${td}>${s.product_id ?? ''}</td>
               <td ${td}>${info.model}</td>
               <td ${td}>${s.serial_no ?? ''}</td>
               <td ${td}>${s.technician_alloted ?? ''}</td>
@@ -276,7 +275,6 @@ function renderServiceTable(services) {
 
     tr.innerHTML = `
       <td>${serviceProductInfo(s).name}</td>
-      <td>${s.product_id ?? ''}</td>
       <td>${serviceProductInfo(s).model}</td>
       <td>${s.serial_no ?? ''}</td>
       <td><div class="tech">${s.technician_alloted ?? ''}</div></td>
@@ -365,7 +363,7 @@ function openViewModal(s) {
   if (!modal) return;
   const values = modal.querySelectorAll('.detail p');
   const listedOn = s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '-';
-  const fields = [s.service_id, s.product_id, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None', s.service_charges != null ? `₹${s.service_charges}` : 'Not set', s.created_by || '-', listedOn];
+  const fields = [s.service_id, serviceProductInfo(s).name, serviceProductInfo(s).model, s.serial_no, s.technician_alloted, s.purchase_date, s.issue, s.spare_parts || 'None', s.service_charges != null ? `₹${s.service_charges}` : 'Not set', s.created_by || '-', listedOn];
   values.forEach((el, i) => el.textContent = fields[i] ?? '');
   modal.style.display = 'flex';
 }
@@ -451,8 +449,8 @@ function exportServicesCSV() {
     dateLabel: 'Purchase Date',
     getRows: getFilteredServices,
     onConfirm: (rows) => {
-      const header = ['Service ID', 'Product', 'Product ID', 'Model', 'Serial No', 'Technician', 'Issue', 'Location', 'Warranty Until', 'Status', 'Created By', 'Listed On'];
-      const csvRows = rows.map(s => [s.service_id, serviceProductInfo(s).name, s.product_id, serviceProductInfo(s).model, s.serial_no, s.technician_alloted, s.issue, s.location, s.warranty_until || '', s.status, s.created_by || '', s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '']);
+      const header = ['Service ID', 'Product', 'Model', 'Serial No', 'Technician', 'Issue', 'Location', 'Warranty Until', 'Status', 'Created By', 'Listed On'];
+      const csvRows = rows.map(s => [s.service_id, serviceProductInfo(s).name, serviceProductInfo(s).model, s.serial_no, s.technician_alloted, s.issue, s.location, s.warranty_until || '', s.status, s.created_by || '', s.created_at ? new Date(s.created_at).toLocaleDateString('en-GB') : '']);
       downloadCSV(header, csvRows, 'services.csv');
     }
   });
@@ -571,6 +569,8 @@ async function openCreateModal() {
             <option value="indoor">Inhouse</option>
             <option value="outdoor">Field</option>
           </select>
+          <input name="product_name" placeholder="Product Name" required>
+          <input name="model_no" placeholder="Model No." required>
           <input name="serial_no" placeholder="Serial No" required>
           <select name="technician_id" id="technicianSelect" required>
             <option value="">Select person</option>
@@ -618,6 +618,8 @@ async function openCreateModal() {
 
       const payload = {
         product_id: DEFAULT_PRODUCT_ID,
+        product_name: (fd.get('product_name') || '').trim(),
+        model_no: (fd.get('model_no') || '').trim(),
         location: fd.get('location'),
         serial_no: (fd.get('serial_no') || '').trim().toLowerCase(),
         technician_id: fd.get('technician_id'),
