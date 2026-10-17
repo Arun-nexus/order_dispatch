@@ -129,7 +129,7 @@ function dispCvFiltered() {
     if (f.from && day < f.from) return false;
     if (f.to && day > f.to) return false;
     if (q) {
-      const hay = [d.dispatch?.docket_no, d.dispatch?.invoice_no, cvPlain(productLabel(row)), cvPlain(billToLabel(row)),
+      const hay = [d.dispatch?.docket_no, d.dispatch?.dispatched_through, d.dispatch?.invoice_no, cvPlain(productLabel(row)), cvPlain(billToLabel(row)),
         ...rowSerialNumbers(row)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
@@ -137,7 +137,7 @@ function dispCvFiltered() {
   });
 }
 
-const DISP_CV_HEAD = ['Type', 'Date', 'Product', 'Qty', 'Bill To / Service', 'Docket No.', 'Invoice No.', 'Status'];
+const DISP_CV_HEAD = ['Type', 'Date', 'Product', 'Qty', 'Bill To / Service', 'Docket No.', 'Courier / Transport', 'Invoice No.', 'Status'];
 
 function dispCvCells(row) {
   return [
@@ -147,6 +147,7 @@ function dispCvCells(row) {
     quantityLabel(row),
     billToLabel(row),
     row.data.dispatch?.docket_no ?? '-',
+    row.data.dispatch?.dispatched_through || '-',
     row.data.dispatch?.invoice_no ?? '-',
     dispatchStatusHtml(row.data)
   ];
@@ -155,7 +156,7 @@ function dispCvCells(row) {
 function dispCvExportRows(row) {
   const d = row.data;
   const head = [dispatchCardTypeLabel(row.kind), dateLabel(row)];
-  const tail = [cvPlain(billToLabel(row)), d.dispatch?.docket_no ?? '-', d.dispatch?.invoice_no ?? '-', cvPlain(dispatchStatusHtml(d))];
+  const tail = [cvPlain(billToLabel(row)), d.dispatch?.docket_no ?? '-', d.dispatch?.dispatched_through || '-', d.dispatch?.invoice_no ?? '-', cvPlain(dispatchStatusHtml(d))];
   if ((row.kind === 'order' || row.kind === 'product_allocation') && (d.items || []).length) {
     return d.items.map(i => {
       const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
@@ -287,9 +288,10 @@ function getFilteredRows() {
       const d = row.data;
       const docket = (d.dispatch?.docket_no || '').toLowerCase();
       const invoice = (d.dispatch?.invoice_no || '').toLowerCase();
+      const courier = (d.dispatch?.dispatched_through || '').toLowerCase();
       const product = productLabel(row).toLowerCase();
       const serials = rowSerialNumbers(row).map(s => (s || '').toLowerCase());
-      return docket.includes(q) || invoice.includes(q) || product.includes(q) ||
+      return docket.includes(q) || invoice.includes(q) || courier.includes(q) || product.includes(q) ||
         serials.some(s => s.includes(q));
     });
   }
@@ -443,6 +445,7 @@ function renderTable(rows) {
       <td>${quantityLabel(row)}</td>
       <td>${billToLabel(row)}</td>
       <td>${d.dispatch?.docket_no ?? '-'}</td>
+      <td>${d.dispatch?.dispatched_through || '-'}</td>
       <td>${d.dispatch?.invoice_no ?? '-'}</td>
       <td>${statusHtml}</td>
       <td>
@@ -502,87 +505,119 @@ function wireFilter() {
 }
 
 // ---------- View Details modal ----------
+const DV_LABELS = {
+  dispatched_through: 'Courier / Transport', mode_of_delivery: 'Mode of Delivery', gst_number: 'GST No.', total_mrp: 'Total Amount',
+  company_name: 'Company', company_address: 'Address', phone_number: 'Phone', contact_number: 'Contact No.', serial_numbers: 'Serial No.',
+  model_no: 'Model No.', product_id: 'Product ID', tax_rate: 'Tax Rate (%)', order_id: 'Order ID', allocation_id: 'Allocation ID',
+  service_id: 'Service ID', part_name: 'Part Name', created_by: 'Created By', allocated_by: 'Allocated By'
+};
+function dvEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function dvLabel(k) {
+  return DV_LABELS[k] || k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function dvFmt(k, v) {
+  if (v === true) return 'Yes';
+  if (v === false) return 'No';
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}(T|$)/.test(v)) {
+    const t = new Date(v);
+    if (!isNaN(t)) return v.length > 10 ? t.toLocaleString('en-GB') : t.toLocaleDateString('en-GB');
+  }
+  if (typeof v === 'number' && /(price|amount|mrp|total|discount|charge)/i.test(k) && !/(rate|percent|qty|quantity)/i.test(k)) return '\u20b9' + v;
+  return String(v);
+}
+function dvFlat(obj, prefix, out, skip) {
+  Object.entries(obj || {}).forEach(([k, v]) => {
+    if (skip.includes(k) || v === null || v === undefined || v === '') return;
+    if (typeof v === 'string' && v.startsWith('data:')) return;
+    const label = prefix ? `${prefix} \u2013 ${dvLabel(k)}` : dvLabel(k);
+    if (Array.isArray(v)) {
+      if (!v.length) return;
+      if (v.every(x => x === null || typeof x !== 'object')) out.push([label, v.map(x => dvFmt(k, x)).join(', ')]);
+      else v.forEach((x, i) => dvFlat(x, `${label} ${i + 1}`, out, skip));
+    } else if (typeof v === 'object') {
+      dvFlat(v, label, out, skip);
+    } else {
+      out.push([label, dvFmt(k, v)]);
+    }
+  });
+  return out;
+}
+function dvRow(label, value) {
+  if (value === undefined || value === null || value === '') return '';
+  return `<div class="detail"><small>${dvEsc(label)}</small><p>${dvEsc(value)}</p></div>`;
+}
+function dvRows(obj, skip) {
+  return dvFlat(obj, '', [], ['_id', 'image', 'password'].concat(skip || [])).map(([l, v]) => dvRow(l, v)).join('');
+}
+function dvSection(title, html) {
+  return html ? `<h4 style="margin:16px 0 8px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">${title}</h4>${html}` : '';
+}
+function dvItemBlock(it) {
+  return `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:8px;">${dvRows(it)}</div>`;
+}
+
 function openViewDispatchModal(row) {
   const modal = document.getElementById('viewDispatchModal');
   if (!modal) return;
   const content = modal.querySelector('.modal-content');
   const d = row.data;
   const disp = d.dispatch || null;
+  const skipTop = ['dispatch', 'items', 'customer', 'sales_person', 'spare_part', 'attachments'];
 
   let bodyHtml = '';
   if (row.kind === 'order') {
-    const items = d.items || [];
-    const customer = d.customer || {};
-    const itemsRows = items.length
-      ? items.map(it => `<tr>
-          <td>${it.product_name ?? ''}<br><small style="color:#94a3b8;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
-          <td>${it.quantity ?? 0}</td>
-          <td>₹${it.price ?? 0}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
-
-    bodyHtml = `
-      <div class="detail"><small>Order ID</small><p>${d.order_id ?? ''}</p></div>
-      <div class="detail"><small>Order Date</small><p>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-GB') : '-'}</p></div>
-      <div class="detail"><small>Company</small><p>${customer.company_name ?? '-'}</p></div>
-      <div class="detail"><small>Status</small><p>${d.status ?? ''}</p></div>
-      <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Qty</th><th>Price</th></tr></thead>
-        <tbody>${itemsRows}</tbody>
-      </table>
-      <div class="detail"><small>Total Amount</small><p>₹${d.total_mrp ?? 0}</p></div>`;
+    const files = (d.attachments || []).map(a => (typeof a === 'string' ? a : a.filename || a.name || a.original_name || 'file')).join(', ');
+    bodyHtml = dvSection('Order', dvRows(d, skipTop) + dvRow('Attachments', files))
+      + dvSection('Customer', dvRows(d.customer))
+      + dvSection('Products', (d.items || []).map(dvItemBlock).join('') || dvRow('Products', 'No items'));
   } else if (row.kind === 'product_allocation') {
-    const items = d.items || [];
-    const itemsRows = items.length
-      ? items.map(it => `<tr>
-          <td>${it.product_name ?? ''}<br><small style="color:#94a3b8;">${[it.product_id, it.model_no].filter(Boolean).join(' · ')}</small>${it.serial_numbers?.length ? `<br><small style="color:#94a3b8;">${it.serial_numbers.join(', ')}</small>` : ''}</td>
-          <td>${it.quantity ?? 0}</td>
-        </tr>`).join('')
-      : `<tr><td colspan="2" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
-
-    bodyHtml = `
-      <div class="detail"><small>Allocation ID</small><p>${d.allocation_id ?? ''}</p></div>
-      <div class="detail"><small>Sales Person</small><p>${d.sales_person?.name ?? '-'}</p></div>
-      <div class="detail"><small>Address</small><p>${d.address ?? '-'}</p></div>
-      <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Qty</th></tr></thead>
-        <tbody>${itemsRows}</tbody>
-      </table>`;
+    bodyHtml = dvSection('Allocation', dvRows(d, skipTop))
+      + dvSection('Sales Person', dvRows(d.sales_person))
+      + dvSection('Products', (d.items || []).map(dvItemBlock).join('') || dvRow('Products', 'No items'));
   } else {
-    bodyHtml = `
-      <div class="detail"><small>Allocation ID</small><p>${d.allocation_id ?? ''}</p></div>
-      <div class="detail"><small>Part Name</small><p>${d.spare_part?.part_name ?? '-'}</p></div>
-      <div class="detail"><small>Quantity</small><p>${d.spare_part?.quantity ?? '-'}</p></div>
-      <div class="detail"><small>Service ID</small><p>${d.spare_part?.service_id ?? '-'}</p></div>`;
+    bodyHtml = dvSection('Spare Part Allocation', dvRows(d, skipTop))
+      + dvSection('Spare Part', dvRows(d.spare_part));
   }
 
-  const dispatchHtml = disp ? `
-    <div class="detail"><small>Invoice No.</small><p>${disp.invoice_no ?? '-'}</p></div>
-    <div class="detail"><small>Invoice Date</small><p>${disp.invoice_date ? new Date(disp.invoice_date).toLocaleDateString('en-GB') : '-'}</p></div>
-    <div class="detail"><small>Mode of Delivery</small><p>${disp.mode_of_delivery ?? '-'}</p></div>
-    <div class="detail"><small>Dispatched By</small><p>${disp.dispatched_by ?? '-'}</p></div>
-    <div class="detail"><small>Ship To</small><p>${disp.ship_to_different ? `${disp.ship_to_address?.company_name ?? ''}, ${disp.ship_to_address?.address ?? ''}` : 'Same as bill to'}</p></div>
-    <div class="detail"><small>Dispatched At</small><p>${disp.dispatched_at ? new Date(disp.dispatched_at).toLocaleString('en-GB') : '-'}</p></div>
-  ` : `<div class="detail"><small>Dispatch</small><p>Not yet dispatched</p></div>`;
+  let dispatchHtml;
+  if (disp) {
+    const handled = ['image', 'image_drive_link', 'media_updated_at', 'docket_no', 'dispatched_through', 'mode_of_delivery', 'invoice_no', 'invoice_date', 'dispatched_by', 'ship_to_different', 'ship_to_address', 'dispatched_at'];
+    const ship = disp.ship_to_different
+      ? [disp.ship_to_address?.company_name, disp.ship_to_address?.address].filter(Boolean).join(', ')
+      : 'Same as bill to';
+    const photo = typeof disp.image === 'string' && disp.image.startsWith('data:image')
+      ? `<div class="detail"><small>Packaging / Handover Photo</small><img src="${disp.image}" alt="Dispatch photo" style="max-width:100%;border-radius:10px;margin-top:6px;"></div>`
+      : disp.image_drive_link
+        ? `<div class="detail"><small>Packaging / Handover Photo</small><p><a href="${dvEsc(disp.image_drive_link)}" target="_blank" rel="noopener">View photo</a></p></div>`
+        : '';
+    dispatchHtml = dvSection('Dispatch',
+      dvRow('Docket No.', disp.docket_no)
+      + dvRow('Courier / Transport', disp.dispatched_through)
+      + dvRow('Mode of Delivery', (disp.mode_of_delivery || '').replace(/_/g, ' '))
+      + dvRow('Invoice No.', disp.invoice_no)
+      + dvRow('Invoice Date', disp.invoice_date ? new Date(disp.invoice_date).toLocaleDateString('en-GB') : '')
+      + dvRow('Dispatched By', disp.dispatched_by)
+      + dvRow('Ship To', ship)
+      + dvRow('Dispatched At', disp.dispatched_at ? new Date(disp.dispatched_at).toLocaleString('en-GB') : '')
+      + dvRows(disp, handled)
+      + photo);
+  } else {
+    dispatchHtml = dvSection('Dispatch', dvRow('Dispatch', 'Not yet dispatched'));
+  }
 
+  content.style.maxHeight = '86vh';
+  content.style.overflowY = 'auto';
   content.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
       <h3>Dispatch Details</h3>
-      <div style="display:flex;align-items:flex-start;gap:16px;">
-        <div style="text-align:right;">
-          <small style="color:#64748b;">Docket No.</small>
-          <p style="margin:2px 0 0;font-weight:600;">${disp?.docket_no ?? '-'}</p>
-        </div>
-        <div style="text-align:right;">
-          <small style="color:#64748b;">By</small>
-          <p style="margin:2px 0 0;font-weight:600;">${disp?.dispatched_through ?? '-'}</p>
-        </div>
+      <div style="display:flex;align-items:center;gap:10px;">
         <button class="cv-btn exp" id="viewPrintForm" title="Order Dispatch Form"><i class="fa-solid fa-print"></i> Dispatch Form</button>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
     </div>
     ${bodyHtml}
-    <hr style="margin:14px 0;border:none;border-top:1px solid #eef1f6;">
     ${dispatchHtml}`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
