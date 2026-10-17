@@ -1,9 +1,11 @@
 .table-container {
+  overscroll-behavior-x: contain;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 .tbl-wrap {
+  overscroll-behavior-x: contain;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
@@ -24,7 +26,7 @@ main {
   margin: 0 0 6px;
   background: #e2e8f0;
   border-radius: 999px;
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
   overflow: hidden;
@@ -61,11 +63,13 @@ canvas {
 }
 
 @media (max-width: 1100px) {
+  html {
+    overflow-x: hidden;
+  }
 
-  html,
   body {
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .work-grid,
@@ -109,10 +113,13 @@ canvas {
     --sidebar-collapsed: 72px;
   }
 
-  html,
+  html {
+    overflow-x: hidden;
+  }
+
   body {
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   .container {
@@ -322,11 +329,13 @@ canvas {
 }
 
 @media (max-width: 599px) {
+  html {
+    overflow-x: hidden;
+  }
 
-  html,
   body {
     max-width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   main>* {
