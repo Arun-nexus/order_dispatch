@@ -12,6 +12,7 @@ const ROLE_ACCESS = {
   technician:      ['technician.html','technician_dashboard.html', 'work_report.html'],
   distributor:     ['distributor.html', 'distributor_orders.html', 'distributor_team.html','technician.html', 'work_report.html'],
   inventory_manager: ['inventory.html', 'distributor.html', 'distributor_orders.html', 'assembly.html', 'shipment.html', 'work_report.html'],
+  qc:              ['qc.html'],
 };
 
 const ROLE_HOME = {
@@ -22,6 +23,7 @@ const ROLE_HOME = {
   technician: 'technician.html',
   distributor: 'distributor.html',
   inventory_manager: 'inventory.html',
+  qc: 'qc.html',
 };
 
 // Only these two usernames can assign / manage work (any role, even admin). Must match WORK_MANAGERS in app.py.
@@ -1334,6 +1336,7 @@ function injectWorkSidebarLink() {
 }
 
 function initWorkPopup() {
+  if (getRole() === 'qc') return;   // QC users see only the QC page (no Work Report link / popups)
   injectWorkSidebarLink();
   refreshWorkBadge();
   setInterval(refreshWorkBadge, 15000);
@@ -1470,7 +1473,7 @@ window.addEventListener('load', () => {
 
 (function addQcLink() {
   const mount = () => {
-    if (typeof getRole !== 'function' || getRole() !== 'admin') return;
+    if (typeof getRole !== 'function' || !['admin', 'qc'].includes(getRole())) return;
     const ul = document.querySelector('.sidebar ul');
     if (!ul || ul.querySelector('a[href$="qc.html"]')) return;
     const inPages = location.pathname.includes('/pages/');

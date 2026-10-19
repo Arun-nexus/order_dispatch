@@ -79,6 +79,7 @@
                 <option value="technician">Technician</option>
                 <option value="distributor">Employee-Sales Person</option>
                 <option value="inventory_manager">Inventory Manager</option>
+                <option value="qc">QC</option>
               </select>
             </div>
           </div>
@@ -111,7 +112,8 @@
         assembly: 'pages/assembly.html',
         technician: 'pages/technician.html',
         distributor: 'pages/distributor.html',
-        inventory_manager: 'pages/inventory.html'
+        inventory_manager: 'pages/inventory.html',
+        qc: 'pages/qc.html'
       };
       if (token && role) window.location.href = roleHome[role] || 'main_dashboard.html';
     })();
@@ -158,7 +160,8 @@
           assembly: 'pages/assembly.html',
           technician: 'pages/technician_dashboard.html',
           distributor: 'pages/distributor.html',
-          inventory_manager: 'pages/inventory.html'
+          inventory_manager: 'pages/inventory.html',
+          qc: 'pages/qc.html'
         };
         window.location.href = roleHome[data.role] || 'main_dashboard.html';
 

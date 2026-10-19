@@ -9,7 +9,7 @@ const userState = {
   customerFilter: { text: '', field: 'credit_limit', min: '', max: '' }
 };
 
-const USER_ROLE_LABELS = { distributor: 'Employee-Sales Person', inventory_manager: 'Inventory Manager' };
+const USER_ROLE_LABELS = { distributor: 'Employee-Sales Person', inventory_manager: 'Inventory Manager', qc: 'QC' };
 function displayRole(role) {
   if (!role) return '';
   return USER_ROLE_LABELS[role] || (role.charAt(0).toUpperCase() + role.slice(1));
@@ -885,6 +885,7 @@ function openUserModal(existingUser) {
         <option value="technician" ${existingUser?.role === 'technician' ? 'selected' : ''}>Technician</option>
         <option value="distributor" ${existingUser?.role === 'distributor' ? 'selected' : ''}>Employee-Sales Person</option>
         <option value="inventory_manager" ${existingUser?.role === 'inventory_manager' ? 'selected' : ''}>Inventory Manager</option>
+        <option value="qc" ${existingUser?.role === 'qc' ? 'selected' : ''}>QC</option>
       </select>
       <div id="managerBox" style="display:none;">
         <label style="font-size:13px;color:#64748b;">Team Manager</label>
@@ -1077,7 +1078,7 @@ function openUserExportModal(opts) {
         ${fixed ? '' : `
           <label style="${lbl};margin-top:6px;">Role</label>
           <select name="role" style="${inp}">
-            ${[['', 'All Roles'], ['admin', 'Admin'], ['accounts', 'Accounts'], ['service_manager', 'Service Manager'], ['assembly', 'Assembly'], ['technician', 'Technician'], ['distributor', 'Employee-Sales Person'], ['inventory_manager', 'Inventory Manager']]
+            ${[['', 'All Roles'], ['admin', 'Admin'], ['accounts', 'Accounts'], ['service_manager', 'Service Manager'], ['assembly', 'Assembly'], ['technician', 'Technician'], ['distributor', 'Employee-Sales Person'], ['inventory_manager', 'Inventory Manager'], ['qc', 'QC']]
               .map(([v, l]) => `<option value="${v}" ${(roleNow === v || (v === '' && roleNow === 'All Roles')) ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
           <label style="${lbl}">Search (username or name)</label>
