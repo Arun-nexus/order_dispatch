@@ -1557,7 +1557,7 @@ window.addEventListener('load', () => {
     if (!ul || ul.querySelector('a[href$="qc.html"]')) return;
     const inPages = location.pathname.includes('/pages/');
     const li = document.createElement('li');
-    li.innerHTML = `<a href="${inPages ? 'qc.html' : 'pages/qc.html'}"><i class="fa-solid fa-clipboard-check"></i><span>QC</span></a>`;
+    li.innerHTML = `<a href="${inPages ? 'qc.html' : 'pages/qc.html'}"><i class="fa-solid fa-clipboard-check"></i><span>QA</span></a>`;
     const logout = [...ul.querySelectorAll('li')].find(x => x.querySelector('a[onclick*="openLogoutModal"]'));
     if (logout) ul.insertBefore(li, logout); else ul.appendChild(li);
   };
