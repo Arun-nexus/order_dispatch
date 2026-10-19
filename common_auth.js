@@ -39,7 +39,7 @@ const PAGE_CATALOG = [
   { file: 'attendance.html',           label: 'Attendance',           icon: 'fa-calendar-check' },
   { file: 'users.html',                label: 'Users',                icon: 'fa-users' },
   { file: 'reports.html',              label: 'Reports',              icon: 'fa-chart-column' },
-  { file: 'qc.html',                   label: 'QC',                   icon: 'fa-clipboard-check' },
+  { file: 'qc.html',                   label: 'QA',                   icon: 'fa-clipboard-check' },
   { file: 'work_report.html',          label: 'Work Report',          icon: 'fa-list-check' },
   { file: 'distributor.html',          label: 'Distributor',          icon: 'fa-handshake' },
   { file: 'distributor_orders.html',   label: 'Distributor Orders',   icon: 'fa-cart-flatbed' },
