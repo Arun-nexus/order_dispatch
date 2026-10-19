@@ -79,7 +79,7 @@
                 <option value="technician">Technician</option>
                 <option value="distributor">Employee-Sales Person</option>
                 <option value="inventory_manager">Inventory Manager</option>
-                <option value="qc">Regulatory/QA</option>
+                <option value="qc">QC</option>
               </select>
             </div>
           </div>
@@ -102,6 +102,16 @@
   </div>
 
   <script>
+    // If an admin limited this user's pages (/access-control), land on the role's home page when it is
+    // allowed, otherwise on the first allowed page.
+    function pickHome(home, custom) {
+      if (Array.isArray(custom) && custom.length && !custom.includes(home.split('/').pop())) {
+        const first = custom.find(p => p !== 'access_control.html');
+        if (first) return first === 'main_dashboard.html' ? first : 'pages/' + first;
+      }
+      return home;
+    }
+
     (function redirectIfLoggedIn() {
       const token = localStorage.getItem('acer_token');
       const role = localStorage.getItem('acer_role');
@@ -115,7 +125,9 @@
         inventory_manager: 'pages/inventory.html',
         qc: 'pages/qc.html'
       };
-      if (token && role) window.location.href = roleHome[role] || 'main_dashboard.html';
+      let custom = null;
+      try { custom = JSON.parse(localStorage.getItem('acer_pages')); } catch (e) {}
+      if (token && role) window.location.href = pickHome(roleHome[role] || 'main_dashboard.html', custom);
     })();
 
     document.getElementById('togglePassword').addEventListener('click', (e) => {
@@ -152,6 +164,11 @@
         localStorage.setItem('acer_token', data.access_token);
         localStorage.setItem('acer_role', data.role);
         localStorage.setItem('acer_username', payload.username);
+        if (Array.isArray(data.allowed_pages) && data.allowed_pages.length) {
+          localStorage.setItem('acer_pages', JSON.stringify(data.allowed_pages));
+        } else {
+          localStorage.removeItem('acer_pages');
+        }
 
         const roleHome = {
           admin: 'main_dashboard.html',
@@ -163,7 +180,7 @@
           inventory_manager: 'pages/inventory.html',
           qc: 'pages/qc.html'
         };
-        window.location.href = roleHome[data.role] || 'main_dashboard.html';
+        window.location.href = pickHome(roleHome[data.role] || 'main_dashboard.html', data.allowed_pages);
 
       } catch (err) {
         errorBox.textContent = err.message;

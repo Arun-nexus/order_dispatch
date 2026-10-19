@@ -18,7 +18,7 @@ from allocation.allocation import allocation_manager
 from request.request_manager import request_manager
 from shipment.manage_shipment import shipment_manager, compute_payment
 from assembly.manage_assembly import assembly_manager
-from auth import create_access_token, get_current_user, require_role
+from auth import create_access_token, get_current_user, require_role, invalidate_access_cache
 from fastapi.responses import FileResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -451,6 +451,7 @@ def login_page(request: LoginRequest, http_request: Request):
         return {
             "message": "access granted",
             "role": user["role"],
+            "allowed_pages": user.get("allowed_pages") or None,
             "access_token": token,
             "token_type": "bearer"
         }
@@ -633,6 +634,87 @@ def update_account(username: str, updated_values: UpdateAccountRequest, user: di
     except Exception as e:
         logging.error("account details updation was failed")
         raise HTTPException(status_code=500, detail="account details updation was unsuccessful")
+
+
+# ---------------------------------------------------------------------------
+# Page-access control (hidden admin page, not linked in any sidebar)
+#   Open  /access-control  in the browser after logging in as admin.
+#   A user with allowed_pages set can open ONLY those pages (and sees only
+#   those in the sidebar). allowed_pages = None -> the role's default pages.
+# ---------------------------------------------------------------------------
+ACCESS_PAGE_RE = re.compile(r"^[a-z0-9_]+\.html$")
+ACCESS_NON_GRANTABLE = {"access_control.html"}
+
+
+class AccessUpdateRequest(BaseModel):
+    allowed_pages: Optional[List[str]] = None   # None / [] = back to the role's default pages
+
+
+@app.get("/access-control")
+def access_control_page():
+    return FileResponse(os.path.join(BASE_DIR, "pages", "access_control.html"))
+
+
+@app.get("/account/my_access")
+def my_access(user: dict = Depends(get_current_user)):
+    """Logged-in user's own custom page list (None = role default). Pages call this to stay in sync."""
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": user.get("username")})
+        pages = (dataset[0].get("allowed_pages") if dataset else None) or None
+        return {"allowed_pages": pages}
+    except Exception:
+        logging.error("my access cannot be fetched")
+        raise HTTPException(status_code=500, detail="access cannot be fetched")
+
+
+@app.get("/access/users")
+def access_users(user: dict = Depends(require_role("admin"))):
+    try:
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
+        users = [
+            {"username": a.get("username"),
+             "name": a.get("name") or a.get("full_name") or a.get("username"),
+             "role": a.get("role"),
+             "allowed_pages": a.get("allowed_pages") or None}
+            for a in dataset
+        ]
+        return {"message": "access users", "dataset": users}
+    except Exception:
+        logging.error("access users cannot be fetched")
+        raise HTTPException(status_code=500, detail="users cannot be fetched")
+
+
+@app.post("/access/users/{username}")
+def set_user_access(username: str, request: AccessUpdateRequest, user: dict = Depends(require_role("admin"))):
+    try:
+        pages = None
+        if request.allowed_pages:
+            pages = []
+            for p in request.allowed_pages:
+                p = str(p).strip()
+                if not ACCESS_PAGE_RE.match(p):
+                    raise HTTPException(status_code=400, detail=f"invalid page {p}")
+                if p not in ACCESS_NON_GRANTABLE and p not in pages:
+                    pages.append(p)
+            pages = pages or None
+
+        db = mongodbclient()
+        dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": username})
+        if not dataset:
+            raise HTTPException(status_code=404, detail="user not found")
+
+        db.update_data(collection_name=ACCOUNTS_COLLECTION, query={"username": username},
+                       update_values={"allowed_pages": pages})
+        invalidate_access_cache(username)
+        logging.info("page access updated for %s", username)
+        return {"message": "access updated", "username": username, "allowed_pages": pages}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("page access cannot be updated")
+        raise HTTPException(status_code=500, detail="access cannot be updated")
 
 
 VALID_PAYMENT_MODES = {"Credit", "Partial", "NetBanking", "UPI", "Cheque", "DemandDraft", "Cash"}

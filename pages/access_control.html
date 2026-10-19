@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Control | Acer Biomedical</title>
+    <link rel="stylesheet" href="../css/accure.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        body {
+            background: #f1f5f9;
+            margin: 0;
+        }
+
+        .ac-wrap {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 28px 20px 60px;
+        }
+
+        .ac-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+
+        .ac-top h1 {
+            margin: 0;
+            font-size: 26px;
+            color: #0f172a;
+        }
+
+        .ac-sub {
+            color: #64748b;
+            margin: 0 0 18px;
+        }
+
+        .ac-back {
+            text-decoration: none;
+            color: #005ca9;
+            font-weight: 600;
+        }
+
+        .ac-note {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            color: #9a3412;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+
+        .ac-bar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+
+        .ac-bar input,
+        .ac-bar select {
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 14px;
+            background: #fff;
+        }
+
+        .ac-bar input {
+            flex: 1;
+            min-width: 220px;
+        }
+
+        .ac-card {
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+            overflow-x: auto;
+        }
+
+        .ac-card table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 720px;
+        }
+
+        .ac-card th,
+        .ac-card td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid #eef2f7;
+            font-size: 14px;
+        }
+
+        .ac-card th {
+            background: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge.def {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        .badge.cus {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .btn {
+            padding: 9px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .btn.primary {
+            background: #005ca9;
+            color: #fff;
+        }
+
+        .btn.ghost {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .btn.warn {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+
+        .ac-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .45);
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+
+        .ac-modal.open {
+            display: flex;
+        }
+
+        .ac-box {
+            background: #fff;
+            border-radius: 16px;
+            padding: 24px;
+            width: 560px;
+            max-width: 94vw;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .ac-box h3 {
+            margin: 0 0 4px;
+        }
+
+        .ac-box .meta {
+            color: #64748b;
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+
+        .ac-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .ac-grid label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .ac-grid label:hover {
+            background: #f8fafc;
+        }
+
+        .ac-grid i {
+            width: 18px;
+            color: #005ca9;
+            text-align: center;
+        }
+
+        .ac-quick {
+            display: flex;
+            gap: 14px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+
+        .ac-quick a {
+            color: #005ca9;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .ac-actions {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .ac-err {
+            color: #b91c1c;
+            font-size: 13px;
+            min-height: 18px;
+            margin-bottom: 6px;
+        }
+
+        @media (max-width:520px) {
+            .ac-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="ac-wrap">
+        <div class="ac-top">
+            <h1><i class="fa-solid fa-user-lock"></i> Access Control</h1>
+            <a class="ac-back" href="#" id="backLink"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>
+        </div>
+        <p class="ac-sub">Choose which pages each user can open. They will see only those pages, in their sidebar too.
+        </p>
+        <div class="ac-note">
+            <i class="fa-solid fa-circle-info"></i>
+            This controls which <b>pages</b> a user can open. The server still checks each action by the user's role,
+            so a page given outside the user's role may open but some of its data actions can be blocked.
+        </div>
+
+        <div class="ac-bar">
+            <input id="search" type="text" placeholder="Search username or name">
+            <select id="roleFilter">
+                <option value="">All roles</option>
+            </select>
+        </div>
+
+        <div class="ac-card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Page access</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="rows">
+                    <tr>
+                        <td colspan="5">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="ac-modal" id="modal">
+        <div class="ac-box">
+            <h3 id="mTitle">Manage access</h3>
+            <div class="meta" id="mMeta"></div>
+            <div class="ac-quick">
+                <a id="selAll">Select all</a>
+                <a id="selNone">Clear</a>
+                <a id="selDefault">Role default</a>
+            </div>
+            <div class="ac-grid" id="grid"></div>
+            <div class="ac-err" id="mErr"></div>
+            <div class="ac-actions">
+                <button class="btn warn" id="resetBtn">Reset to role default</button>
+                <span>
+                    <button class="btn ghost" id="cancelBtn">Cancel</button>
+                    <button class="btn primary" id="saveBtn">Save</button>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- common_auth.js loads first: enforces login and admin-only access to this page -->
+    <script src="../common_auth.js"></script>
+    <script>
+        let USERS = [];
+        let current = null;
+
+        const $ = id => document.getElementById(id);
+        const esc = v => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const label = r => ({ distributor: 'Employee-Sales Person', inventory_manager: 'Inventory Manager', service_manager: 'Service Manager', qc: 'QC' }[r]
+            || (r ? r.charAt(0).toUpperCase() + r.slice(1) : ''));
+        const catalogFiles = PAGE_CATALOG.map(p => p.file);
+        const roleDefault = role => (ROLE_ACCESS[role] || []).filter(f => catalogFiles.includes(f));
+
+        // admin only: everyone else is bounced by common_auth.js, this is a second guard
+        if (getRole() !== 'admin') { location.href = homePathFor(getRole() || ''); }
+        $('backLink').href = homePathFor('admin');
+
+        async function load() {
+            const res = await apiFetch('/access/users');
+            const data = await res.json();
+            USERS = data.dataset || [];
+            const roles = [...new Set(USERS.map(u => u.role).filter(Boolean))].sort();
+            $('roleFilter').innerHTML = '<option value="">All roles</option>' + roles.map(r => `<option value="${esc(r)}">${esc(label(r))}</option>`).join('');
+            render();
+        }
+
+        function render() {
+            const q = $('search').value.trim().toLowerCase();
+            const rf = $('roleFilter').value;
+            const list = USERS.filter(u =>
+                (!rf || u.role === rf) &&
+                (!q || `${u.username} ${u.name}`.toLowerCase().includes(q)));
+            $('rows').innerHTML = list.length ? list.map(u => {
+                const custom = Array.isArray(u.allowed_pages) && u.allowed_pages.length;
+                const badge = custom
+                    ? `<span class="badge cus">Custom · ${u.allowed_pages.length} page${u.allowed_pages.length > 1 ? 's' : ''}</span>`
+                    : '<span class="badge def">Role default</span>';
+                return `<tr>
+          <td>${esc(u.username)}</td><td>${esc(u.name)}</td><td>${esc(label(u.role))}</td><td>${badge}</td>
+          <td><button class="btn primary" data-user="${esc(u.username)}"><i class="fa-solid fa-sliders"></i> Manage</button></td>
+        </tr>`;
+            }).join('') : '<tr><td colspan="5">No users found.</td></tr>';
+        }
+
+        function openModal(username) {
+            current = USERS.find(u => u.username === username);
+            if (!current) return;
+            const custom = Array.isArray(current.allowed_pages) && current.allowed_pages.length ? current.allowed_pages : null;
+            const checked = new Set(custom || roleDefault(current.role));
+            $('mTitle').textContent = current.username;
+            $('mMeta').textContent = `${label(current.role)} · ${custom ? 'custom access' : 'currently using role default'}`;
+            $('grid').innerHTML = PAGE_CATALOG.map(p => `
+        <label><input type="checkbox" value="${p.file}" ${checked.has(p.file) ? 'checked' : ''}>
+        <i class="fa-solid ${p.icon}"></i><span>${p.label}</span></label>`).join('');
+            $('mErr').textContent = '';
+            $('modal').classList.add('open');
+        }
+
+        const boxes = () => [...$('grid').querySelectorAll('input[type=checkbox]')];
+        const setChecked = fn => boxes().forEach(b => b.checked = fn(b.value));
+        const closeModal = () => { $('modal').classList.remove('open'); current = null; };
+
+        async function save(pages) {
+            const res = await apiFetch('/access/users/' + encodeURIComponent(current.username), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allowed_pages: pages })
+            });
+            const data = await res.json();
+            if (!res.ok) { $('mErr').textContent = data.detail || 'Could not save'; return; }
+            current.allowed_pages = data.allowed_pages;
+            closeModal();
+            render();
+        }
+
+        $('rows').addEventListener('click', e => {
+            const b = e.target.closest('button[data-user]');
+            if (b) openModal(b.dataset.user);
+        });
+        $('search').addEventListener('input', render);
+        $('roleFilter').addEventListener('change', render);
+        $('selAll').onclick = () => setChecked(() => true);
+        $('selNone').onclick = () => setChecked(() => false);
+        $('selDefault').onclick = () => { const d = new Set(roleDefault(current.role)); setChecked(f => d.has(f)); };
+        $('cancelBtn').onclick = closeModal;
+        $('modal').addEventListener('click', e => { if (e.target === $('modal')) closeModal(); });
+        $('resetBtn').onclick = () => save(null);
+        $('saveBtn').onclick = () => {
+            const pages = boxes().filter(b => b.checked).map(b => b.value);
+            if (!pages.length) { $('mErr').textContent = 'Select at least one page (or use Reset to role default).'; return; }
+            const def = roleDefault(current.role);
+            const sameAsDefault = pages.length === def.length && pages.every(p => def.includes(p));
+            save(sameAsDefault ? null : pages);
+        };
+
+        load();
+    </script>
+</body>
+
+</html>

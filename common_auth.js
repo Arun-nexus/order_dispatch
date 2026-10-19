@@ -26,6 +26,47 @@ const ROLE_HOME = {
   qc: 'qc.html',
 };
 
+// Every page that can be granted from the hidden /access-control page.
+const PAGE_CATALOG = [
+  { file: 'main_dashboard.html',       label: 'Dashboard',            icon: 'fa-house' },
+  { file: 'orders.html',               label: 'Orders',               icon: 'fa-cart-shopping' },
+  { file: 'inventory.html',            label: 'Inventory',            icon: 'fa-boxes-stacked' },
+  { file: 'shipment.html',             label: 'Shipment',             icon: 'fa-boxes-packing' },
+  { file: 'assembly.html',             label: 'Assembly',             icon: 'fa-gears' },
+  { file: 'service.html',              label: 'Service',              icon: 'fa-screwdriver-wrench' },
+  { file: 'allocated.html',            label: 'Allocated',            icon: 'fa-people-carry-box' },
+  { file: 'dispatch.html',             label: 'Dispatch',             icon: 'fa-truck-fast' },
+  { file: 'attendance.html',           label: 'Attendance',           icon: 'fa-calendar-check' },
+  { file: 'users.html',                label: 'Users',                icon: 'fa-users' },
+  { file: 'reports.html',              label: 'Reports',              icon: 'fa-chart-column' },
+  { file: 'qc.html',                   label: 'QC',                   icon: 'fa-clipboard-check' },
+  { file: 'work_report.html',          label: 'Work Report',          icon: 'fa-list-check' },
+  { file: 'distributor.html',          label: 'Distributor',          icon: 'fa-handshake' },
+  { file: 'distributor_orders.html',   label: 'Distributor Orders',   icon: 'fa-cart-flatbed' },
+  { file: 'distributor_team.html',     label: 'Distributor Team',     icon: 'fa-people-group' },
+  { file: 'technician.html',           label: 'Technician',           icon: 'fa-user-gear' },
+  { file: 'technician_dashboard.html', label: 'Technician Dashboard', icon: 'fa-gauge' },
+  { file: 'create_account.html',       label: 'Create Account',       icon: 'fa-user-plus' },
+];
+
+// Hidden admin page (not in any sidebar): always open for admins, never grantable to others.
+const ACCESS_PAGE = 'access_control.html';
+const PAGES_KEY = 'acer_pages';
+
+// Per-user override set from /access-control. null = no override -> the role's default pages.
+function getCustomPages() {
+  try {
+    const v = JSON.parse(localStorage.getItem(PAGES_KEY));
+    return Array.isArray(v) && v.length ? v : null;
+  } catch (e) { return null; }
+}
+
+function allowedPages(role) {
+  const custom = getCustomPages();
+  const list = custom || ROLE_ACCESS[role] || [];
+  return role === 'admin' ? [...new Set([...list, ACCESS_PAGE])] : list;
+}
+
 // Only these two usernames can assign / manage work (any role, even admin). Must match WORK_MANAGERS in app.py.
 const WORK_MANAGERS = ['prashant', 'arun'];
 
@@ -55,6 +96,7 @@ function clearSession() {
   localStorage.removeItem(AUTH.tokenKey);
   localStorage.removeItem(AUTH.roleKey);
   localStorage.removeItem(AUTH.usernameKey);
+  localStorage.removeItem(PAGES_KEY);
 }
 
 function loginPath() {
@@ -62,7 +104,9 @@ function loginPath() {
 }
 
 function homePathFor(role) {
-  const page = ROLE_HOME[role] || 'main_dashboard.html';
+  const allowed = allowedPages(role).filter(p => p !== ACCESS_PAGE);
+  let page = ROLE_HOME[role] || 'main_dashboard.html';
+  if (allowed.length && !allowed.includes(page)) page = allowed[0];
   if (page === 'main_dashboard.html') {
     return location.pathname.includes('/pages/') ? '../main_dashboard.html' : 'main_dashboard.html';
   }
@@ -94,7 +138,7 @@ function checkPageAccess() {
     window.location.href = 'work.html';
     return;
   }
-  const allowed = ROLE_ACCESS[role] || [];
+  const allowed = allowedPages(role);
   if (!allowed.includes(currentFile)) {
     alert('Your role doesnt have access to do that action');
     window.location.href = homePathFor(role);
@@ -103,7 +147,7 @@ function checkPageAccess() {
 
 function filterSidebarByRole() {
   const role = getRole();
-  const allowed = ROLE_ACCESS[role] || [];
+  const allowed = allowedPages(role);
   document.querySelectorAll('.sidebar ul li a').forEach(a => {
     const href = a.getAttribute('href');
     if (!href || href.startsWith('#')) return;
@@ -113,6 +157,38 @@ function filterSidebarByRole() {
     }
   });
 }
+// When an admin gave this user a custom page list, add sidebar links for granted pages the
+// current page's sidebar doesn't have (e.g. an Orders link on a technician's sidebar).
+function injectAllowedLinks() {
+  const custom = getCustomPages();
+  const ul = document.querySelector('.sidebar ul');
+  if (!custom || !ul) return;
+  const inPages = location.pathname.includes('/pages/');
+  const present = new Set([...ul.querySelectorAll('a')].map(a => (a.getAttribute('href') || '').split('/').pop()));
+  const logout = [...ul.querySelectorAll('li')].find(x => x.querySelector('a[onclick*="openLogoutModal"]'));
+  PAGE_CATALOG.forEach(p => {
+    if (!custom.includes(p.file) || present.has(p.file)) return;
+    const href = p.file === 'main_dashboard.html' ? (inPages ? '../main_dashboard.html' : 'main_dashboard.html') : (inPages ? p.file : 'pages/' + p.file);
+    const li = document.createElement('li');
+    li.innerHTML = `<a href="${href}"><i class="fa-solid ${p.icon}"></i><span>${p.label}</span></a>`;
+    if (logout) ul.insertBefore(li, logout); else ul.appendChild(li);
+  });
+}
+
+// Keeps the stored page list in sync with what the admin set, without needing a re-login.
+async function syncMyAccess() {
+  try {
+    const res = await fetch('/account/my_access', { headers: { Authorization: `Bearer ${getToken()}` } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const fresh = Array.isArray(data.allowed_pages) && data.allowed_pages.length ? data.allowed_pages : null;
+    if (JSON.stringify(fresh) !== JSON.stringify(getCustomPages())) {
+      if (fresh) localStorage.setItem(PAGES_KEY, JSON.stringify(fresh)); else localStorage.removeItem(PAGES_KEY);
+      location.reload();     // page guard + sidebar re-run with the new list
+    }
+  } catch (e) { /* offline / server busy: keep what we have */ }
+}
+
 async function apiFetch(url, options = {}) {
   const token = getToken();
   const headers = Object.assign({}, options.headers || {}, {
@@ -152,7 +228,9 @@ function logoutNow() {
 document.addEventListener('DOMContentLoaded', () => {
   if (requireAuth()) {
     checkPageAccess();
+    injectAllowedLinks();
     filterSidebarByRole();
+    syncMyAccess();
     initNotificationBell();
     initMessaging();
     initWorkPopup();
@@ -1336,7 +1414,8 @@ function injectWorkSidebarLink() {
 }
 
 function initWorkPopup() {
-  if (getRole() === 'qc') return;   // QC users see only the QC page (no Work Report link / popups)
+  // no Work Report link / popups for users who can't open that page (e.g. QC, or pages limited from /access-control)
+  if (!allowedPages(getRole()).includes('work_report.html') && !isWorkManager()) return;
   injectWorkSidebarLink();
   refreshWorkBadge();
   setInterval(refreshWorkBadge, 15000);
@@ -1473,7 +1552,7 @@ window.addEventListener('load', () => {
 
 (function addQcLink() {
   const mount = () => {
-    if (typeof getRole !== 'function' || !['admin', 'qc'].includes(getRole())) return;
+    if (typeof getRole !== 'function' || !['admin', 'qc'].includes(getRole()) || getCustomPages()) return;
     const ul = document.querySelector('.sidebar ul');
     if (!ul || ul.querySelector('a[href$="qc.html"]')) return;
     const inPages = location.pathname.includes('/pages/');
