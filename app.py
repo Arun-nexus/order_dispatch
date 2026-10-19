@@ -604,8 +604,8 @@ def create_account(request: CreateAccountRequest, user: dict = Depends(require_r
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("account creation was failed!")
-        raise HTTPException(status_code=500, detail="account creation failed")
+        logging.exception("account creation was failed! role=%s username=%s", request.role, request.username)
+        raise HTTPException(status_code=500, detail=f"account creation failed: {e}")
 
 
 @app.post("/login/delete_account/{username}")
