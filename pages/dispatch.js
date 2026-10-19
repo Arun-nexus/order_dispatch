@@ -451,6 +451,7 @@ function renderTable(rows) {
       <td>
         <button class="icon-btn view-dispatch-btn" title="View Details"><i class="fa-solid fa-eye"></i></button>
         <button class="icon-btn print-form-btn" title="Order Dispatch Form (View / Edit / Print)"><i class="fa-solid fa-print"></i></button>
+        <button class="icon-btn qc-form-btn" title="QC Forms (SOP-07)"><i class="fa-solid fa-clipboard-check"></i></button>
         ${actionHtml}
       </td>`;
     tbody.appendChild(tr);
@@ -470,6 +471,14 @@ function renderTable(rows) {
     const id = tr.dataset.id;
     const row = combinedRows().find(r => (kind === 'order' ? r.data.order_id : r.data.allocation_id) === id && r.kind === kind);
     if (row) openDispatchForm(row);
+  }));
+
+  tbody.querySelectorAll('.qc-form-btn').forEach(btn => btn.addEventListener('click', e => {
+    const tr = e.target.closest('tr');
+    const kind = tr.dataset.kind;
+    const id = tr.dataset.id;
+    const row = combinedRows().find(r => (kind === 'order' ? r.data.order_id : r.data.allocation_id) === id && r.kind === kind);
+    if (row) openQcFormFor(row);
   }));
 
   tbody.querySelectorAll('.confirm-dispatch-btn').forEach(btn => btn.addEventListener('click', e => {
@@ -716,6 +725,7 @@ function openViewDispatchModal(row) {
       <div style="display:flex;align-items:center;gap:12px;">
         <span style="font-size:14px;color:#475569;">${cvPlain(dispatchStatusHtml(d))}</span>
         <button class="cv-btn exp" id="viewPrintForm" title="Order Dispatch Form"><i class="fa-solid fa-print"></i> Dispatch Form</button>
+        <button class="cv-btn exp" id="viewQcForm" title="QC Forms (SOP-07)"><i class="fa-solid fa-clipboard-check"></i> QC Form</button>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
     </div>
@@ -726,6 +736,7 @@ function openViewDispatchModal(row) {
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   content.querySelector('#viewPrintForm').addEventListener('click', () => openDispatchForm(row));
+  content.querySelector('#viewQcForm').addEventListener('click', () => openQcFormFor(row));
   modal.style.display = 'flex';
 }
 
@@ -798,6 +809,11 @@ function odfDefaults(row) {
     mfg: mfg.join('\n'),
     handover: disp.docket_no ? `Docket No.: ${String(disp.docket_no).toUpperCase()}` : ''
   };
+}
+
+function openQcFormFor(row) {
+  if (typeof openQcForms !== 'function') { alert('qc_forms.js is not loaded.'); return; }
+  openQcForms(row, { assemblyDates: dispAssemblyDates, personName: odfPersonName });
 }
 
 function openDispatchForm(row) {

@@ -5,7 +5,7 @@ const AUTH = {
 };
 
 const ROLE_ACCESS = {
-  admin:           ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html', 'work_report.html'],
+  admin:           ['main_dashboard.html', 'qc.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'create_account.html', 'attendance.html', 'work_report.html'],
   accounts:        ['main_dashboard.html', 'orders.html', 'inventory.html', 'service.html', 'allocated.html', 'dispatch.html', 'shipment.html', 'assembly.html', 'users.html', 'reports.html', 'work_report.html'],
   service_manager: ['service.html', 'inventory.html', 'dispatch.html','allocated.html', 'work_report.html'],
   assembly:        ['assembly.html', 'inventory.html', 'work_report.html'],
@@ -1467,3 +1467,17 @@ window.addEventListener('load', () => {
     });
   }
 });
+
+(function addQcLink() {
+  const mount = () => {
+    if (typeof getRole !== 'function' || getRole() !== 'admin') return;
+    const ul = document.querySelector('.sidebar ul');
+    if (!ul || ul.querySelector('a[href$="qc.html"]')) return;
+    const inPages = location.pathname.includes('/pages/');
+    const li = document.createElement('li');
+    li.innerHTML = `<a href="${inPages ? 'qc.html' : 'pages/qc.html'}"><i class="fa-solid fa-clipboard-check"></i><span>QC</span></a>`;
+    const logout = [...ul.querySelectorAll('li')].find(x => x.querySelector('a[onclick*="openLogoutModal"]'));
+    if (logout) ul.insertBefore(li, logout); else ul.appendChild(li);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
+})();
