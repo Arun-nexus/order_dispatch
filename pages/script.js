@@ -359,6 +359,7 @@ function openActionMenu(s, evt) {
     { label: 'View Details', action: () => openViewModal(s) },
     { label: 'Update Status', action: () => openStatusModal(s) },
   ];
+  if (s.status !== 'rejected' && typeof openAllocatePartModal === 'function') items.push({ label: 'Allocate Spare Part', action: () => openAllocatePartModal({ service: s, onDone: () => loadServices() }) });
   if (s.status !== 'completed' && s.status !== 'rejected') items.push({ label: 'Reschedule', action: () => openRescheduleModal(s) });
   if (s.status === 'pending_approval') items.unshift({ label: 'Review & Approve', action: () => openReviewModal(s) });
   if (canManage) {
@@ -1239,6 +1240,16 @@ function renderChipsS() {
   box.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => { svcState.status = c.dataset.k; renderChipsS(); renderMain(); }));
   const btn = document.getElementById('viewAction');
   if (v.button) { btn.style.display = ''; btn.innerHTML = v.button.label; btn.onclick = v.button.fn; } else { btn.style.display = 'none'; btn.onclick = null; }
+  // second top action on the Services view: allocate a spare part to any service without leaving the page
+  let ap = document.getElementById('allocPartBtn');
+  if (!ap) {
+    ap = document.createElement('button');
+    ap.type = 'button'; ap.id = 'allocPartBtn'; ap.className = 'add-product';
+    ap.innerHTML = '<i class="fa-solid fa-gears"></i> Allocate Spare Part';
+    ap.addEventListener('click', () => { if (typeof openAllocatePartModal === 'function') openAllocatePartModal({ onDone: () => Promise.all([loadServices(), loadRequests()]) }); });
+    btn.parentNode.insertBefore(ap, btn);
+  }
+  ap.style.display = svcView === 'services' && typeof openAllocatePartModal === 'function' ? '' : 'none';
   document.getElementById('dateBox').style.display = v.date ? '' : 'none';
   document.getElementById('exportBtn').style.display = v.exp ? '' : 'none';
 }
@@ -1436,7 +1447,7 @@ function openRequestDetailS(r) {
       ${dRowS('Parts needed', esc(sparePartNamesS(r)))}
       ${(d.parts || []).map(p => dRowS(esc(p.part_name || 'Part'), 'Faulty hologram ' + esc(p.old_hologram_number || '-'))).join('')}
       ${dRowS('Status', esc(r.status))}${r.status === 'rejected' && r.reason ? dRowS('Rejection Reason', esc(r.reason)) : ''}${dRowS('Resolved By', esc(r.resolved_by))}
-      ${r.status === 'pending' ? '<p style="font-size:12px;color:#64748b;margin-top:10px;">Approve opens the Allocated page with this service and part added — you only choose the hologram number(s).</p>' : ''}`);
+      ${r.status === 'pending' ? '<p style="font-size:12px;color:#64748b;margin-top:10px;">Approve opens the allocate popup with this service and part added — you only choose the hologram number(s).</p>' : ''}`);
     return;
   }
   svcModal('Reschedule Request', `${dRowS('Raised By', esc(r.raised_by))}${dRowS('Item', esc(d.label))}${dRowS('Current Date', d.current_date ? fmtSchedule(d.current_date) : '-')}
@@ -1454,8 +1465,15 @@ function sparePartNamesS(r) {
 async function approveReschedule(r) {
   try {
     const out = await svcPost(`/request/approve/${encodeURIComponent(r.request_id)}`, {});
-    // spare part: go to the Allocated page with this service + the requested part(s) already added
-    if (out && out.pending_allocation && out.redirect) { window.location.href = out.redirect; return; }
+    // spare part: the allocate popup opens right here with this service + the requested part(s) already added
+    if (out && out.pending_allocation) {
+      const svc = svcState.services.find(x => x.service_id === (out.service_id || (r.details || {}).service_id)) || { service_id: out.service_id || (r.details || {}).service_id };
+      if (typeof openAllocatePartModal === 'function') {
+        openAllocatePartModal({ service: svc, requestId: r.request_id, parts: out.parts || [], onDone: () => Promise.all([loadRequests(), loadServices()]) });
+        return;
+      }
+      if (out.redirect) { window.location.href = out.redirect; return; }
+    }
     await Promise.all([loadRequests(), loadServices(), loadInstallations()]);
   } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
 }
