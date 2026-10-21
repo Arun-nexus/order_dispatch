@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from bson import ObjectId
 from logger import logging
+import urllib.parse
 from configuration import load_params
 from dotenv import load_dotenv
 from mongodb.mongodb_connection import mongodbclient
@@ -228,6 +229,15 @@ class SparePartAllocation(BaseModel):
     service_id: str
     part_name: str
     quantity: int = 1
+    # optional: which inventory item was picked. With hologram_numbers those exact units are
+    # deducted; with only lot_id the given quantity is deducted from that lot.
+    product_id: str = ""
+    model_no: str = ""
+    product_type: str = ""
+    lot_id: str = ""
+    hologram_numbers: list[str] = []
+    holograms: list[dict] = []
+    request_id: str = ""  # spare_part request this allocation fulfils
 
 
 class CreateAllocationRequest(BaseModel):
@@ -3416,7 +3426,9 @@ def flow_spare_decision(service_id: str, request: SpareDecisionRequest, user: di
                 # same request the old "Request Spare Part" button raised, so the service manager can allocate the part
                 db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=note)
                 req = request_manager(request_type="spare_part", raised_by=user["username"],
-                                      details={"service_id": service_id, "note": note})
+                                      details={"service_id": service_id, "note": note,
+                                               "parts": [{"part_name": p["part_name"],
+                                                          "old_hologram_number": p.get("old_hologram_number", "")} for p in parts]})
                 req.add(collection_name=REQUESTS_COLLECTION)
         return {"message": "spare part decision saved", "service_id": service_id}
     except HTTPException:
@@ -5932,27 +5944,18 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and service status updated", "service_id": details.get("service_id")}
 
-        # spare_part requests: approving now also issues the part — creates a
-        # spare-part allocation automatically so it shows up on the Dispatch page
+        # spare_part requests: the service manager picks the hologram number(s) on the Allocated
+        # page, which opens with this service and the requested part(s) already added. The request
+        # stays pending until that allocation is made (create_allocation closes it).
         if req["request_type"] == "spare_part":
-            details = req["details"]
-            alloc = allocation_manager(
-                created_by=user["username"],
-                sales_person={},
-                items=[],
-                spare_part={
-                    "service_id": details.get("service_id"),
-                    "part_name": details.get("note", "Spare part"),
-                    "quantity": 1
-                },
-                company_name="",
-                address=""
-            )
-            alloc.add(collection_name=ALLOCATION_COLLECTION)
-
-            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
-                           status="approved", resolved_by=user["username"])
-            return {"message": "request approved and spare part issued", "allocation_id": alloc.allocation_id}
+            details = req["details"] or {}
+            parts = details.get("parts") or []
+            names = [p.get("part_name", "") for p in parts if p.get("part_name")] or ([details.get("note")] if details.get("note") else [])
+            qs = urllib.parse.urlencode({"alloc_service": details.get("service_id", ""),
+                                         "alloc_parts": "|".join(names), "alloc_request": request_id})
+            return {"message": "choose the hologram number(s) to allocate", "pending_allocation": True,
+                    "service_id": details.get("service_id"), "parts": names,
+                    "redirect": f"allocated.html?{qs}"}
 
         db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                        status="approved", resolved_by=user["username"])
@@ -6182,6 +6185,24 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
             if not existing_service:
                 raise HTTPException(status_code=404, detail="selected service not found")
 
+            # take the chosen item out of inventory (only when the caller said which one)
+            sp = request.spare_part
+            holograms = [h.strip() for h in sp.hologram_numbers if h and h.strip()]
+            try:
+                if holograms:
+                    if len(set(holograms)) != len(holograms):
+                        raise HTTPException(status_code=400, detail="duplicate hologram numbers selected")
+                    inventory_db.allocate_specific_holograms(INVENTORY_COLLECTION, holograms, product_name=sp.part_name)
+                    sp.quantity = len(holograms)
+                elif sp.lot_id:
+                    if sp.quantity <= 0:
+                        raise HTTPException(status_code=400, detail="quantity must be greater than 0")
+                    inventory_db.consume_from_lot(INVENTORY_COLLECTION, sp.lot_id, sp.quantity, product_name=sp.part_name)
+            except HTTPException:
+                raise
+            except Exception as inv_err:
+                raise HTTPException(status_code=400, detail=str(inv_err))
+
             svc_db.update_data(
                 collection_name=SERVICE_COLLECTION,
                 query={"service_id": request.spare_part.service_id},
@@ -6200,6 +6221,28 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
             )
             spare_allocation.add(collection_name=ALLOCATION_COLLECTION)
             created_allocation_ids.append(spare_allocation.allocation_id)
+
+            # fulfilling a technician's spare part request: close it once every requested part is issued
+            rid = (request.spare_part.request_id or "").strip()
+            if rid:
+                try:
+                    rdb = request_manager()
+                    found = rdb.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": rid})
+                    if found and found[0].get("request_type") == "spare_part" and found[0].get("status") == "pending":
+                        d = found[0].get("details") or {}
+                        wanted = len(d.get("parts") or []) or 1
+                        done = len(allocation_manager().get_data(
+                            collection_name=ALLOCATION_COLLECTION,
+                            query={"allocation_type": "spare_part", "spare_part.request_id": rid}))
+                        if done >= wanted:
+                            rdb.set_status(collection_name=REQUESTS_COLLECTION, request_id=rid,
+                                           status="approved", resolved_by=user["username"])
+                            _notify([found[0]["raised_by"]], kind="spare_part_allocated",
+                                    title="Spare part allocated",
+                                    body="Your requested spare part was allocated to you.",
+                                    service_id=request.spare_part.service_id, link="/pages/technician.html?tab=parts")
+                except Exception as close_err:
+                    logging.error(f"could not close spare part request {rid}: {close_err}")
 
         logging.info(f"allocation(s) created successfully: {created_allocation_ids}")
         return {"message": "allocation created successfully", "allocation_ids": created_allocation_ids, "redirect": redirect_to}

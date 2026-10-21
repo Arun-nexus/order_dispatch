@@ -577,6 +577,75 @@ class inventory_manager(mongodbclient):
             logging.error("hologram number allocation failed!")
             raise Exception(e)
 
+    def allocate_specific_holograms(self, collection_name, hologram_numbers, product_name=None):
+        """
+        Deducts exactly the given hologram numbers from spare_parts / service_parts lots:
+        each lot that holds any of them loses those hologram numbers and the same number
+        of units. Everything is checked first, so if any hologram number is not on file
+        nothing is deducted. Returns the list of hologram numbers taken.
+        """
+        try:
+            wanted = list(dict.fromkeys(str(h).strip() for h in (hologram_numbers or []) if h and str(h).strip()))
+            if not wanted:
+                return []
+            query = {"hologram_numbers": {"$in": wanted}, "product_type": {"$in": ["spare_parts", "service_parts"]}}
+            if product_name:
+                query["product_name"] = product_name
+            lots = self.get_data(collection_name=collection_name, query=query)
+
+            found = {}
+            for lot in lots:
+                for h in (lot.get("hologram_numbers") or []):
+                    if h in wanted and h not in found:
+                        found[h] = lot["_id"]
+            missing = [h for h in wanted if h not in found]
+            if missing:
+                raise Exception(f"hologram number(s) not available in inventory: {', '.join(missing[:10])}")
+
+            for lot in lots:
+                taken = [h for h in wanted if found.get(h) == lot["_id"]]
+                if not taken:
+                    continue
+                leftover = [h for h in (lot.get("hologram_numbers") or []) if h not in taken]
+                new_quantity = int(lot.get("quantity", 0) or 0) - len(taken)
+                self._decrement_or_delete(collection_name, lot["_id"], new_quantity, {"hologram_numbers": leftover})
+
+            logging.info(f"allocated {len(wanted)} specific hologram number(s)")
+            return wanted
+        except Exception as e:
+            logging.error("allocating specific hologram number(s) failed!")
+            raise Exception(e)
+
+    def consume_from_lot(self, collection_name, lot_id, quantity, product_name=None):
+        """
+        Deducts `quantity` units from ONE specific inventory lot (by its _id) — used for items
+        given out by quantity only (accessories, parts without hologram numbers). If the lot
+        carries serial numbers, the same number of serials leave with it so quantity and serial
+        count never drift apart. Returns the serial numbers taken (may be empty).
+        """
+        try:
+            quantity = int(quantity or 0)
+            if quantity <= 0:
+                raise Exception("quantity must be greater than 0")
+            lots = self.get_data(collection_name=collection_name, query={"_id": ObjectId(lot_id)})
+            if not lots:
+                raise Exception("selected inventory item was not found, refresh and try again")
+            lot = lots[0]
+            if product_name and lot.get("product_name") != product_name:
+                raise Exception("selected inventory item changed, refresh and try again")
+            available = int(lot.get("quantity", 0) or 0)
+            if available < quantity:
+                raise Exception(f"insufficient stock for '{lot.get('product_name')}': only {available} available")
+            serials = lot.get("serial_numbers") or []
+            taken = serials[:min(quantity, len(serials))]
+            self._decrement_or_delete(collection_name, lot["_id"], available - quantity,
+                                       {"serial_numbers": serials[len(taken):]})
+            logging.info(f"consumed {quantity} unit(s) from lot {lot_id}")
+            return taken
+        except Exception as e:
+            logging.error("consuming from specific lot failed!")
+            raise Exception(e)
+
     @staticmethod
     def _model_query(model_no):
         """model_no "" / None both mean "no variant" — old lots store null, not ""."""
