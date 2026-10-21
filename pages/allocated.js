@@ -2088,13 +2088,9 @@ async function renderSparePartFormStep() {
     <form id="sparePartForm">
       <div style="font-size:12px;font-weight:600;color:#334155;margin-bottom:4px;">1. Select item <small style="font-weight:400;color:#94a3b8;">(spare parts, service parts, accessories)</small></div>
       <div style="display:flex;gap:8px;">
-        <input id="spFilter" placeholder="Search item..." style="flex:1;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;min-width:0;">
-        <select id="spType" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
-          <option value="">All types</option>
-          ${Object.entries(ALLOC_PART_LABELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
-        </select>
+        <input id="spFilter" placeholder="Search item..." style="flex:1;width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;min-width:0;">
       </div>
-      ${hasMatches ? `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:8px 0;"><input type="checkbox" id="spOnlyFor"> Only items that belong to this product</label>` : '<div style="height:8px;"></div>'}
+      ${hasMatches ? `<label style="display:flex;align-items:center;justify-content:flex-start;gap:6px;font-size:12px;color:#475569;margin:8px 0;"><input type="checkbox" id="spOnlyFor" style="width:auto;margin:0;"> Only items that belong to this product</label>` : '<div style="height:8px;"></div>'}
       <div id="spList" style="max-height:180px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;"></div>
 
       <div id="spHoloBox" style="display:none;margin-top:14px;">
@@ -2114,6 +2110,11 @@ async function renderSparePartFormStep() {
         <span style="font-size:12px;font-weight:600;color:#334155;">2. Quantity to give</span>
         <small id="spQtyInfo" style="margin-left:8px;color:#64748b;"></small>
         <input id="spQty" type="number" min="1" value="1" style="width:100%;margin-top:4px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+          <span style="font-size:12px;font-weight:600;color:#334155;">3. Hologram numbers <small style="font-weight:400;color:#94a3b8;">(optional — type or edit, one per line or comma separated)</small></span>
+          <span id="spManualInfo" style="font-size:12px;color:#64748b;"></span>
+        </div>
+        <textarea id="spManual" rows="3" placeholder="e.g. HG-1001, HG-1002" style="width:100%;margin-top:4px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;font-family:inherit;"></textarea>
       </div>
 
       <div id="spPicked" style="font-size:13px;color:#64748b;margin:10px 0 0;">Select an item to allocate.</div>
@@ -2129,9 +2130,11 @@ async function renderSparePartFormStep() {
 
   const $ = id => document.getElementById(id);
   const listEl = $('spList'), pickedEl = $('spPicked'), submitEl = $('spSubmit');
-  const filterEl = $('spFilter'), typeEl = $('spType'), onlyEl = $('spOnlyFor');
+  const filterEl = $('spFilter'), onlyEl = $('spOnlyFor');
   const holoBox = $('spHoloBox'), holoList = $('spHoloList'), holoSearch = $('spHoloSearch'), holoInfo = $('spHoloInfo');
   const qtyBox = $('spQtyBox'), qtyEl = $('spQty'), qtyInfo = $('spQtyInfo');
+  const manualEl = $('spManual'), manualInfo = $('spManualInfo');
+  const manualList = () => [...new Set(manualEl.value.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean))];
   let sel = null, holos = [], chosen = new Set();
   const holoCache = new Map();
   const byHologram = () => !!sel && sel.tagged > 0;
@@ -2141,6 +2144,7 @@ async function renderSparePartFormStep() {
     let n = 0;
     if (sel) n = byHologram() ? chosen.size : qtyValue();
     holoInfo.textContent = `${chosen.size} selected / ${holos.length} available`;
+    { const m = manualList().length; manualInfo.textContent = m ? `${m} number${m === 1 ? '' : 's'}${sel && m > qtyValue() ? ' — more than quantity' : ''}` : ''; }
     if (!sel) pickedEl.textContent = 'Select an item to allocate.';
     else if (byHologram()) pickedEl.innerHTML = `Giving <b>${n}</b> × <b>${esc(sel.name)}</b>${sel.model ? ' · ' + esc(sel.model) : ''}${n ? ' — ' + [...chosen].slice(0, 6).map(esc).join(', ') + (n > 6 ? ` +${n - 6} more` : '') : ''}`;
     else pickedEl.innerHTML = `Giving <b>${n}</b> × <b>${esc(sel.name)}</b>${sel.model ? ' · ' + esc(sel.model) : ''}`;
@@ -2163,7 +2167,7 @@ async function renderSparePartFormStep() {
   }
   async function pick(key) {
     sel = lotMap.get(key) || null;
-    chosen = new Set(); holos = []; holoSearch.value = '';
+    chosen = new Set(); holos = []; holoSearch.value = ''; manualEl.value = '';
     drawLots();
     holoBox.style.display = 'none'; qtyBox.style.display = 'none';
     if (!sel) { updateSummary(); return; }
@@ -2185,8 +2189,7 @@ async function renderSparePartFormStep() {
   function drawLots() {
     const term = filterEl.value.trim().toLowerCase();
     const only = onlyEl && onlyEl.checked;
-    const type = typeEl.value;
-    const rows = lots.filter(l => (!only || forService(l)) && (!type || l.type === type) &&
+    const rows = lots.filter(l => (!only || forService(l)) && 
       (!term || [l.name, l.model, l.parent, l.product_id, ALLOC_PART_LABELS[l.type]].join(' ').toLowerCase().includes(term)));
     if (!rows.length) {
       listEl.innerHTML = `<p style="padding:14px;color:#94a3b8;font-size:13px;">${lots.length ? 'No item matches.' : 'No spare parts, service parts or accessories in inventory.'}</p>`;
@@ -2204,10 +2207,14 @@ async function renderSparePartFormStep() {
     listEl.querySelectorAll('.sp-row').forEach(r => r.addEventListener('click', () => pick(r.dataset.key)));
   }
   filterEl.addEventListener('input', drawLots);
-  typeEl.addEventListener('change', drawLots);
   if (onlyEl) onlyEl.addEventListener('change', drawLots);
   holoSearch.addEventListener('input', drawHolos);
   qtyEl.addEventListener('input', updateSummary);
+  manualEl.addEventListener('input', () => {
+    const n = manualList().length;
+    if (n && sel) qtyEl.value = Math.min(n, sel.stock);   // quantity follows the numbers typed
+    updateSummary();
+  });
   $('spSelShown').addEventListener('click', () => {
     const shown = holoList._shown || [];
     if (shown.length > 25 && !confirm(`Select all ${shown.length} shown hologram numbers?`)) return;
@@ -2232,6 +2239,7 @@ async function renderSparePartFormStep() {
     const picked = withHolo ? holos.filter(h => chosen.has(h.no)) : [];
     const quantity = withHolo ? picked.length : qtyValue();
     if (!quantity) { alert(withHolo ? 'Select the hologram number(s) to give.' : 'Enter a valid quantity.'); return; }
+    if (!withHolo && manualList().length > quantity) { alert('You typed more hologram numbers than the quantity. Increase the quantity or remove some numbers.'); return; }
     submitEl.disabled = true; submitEl.textContent = 'Allocating...';
     const payload = {
       spare_part: {
@@ -2244,7 +2252,8 @@ async function renderSparePartFormStep() {
         lot_id: part.docs[0]?._id || '',
         hologram_numbers: picked.map(h => h.no),
         holograms: picked.map(h => ({ hologram_number: h.no, lot_id: h.lot_id })),
-        request_id: allocWiz.requestId || ''
+        request_id: allocWiz.requestId || '',
+        manual_holograms: withHolo ? [] : manualList()
       }
     };
     try {

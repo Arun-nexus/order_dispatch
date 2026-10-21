@@ -238,6 +238,7 @@ class SparePartAllocation(BaseModel):
     hologram_numbers: list[str] = []
     holograms: list[dict] = []
     request_id: str = ""  # spare_part request this allocation fulfils
+    manual_holograms: list[str] = []  # hologram numbers typed for stock that has none on file
 
 
 class CreateAllocationRequest(BaseModel):
