@@ -3430,6 +3430,9 @@ def flow_spare_decision(service_id: str, request: SpareDecisionRequest, user: di
                                                "parts": [{"part_name": p["part_name"],
                                                           "old_hologram_number": p.get("old_hologram_number", "")} for p in parts]})
                 req.add(collection_name=REQUESTS_COLLECTION)
+                _notify(_service_reviewers(), kind="spare_part_request", title="Spare part request",
+                        body=f"{user['username']} needs: {note}", service_id=service_id,
+                        link="/pages/service.html?tab=requests")
         return {"message": "spare part decision saved", "service_id": service_id}
     except HTTPException:
         raise

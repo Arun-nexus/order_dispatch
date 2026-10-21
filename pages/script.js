@@ -1083,7 +1083,7 @@ async function loadRequests() {
     const res = await apiFetch('/request/');
     const data = await res.json();
     svcState.returnReqs = res.ok ? (data.dataset || []).filter(r => /return/i.test(r.request_type || '')) : [];
-    svcState.requests = res.ok ? (data.dataset || []).filter(r => r.request_type === 'reschedule')
+    svcState.requests = res.ok ? (data.dataset || []).filter(r => r.request_type === 'reschedule' || r.request_type === 'spare_part')
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)) : [];
   } catch (e) { svcState.requests = []; }
   renderAll();
@@ -1148,9 +1148,12 @@ const SVC_VIEWS = {
     cols: ['Raised By', 'Type', 'Item', 'Current Date', 'Requested Date', 'Reason', 'Status', 'Raised On', 'Actions'],
     statuses: [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['all', 'All']],
     list: () => requestRowsS(), statusOf: r => r.status, techOf: r => r.raised_by || '',
-    text: r => [r.raised_by, (r.details || {}).label, (r.details || {}).reason].join(' '),
+    text: r => [r.raised_by, (r.details || {}).label, (r.details || {}).reason, (r.details || {}).note].join(' '),
     cells: r => {
       const d = r.details || {};
+      if (r.request_type === 'spare_part') return [esc(r.raised_by), 'Spare part request', esc(sparePartNamesS(r) || '-'), '-', '-',
+        `Needs spare part for service #${esc(String(d.service_id || '').slice(0, 8))}`,
+        `<span class="${r.status === 'approved' ? 'completed' : r.status === 'rejected' ? 'rejected' : 'pending'}">${esc(r.status)}</span>`, r.created_at ? fmtSchedule(r.created_at) : '-'];
       if (r._inst) return [esc(r.raised_by), 'Installation request', esc(d.label || '-'), '-', '-', 'Wants to take this installation', `<span class="pending">${esc(r.status)}</span>`, r.created_at ? fmtSchedule(r.created_at) : '-'];
       return [esc(r.raised_by), d.kind === 'installation' ? 'Installation reschedule' : 'Service reschedule', esc(d.label || '-'), d.current_date ? fmtSchedule(d.current_date) : '-',
       `<b>${fmtSchedule(d.requested_date)}</b>`, esc(d.reason || '-'),
@@ -1428,14 +1431,31 @@ async function openAssignDemo() {
 
 function openRequestDetailS(r) {
   const d = r.details || {};
+  if (r.request_type === 'spare_part') {
+    svcModal('Spare Part Request', `${dRowS('Raised By', esc(r.raised_by))}${dRowS('Service ID', esc(d.service_id))}
+      ${dRowS('Parts needed', esc(sparePartNamesS(r)))}
+      ${(d.parts || []).map(p => dRowS(esc(p.part_name || 'Part'), 'Faulty hologram ' + esc(p.old_hologram_number || '-'))).join('')}
+      ${dRowS('Status', esc(r.status))}${r.status === 'rejected' && r.reason ? dRowS('Rejection Reason', esc(r.reason)) : ''}${dRowS('Resolved By', esc(r.resolved_by))}
+      ${r.status === 'pending' ? '<p style="font-size:12px;color:#64748b;margin-top:10px;">Approve opens the Allocated page with this service and part added — you only choose the hologram number(s).</p>' : ''}`);
+    return;
+  }
   svcModal('Reschedule Request', `${dRowS('Raised By', esc(r.raised_by))}${dRowS('Item', esc(d.label))}${dRowS('Current Date', d.current_date ? fmtSchedule(d.current_date) : '-')}
     ${dRowS('Requested Date', fmtSchedule(d.requested_date))}${dRowS('Reason', esc(d.reason))}${dRowS('Status', esc(r.status))}
     ${r.status === 'rejected' && r.reason ? dRowS('Rejection Reason', esc(r.reason)) : ''}${dRowS('Resolved By', esc(r.resolved_by))}`);
 }
 
+// parts a technician asked for (structured list, or the plain note for older requests)
+function sparePartNamesS(r) {
+  const d = r.details || {};
+  const names = (d.parts || []).map(p => p.part_name).filter(Boolean);
+  return names.length ? names.join(', ') : (d.note || '');
+}
+
 async function approveReschedule(r) {
   try {
-    await svcPost(`/request/approve/${encodeURIComponent(r.request_id)}`, {});
+    const out = await svcPost(`/request/approve/${encodeURIComponent(r.request_id)}`, {});
+    // spare part: go to the Allocated page with this service + the requested part(s) already added
+    if (out && out.pending_allocation && out.redirect) { window.location.href = out.redirect; return; }
     await Promise.all([loadRequests(), loadServices(), loadInstallations()]);
   } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
 }
