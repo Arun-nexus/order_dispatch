@@ -12,14 +12,40 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <!-- sidebar scrollbar -->
   <style id="sidebar-scroll-fix">
-    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
-    .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
-    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+    .sidebar {
+      max-height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, .6) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .55);
+      border-radius: 999px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, .9);
+    }
   </style>
   <style id="dispatched-badge">
-    .dispatched { background: #e0edff; color: #1665ff; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+    .dispatched {
+      background: #e0edff;
+      color: #1665ff;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+    }
   </style>
 </head>
 
@@ -35,13 +61,13 @@
         <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li class="active"><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
         <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-                <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
         <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
 
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
         <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
-                <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+        <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
 
         <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
         <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
@@ -327,7 +353,8 @@
   <!-- Order History Modal (who created + who edited, with remarks) -->
   <div id="orderHistoryModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:80vh;overflow-y:auto;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:80vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Order History</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
@@ -339,7 +366,8 @@
   <!-- Update Order Status Modal -->
   <div id="orderStatusModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:440px;max-height:86vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h3>Update Order Status</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
@@ -359,7 +387,8 @@
           style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
         <textarea class="return-reason" placeholder="Reason for return" rows="3"
           style="display:none;padding:10px;border:1px solid #ddd;border-radius:8px;resize:vertical;"></textarea>
-        <div class="return-items-box" style="display:none;flex-direction:column;gap:10px;max-height:280px;overflow-y:auto;"></div>
+        <div class="return-items-box"
+          style="display:none;flex-direction:column;gap:10px;max-height:280px;overflow-y:auto;"></div>
         <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
           <button type="button" class="cancel-btn"
             style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>

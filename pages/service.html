@@ -8,13 +8,35 @@
 
     <link rel="stylesheet" href="../css/accure.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <!-- Page-local styles: reuse inventory's .cards/.card look, only add the "selected" state + tab chips -->
+  <style>
+    .cards .card.cat-card{cursor:pointer;border:2px solid transparent;transition:border-color .15s,background .15s,transform .15s}
+    .cards .card.cat-card:hover{transform:translateY(-2px)}
+    .cards .card.cat-card.active{border-color:#1665ff;background:#f5f9ff}
+    .cards .card.cat-card.active>i{background:#1665ff;color:#fff}
+    .cards .card.cat-card p:empty::before{content:"\a0"}
+
+    .view-bar{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0 10px}
+    .view-bar h3{font-size:18px}
+    .view-bar p{font-size:13px;color:#64748b;margin-top:2px}
+
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+    .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;background:#fff;border-radius:10px;
+      padding:9px 14px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;transition:.15s}
+    .chip:hover{border-color:#1665ff;color:#1665ff}
+    .chip.active{background:#1665ff;border-color:#1665ff;color:#fff}
+    .chip:focus-visible,.cards .card.cat-card:focus-visible{outline:2px solid #1665ff;outline-offset:2px}
+
+    .table-container tbody tr[data-n]:hover{background:#f8fafc}
+    @media (prefers-reduced-motion:reduce){.cards .card.cat-card,.chip{transition:none}.cards .card.cat-card:hover{transform:none}}
+  </style>
   <!-- sidebar scrollbar -->
   <style id="sidebar-scroll-fix">
-    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
-    .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
-    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+    .sidebar{max-height:100vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.6) transparent}
+    .sidebar::-webkit-scrollbar{width:6px}
+    .sidebar::-webkit-scrollbar-track{background:transparent}
+    .sidebar::-webkit-scrollbar-thumb{background:rgba(148,163,184,.55);border-radius:999px}
+    .sidebar::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.9)}
   </style>
 </head>
 
@@ -32,13 +54,13 @@
                 <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
                 <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
                 <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
-        <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
+                <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
 
                 <li class="active"><a href="service.html"><i
                             class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
                 <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
                 <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
-        <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+                <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
 
                 <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
                 <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
@@ -84,120 +106,79 @@
                 </div>
             </header>
 
-            <!-- CARDS -->
-            <section class="cards">
-                <div class="card" data-card-filter="all" style="cursor:pointer;">
-                    <div>
-                        <span>Total Services</span>
-                        <h2>0</h2>
-                        <p>All Services</p>
-                    </div>
-                    <i class="fa-solid fa-layer-group"></i>
-                </div>
-                <div class="card" data-card-filter="active" style="cursor:pointer;">
-                    <div>
-                        <span>Active</span>
-                        <h2>0</h2>
-                        <p>Active Services</p>
-                    </div>
-                    <i class="fa-solid fa-circle-check"></i>
-                </div>
-                <div class="card" data-card-filter="in_progress" style="cursor:pointer;">
-                    <div>
-                        <span>In Progress</span>
-                        <h2>0</h2>
-                        <p>Ongoing Services</p>
-                    </div>
-                    <i class="fa-solid fa-spinner"></i>
-                </div>
-                <div class="card" data-card-filter="completed" style="cursor:pointer;">
-                    <div>
-                        <span>Completed</span>
-                        <h2>0</h2>
-                        <p>Completed Services</p>
-                    </div>
-                    <i class="fa-solid fa-check-double"></i>
-                </div>
-                <div class="card" data-card-filter="rejected" style="cursor:pointer;">
-                    <div>
-                        <span>Rejected</span>
-                        <h2>0</h2>
-                        <p>Rejected Services</p>
-                    </div>
-                    <i class="fa-solid fa-circle-xmark"></i>
-                </div>
+            <!-- CARDS (same .cards/.card pattern as Inventory) -->
+            <section class="cards" id="catCards">
+        <div class="card cat-card" data-view="services" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Services</span>
+            <h2 id="catServices">0</h2>
+            <p id="catServicesSub"></p>
+          </div>
+          <i class="fa-solid fa-screwdriver-wrench"></i>
+        </div>
+        <div class="card cat-card" data-view="installs" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Installations</span>
+            <h2 id="catInstalls">0</h2>
+            <p id="catInstallsSub"></p>
+          </div>
+          <i class="fa-solid fa-box-open"></i>
+        </div>
+        <div class="card cat-card" data-view="demo" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Demo Units</span>
+            <h2 id="catDemo">0</h2>
+            <p id="catDemoSub"></p>
+          </div>
+          <i class="fa-solid fa-handshake"></i>
+        </div>
+        <div class="card cat-card" data-view="requests" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Technician Requests</span>
+            <h2 id="catRequests">0</h2>
+            <p id="catRequestsSub"></p>
+          </div>
+          <i class="fa-solid fa-calendar-check"></i>
+        </div>
             </section>
 
             <!-- TOP ACTIONS -->
             <div class="top-actions">
-                <button class="export"><i class="fa-solid fa-download"></i> Export</button>
-                <button class="new-service"
-                    style="border: none;background:linear-gradient(135deg, #1665ff, #4c92ff);color:white;padding: 14px 28px;border-radius: var(--radius-sm);cursor: pointer;font-size: 15px;font-weight: 600;transition: var(--transition);"><i
-                        class="fa-solid fa-plus"></i> Add Service</button>
+                <button type="button" class="export" id="exportBtn"><i class="fa-solid fa-file-export"></i> Export</button>
+                <button type="button" class="add-product" id="viewAction"></button>
             </div>
 
             <!-- FILTER SECTION -->
-            <section class="filter-section">
-                <div class="filter-box">
-                    <i class="fa-solid fa-filter"></i>
-                    <select>
-                        <option>Status</option>
-                        <option>Active</option>
-                        <option>In Progress</option>
-                        <option>Completed</option>
-                        <option>Rejected</option>
-                    </select>
-                </div>
+            <section class="filter-section" id="filterBar">
                 <div class="filter-box">
                     <i class="fa-solid fa-user-gear"></i>
-                    <select>
-                        <option>Technician</option>
-                        <option>Dheeraj</option>
-                        <option>Adarsh</option>
-                        <option>Renu</option>
-                        <option>Bhawna</option>
+                    <select id="techFilter">
+                        <option value="">Technician</option>
                     </select>
                 </div>
-                <div class="filter-box">
+                <div class="filter-box" id="dateBox">
                     <i class="fa-solid fa-calendar-days"></i>
-                    <input type="date">
+                    <input type="date" id="dateFilter">
                 </div>
-                <button class="filter-btn"><i class="fa-solid fa-magnifying-glass"></i> Apply Filter</button>
             </section>
+
+            <!-- VIEW HEADING -->
+            <section class="view-bar">
+                <div>
+                    <h3 id="viewTitle">Services</h3>
+                    <p id="viewInfo"></p>
+                </div>
+            </section>
+
+            <!-- STATUS TABS -->
+            <section class="chips" id="statusChips"></section>
 
             <!-- TABLE -->
             <div class="table-container">
                 <table>
-                    <thead>
-                        <tr>
-                            <th>Product Name</th>
-                            <th>Model No.</th>
-                            <th>Serial No.</th>
-                            <th>Technician</th>
-                            <th>Issue</th>
-                            <th>Location</th>
-                            <th>Warranty</th>
-                            <th>Status</th>
-                            <th>Return Approval</th>
-                            <th>Created By</th>
-                            <th>Listed On</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- rows rendered dynamically by script.js -->
-                    </tbody>
+                    <thead id="mainHead"></thead>
+                    <tbody id="mainBody"></tbody>
                 </table>
-            </div>
-
-            <!-- PAGINATION -->
-            <div class="pagination">
-                <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
-                <button class="page active-page">1</button>
-                <button class="page">2</button>
-                <button class="page">3</button>
-                <button class="page">4</button>
-                <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
             </div>
         </main>
 
@@ -234,7 +215,8 @@
     <!-- View Service Modal -->
     <div id="viewModal" class="modal"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
+        <div class="modal-content"
+            style="background:#fff;border-radius:16px;padding:26px;width:420px;max-height:90vh;overflow-y:auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                 <h3>Service Details</h3>
                 <button class="close"
@@ -332,7 +314,8 @@
                         Used</button>
                 </div>
                 <div class="parts-used-list" style="display:none;flex-direction:column;gap:8px;"></div>
-                <button type="button" class="add-part-btn" style="display:none;padding:8px;border:1px dashed #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;">+
+                <button type="button" class="add-part-btn"
+                    style="display:none;padding:8px;border:1px dashed #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;">+
                     Add Spare Part</button>
                 <input type="number" min="0" step="0.01" class="service-charges-input"
                     placeholder="Service Charges (required if Completed)">
@@ -363,7 +346,9 @@
     </script>
     <div id="serviceCardDetailModal" class="modal"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(900px,96vw);max-height:92vh;overflow-y:auto;"></div>
+        <div class="modal-content"
+            style="background:#fff;border-radius:16px;padding:26px;width:min(900px,96vw);max-height:92vh;overflow-y:auto;">
+        </div>
     </div>
 
     <script src="script.js"></script>

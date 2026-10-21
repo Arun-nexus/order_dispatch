@@ -305,9 +305,8 @@ function ddClose() { dd.modal.classList.remove('open'); dd.stack = []; dd.view =
 const ddKV = pairs => `<div class="dd-grid">${pairs.map(([k, v]) => `<div><b>${ddEsc(k)}</b>${v}</div>`).join('')}</div>`;
 function ddTable(heads, rows, clickable) {
   if (!rows.length) return '<p class="dd-empty">Nothing to show.</p>';
-  return `<div class="dd-wrap"><table class="dd-table"><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${
-    rows.map((r, i) => `<tr class="${clickable ? 'dd-row' : ''}" data-i="${i}">${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
-  }</tbody></table></div>`;
+  return `<div class="dd-wrap"><table class="dd-table"><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r, i) => `<tr class="${clickable ? 'dd-row' : ''}" data-i="${i}">${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')
+    }</tbody></table></div>`;
 }
 function ddList(title, heads, rows, onRow) {
   dd.rowFn = onRow || null;
@@ -448,15 +447,17 @@ function ddExport() {
 }
 
 // ---------- row builders ----------
-const orderRow = o => { const it = (o.items || [])[0] || {};
-  return [ddDash(it.product_name), ddDash(it.product_id), ddDash(it.model_no), ddDate(o.order_date), ddBadge(o.status, statusBadgeClass(o.status)), ddMoney(o.total_mrp ?? o.price)]; };
+const orderRow = o => {
+  const it = (o.items || [])[0] || {};
+  return [ddDash(it.product_name), ddDash(it.product_id), ddDash(it.model_no), ddDate(o.order_date), ddBadge(o.status, statusBadgeClass(o.status)), ddMoney(o.total_mrp ?? o.price)];
+};
 const ORDER_HEADS = ['Product', 'Product ID', 'Model No', 'Date', 'Status', 'Total'];
 const ORDER_CSV_HEADS = ['Order ID', 'Date', 'Products', 'Model No', 'Customer', 'Payment Mode', 'Status', 'Total (INR)'];
 const orderItem = o => ({
   f: { status: o.status || '' },
   cells: orderRow(o),
   csv: [o.order_id, ddDateTxt(o.order_date), (o.items || []).map(i => `${i.product_name} x${i.quantity}`).join('; '),
-    (o.items || []).map(i => i.model_no).filter(Boolean).join('; '), (o.customer || {}).company_name, o.payment_mode, o.status, o.total_mrp ?? o.price],
+  (o.items || []).map(i => i.model_no).filter(Boolean).join('; '), (o.customer || {}).company_name, o.payment_mode, o.status, o.total_mrp ?? o.price],
   open: () => openOrderDetail(o)
 });
 const orderStatusFilter = list => ({ key: 'status', label: 'Status', options: uniq(list.map(o => o.status)).map(s => [s, ddPretty(s)]) });

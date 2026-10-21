@@ -12,11 +12,30 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <!-- sidebar scrollbar -->
   <style id="sidebar-scroll-fix">
-    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
-    .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
-    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+    .sidebar {
+      max-height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, .6) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .55);
+      border-radius: 999px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, .9);
+    }
   </style>
 </head>
 
@@ -32,7 +51,7 @@
       <ul>
         <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
-        <li  class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
+        <li class="active"><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a>
         </li>
         <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
         <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
@@ -73,7 +92,9 @@
           <div class="search" style="position:relative;">
             <i class="fa-solid fa-magnifying-glass"></i>
             <input type="text" id="headerSearchInput" placeholder="Search Product..." autocomplete="off">
-            <div id="headerSearchSuggestions" style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:1200;"></div>
+            <div id="headerSearchSuggestions"
+              style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 12px 28px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:1200;">
+            </div>
           </div>
           <button><i class="fa-regular fa-bell"></i></button>
           <button><i class="fa-regular fa-envelope"></i></button>
@@ -150,7 +171,8 @@
       <!-- Card Detail Modal (built dynamically by inventory.js) -->
       <div id="cardDetailModal" class="modal"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:80vh;overflow-y:auto;"></div>
+        <div class="modal-content"
+          style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:80vh;overflow-y:auto;"></div>
       </div>
 
       <!-- TOP ACTIONS -->
@@ -163,7 +185,8 @@
       <!-- Serial Number Record / History Modal (built dynamically by inventory.js) -->
       <div id="serialRecordModal" class="modal"
         style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-        <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:84vh;overflow-y:auto;"></div>
+        <div class="modal-content"
+          style="background:#fff;border-radius:16px;padding:26px;width:520px;max-height:84vh;overflow-y:auto;"></div>
       </div>
 
       <!-- FILTER SECTION -->
@@ -348,7 +371,8 @@
       </div>
       <form style="display:flex;flex-direction:column;gap:10px;">
         <input id="editProductNameInput" name="product_name" placeholder="Product Name">
-        <input id="editParentProductName" name="parent_product_name" placeholder="Belongs To (Parent Product)" style="display:none;">
+        <input id="editParentProductName" name="parent_product_name" placeholder="Belongs To (Parent Product)"
+          style="display:none;">
         <div id="editIdModelWrap" style="display:flex;flex-direction:column;gap:10px;">
           <input name="model_no" placeholder="Model No.">
         </div>
@@ -373,11 +397,14 @@
           <div id="currentHologramList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
 
           <div style="display:flex;gap:6px;margin-bottom:6px;">
-            <input id="hologramManualInput" placeholder="Add one hologram number" style="flex:1;padding:8px 10px;border:1px solid #dbe5f1;border-radius:8px;">
-            <button type="button" id="hologramManualAddBtn" style="padding:8px 12px;border:none;border-radius:8px;background:#eaf1ff;color:#1665ff;cursor:pointer;font-size:13px;">Add</button>
+            <input id="hologramManualInput" placeholder="Add one hologram number"
+              style="flex:1;padding:8px 10px;border:1px solid #dbe5f1;border-radius:8px;">
+            <button type="button" id="hologramManualAddBtn"
+              style="padding:8px 12px;border:none;border-radius:8px;background:#eaf1ff;color:#1665ff;cursor:pointer;font-size:13px;">Add</button>
           </div>
 
-          <button type="button" id="hologramFileBtn" style="font-size:12px;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;cursor:pointer;">
+          <button type="button" id="hologramFileBtn"
+            style="font-size:12px;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;cursor:pointer;">
             <i class="fa-solid fa-file-excel"></i> Add by file (upload Excel — serial-wise hologram numbers)
           </button>
           <input type="file" id="hologramFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
@@ -388,7 +415,8 @@
           <label style="font-size:13px;font-weight:600;color:#334155;">Serial Numbers on file</label>
           <div id="currentSerialsList" style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;"></div>
           <div id="serialDeltaMsg" style="font-size:12px;color:#64748b;margin-bottom:6px;"></div>
-          <button type="button" id="editSerialFileBtn" style="display:none;font-size:12px;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;cursor:pointer;margin-bottom:6px;">
+          <button type="button" id="editSerialFileBtn"
+            style="display:none;font-size:12px;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#f8fafc;cursor:pointer;margin-bottom:6px;">
             <i class="fa-solid fa-file-excel"></i> Add by file (upload Excel)
           </button>
           <input type="file" id="editSerialFileInput" accept=".xlsx,.xls,.csv" style="display:none;">
@@ -412,7 +440,9 @@
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;">
       <h3 style="margin-bottom:10px;">Extra Hologram Numbers</h3>
       <p id="hologramOverflowMsg" style="color:#334155;margin-bottom:14px;font-size:14px;"></p>
-      <div id="hologramOverflowList" style="max-height:160px;overflow-y:auto;font-size:12px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px;margin-bottom:16px;"></div>
+      <div id="hologramOverflowList"
+        style="max-height:160px;overflow-y:auto;font-size:12px;color:#64748b;background:#f8fafc;border-radius:8px;padding:8px;margin-bottom:16px;">
+      </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;">
         <button type="button" id="hologramOverflowCloseBtn"
           style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Close</button>

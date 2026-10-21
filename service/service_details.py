@@ -10,12 +10,30 @@ MEDIA_STALE_DAYS = int(os.getenv("MEDIA_STALE_DAYS", "2"))
 GDRIVE_PLACEHOLDER = "this file shifted to gdrive"
 
 
+class ServiceFlowError(Exception):
+    """A rule of the technician workflow was broken (wrong step, missing proof, not your service...).
+    status_code is the HTTP code the API should answer with."""
+
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class ServiceStatus(str, enum.Enum):
-    
-    active = "active"
-    in_progress = "in_progress"
-    completed = "completed"
+
+    active = "active"                      # assigned to the technician, not started yet
+    in_progress = "in_progress"            # technician is working on it (wizard steps 1-3)
+    pending_approval = "pending_approval"  # report submitted, waiting for the service manager
+    completed = "completed"                # service manager approved (faulty part returned)
     rejected = "rejected"
+
+
+# technician wizard: assigned -> spare_decision -> report -> pending_approval -> done
+WORKFLOW_ORDER = ["assigned", "spare_decision", "report", "pending_approval", "done"]
+
+# big base64 fields are left out of list endpoints; GET /service/media/{id} serves them for one service
+SERVICE_LIST_PROJECTION = {"damage_image": 0, "final_image": 0, "faulty_parts.image": 0}
+
 
 class service_detail(mongodbclient):
 
@@ -51,11 +69,19 @@ class service_detail(mongodbclient):
                 "service_charges": None,
                 "manager_confirmed_return": False,
                 "warranty_until": None,
+                "scheduled_date": None,
+                "schedule_history": [],
+                "last_reminder_at": None,
                 "media_updated_at": datetime.now(timezone.utc).isoformat() if (image or video) else None,
                 # who raised this service ticket, and the date it was listed —
                 # shown in the Service page's table/detail view and export
                 "created_by": created_by,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                # technician workflow
+                "workflow_step": "assigned",
+                "spare_needed": None,
+                "faulty_parts": [],
+                "faulty_part_count": 0
             }
 
             added_service = super().add(collection_name=collection_name, dictionary=new_service)
@@ -247,6 +273,245 @@ class service_detail(mongodbclient):
         except Exception as e:
             logging.error(f"stale media migration skipped due to error: {e}")
             return 0
+
+    # ------------------------------------------------------------------
+    # Technician workflow
+    #   1. start_service      damaged product image + serial number
+    #   2. save_spare_decision  spare part needed? (faulty part image + hologram number)
+    #   3. submit_report      work done + new hologram of each replaced part
+    #      -> status pending_approval, faulty_part_count goes up
+    #   4. approve_completion / reject_report   (service manager only)
+    #      -> completed only when the faulty part return is approved
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_image(value) -> bool:
+        return isinstance(value, str) and value.startswith("data:image")
+
+    @staticmethod
+    def _later_step(current, target):
+        cur = WORKFLOW_ORDER.index(current) if current in WORKFLOW_ORDER else 0
+        return WORKFLOW_ORDER[max(cur, WORKFLOW_ORDER.index(target))]
+
+    def _get_one(self, collection_name, service_id):
+        rows = super().get_data(collection_name=collection_name, query={"service_id": service_id})
+        if not rows:
+            raise ServiceFlowError("service not found", 404)
+        return rows[0]
+
+    def _get_own_open_service(self, collection_name, service_id, username):
+        svc = self._get_one(collection_name, service_id)
+        if svc.get("technician_alloted") != username:
+            raise ServiceFlowError("this service is not assigned to you", 403)
+        if svc.get("status") not in ("active", "in_progress"):
+            raise ServiceFlowError("this service can no longer be edited", 409)
+        return svc
+
+    def start_service(self, collection_name, service_id, username, damage_image, serial_no):
+        svc = self._get_own_open_service(collection_name, service_id, username)
+        serial_no = (serial_no or "").strip()
+        if not self._is_image(damage_image):
+            raise ServiceFlowError("image of the damaged product is required")
+        if not serial_no:
+            raise ServiceFlowError("serial number is required")
+
+        ticket_serial = (svc.get("serial_no") or "").strip().lower()
+        update_values = {
+            "status": "in_progress",
+            "workflow_step": self._later_step(svc.get("workflow_step"), "spare_decision"),
+            "damage_image": damage_image,
+            "has_damage_image": True,
+            "tech_serial_no": serial_no,
+            "serial_mismatch": bool(ticket_serial) and ticket_serial != serial_no.lower(),
+        }
+        if not svc.get("started_at"):
+            update_values["started_at"] = datetime.now(timezone.utc).isoformat()
+        super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values=update_values)
+        logging.info(f"service {service_id} started")
+        return update_values["serial_mismatch"]
+
+    def save_spare_decision(self, collection_name, service_id, username, spare_needed: bool, parts: list):
+        svc = self._get_own_open_service(collection_name, service_id, username)
+        if svc.get("workflow_step") not in ("spare_decision", "report"):
+            raise ServiceFlowError("start the service first (damaged product image and serial number)")
+
+        clean = []
+        if spare_needed:
+            if not parts:
+                raise ServiceFlowError("add at least one faulty spare part")
+            seen = set()
+            for p in parts:
+                name = (p.get("part_name") or "").strip()
+                holo = (p.get("old_hologram_number") or "").strip()
+                if not name or not holo:
+                    raise ServiceFlowError("each faulty part needs a name and its hologram number")
+                if holo in seen:
+                    raise ServiceFlowError(f"hologram number {holo} is entered twice")
+                seen.add(holo)
+                if not self._is_image(p.get("image")):
+                    raise ServiceFlowError(f"image of the damaged part {name} is required")
+                clean.append({"part_name": name, "old_hologram_number": holo, "image": p["image"], "has_image": True})
+
+        update_values = {
+            "spare_needed": bool(spare_needed),
+            "faulty_parts": clean,
+            "faulty_part_count": 0,          # counted only when the report is submitted
+            "workflow_step": self._later_step(svc.get("workflow_step"), "report"),
+        }
+        super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values=update_values)
+        logging.info(f"service {service_id}: spare part decision saved (needed={spare_needed})")
+        return clean
+
+    def submit_report(self, collection_name, service_id, username, work_done: str, new_holograms: dict, final_image=None):
+        svc = self._get_own_open_service(collection_name, service_id, username)
+        if svc.get("status") != "in_progress" or svc.get("workflow_step") != "report":
+            raise ServiceFlowError("finish the previous steps before submitting the service report")
+        work_done = (work_done or "").strip()
+        if not work_done:
+            raise ServiceFlowError("write what work was done in the service report")
+
+        parts = svc.get("faulty_parts") or []
+        spare_needed = bool(svc.get("spare_needed"))
+        if spare_needed:
+            for p in parts:
+                new_holo = (new_holograms.get(p["old_hologram_number"]) or "").strip()
+                if not new_holo:
+                    raise ServiceFlowError(f"new hologram number of the replacement for {p['part_name']} is required")
+                if new_holo == p["old_hologram_number"]:
+                    raise ServiceFlowError(f"new hologram number for {p['part_name']} cannot be the same as the old one")
+                p["new_hologram_number"] = new_holo
+
+        update_values = {
+            "status": "pending_approval",
+            "workflow_step": "pending_approval",
+            "work_done": work_done,
+            "faulty_parts": parts,
+            "faulty_part_count": len(parts) if spare_needed else 0,     # <- the faulty part counter goes up here
+            "spare_parts_used": spare_needed,
+            "spare_parts": ", ".join(p["part_name"] for p in parts) if spare_needed else "",
+            "report_submitted_at": datetime.now(timezone.utc).isoformat(),
+            "report_rejected_reason": "",
+        }
+        if final_image:
+            if not self._is_image(final_image):
+                raise ServiceFlowError("final photo must be an image")
+            update_values["final_image"] = final_image
+            update_values["has_final_image"] = True
+        super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values=update_values)
+        logging.info(f"service {service_id}: report submitted, waiting for manager approval")
+        return svc
+
+    def approve_completion(self, collection_name, service_id, approver: str, service_charges=None):
+        """Service manager approves the faulty part return -> the ONLY place a workflow service becomes completed.
+        Returns the parts list for the inventory swap (done by the API layer, before this is called)."""
+        svc = self._get_one(collection_name, service_id)
+        if svc.get("status") != "pending_approval":
+            raise ServiceFlowError("only a service whose report is waiting for approval can be approved", 409)
+        charges = service_charges if service_charges is not None else svc.get("service_charges")
+        if charges is None or float(charges) < 0:
+            raise ServiceFlowError("enter the service charges before approving")
+        update_values = {
+            "status": "completed",
+            "workflow_step": "done",
+            "service_charges": float(charges),
+            "manager_confirmed_return": True,
+            "approved_by": approver,
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "reason": "",
+        }
+        super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values=update_values)
+        logging.info(f"service {service_id} approved by {approver}")
+        return svc
+
+    def pending_parts_for_swap(self, svc: dict) -> list:
+        if not svc.get("spare_needed"):
+            return []
+        return [{"part_name": p["part_name"], "old_hologram_number": p["old_hologram_number"],
+                 "new_hologram_number": p.get("new_hologram_number") or ""} for p in (svc.get("faulty_parts") or [])]
+
+    def reject_report(self, collection_name, service_id, reason: str):
+        svc = self._get_one(collection_name, service_id)
+        if svc.get("status") != "pending_approval":
+            raise ServiceFlowError("only a service whose report is waiting for approval can be sent back", 409)
+        reason = (reason or "").strip()
+        if not reason:
+            raise ServiceFlowError("write the reason for sending the report back")
+        super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values={
+            "status": "in_progress",
+            "workflow_step": "report",
+            "faulty_part_count": 0,
+            "manager_confirmed_return": False,
+            "report_rejected_reason": reason,
+        })
+        logging.info(f"service {service_id}: report sent back")
+        return svc
+
+    def get_media(self, collection_name, service_id):
+        svc = self._get_one(collection_name, service_id)
+        return {
+            "service_id": service_id,
+            "technician_alloted": svc.get("technician_alloted"),
+            "damage_image": svc.get("damage_image") or "",
+            "final_image": svc.get("final_image") or "",
+            "faulty_parts": [{"part_name": p.get("part_name"), "old_hologram_number": p.get("old_hologram_number"),
+                              "new_hologram_number": p.get("new_hologram_number") or "", "image": p.get("image") or ""}
+                             for p in (svc.get("faulty_parts") or [])],
+        }
+
+    # ------------------------------------------------------------------
+    # Rescheduling + 24 hour reminders
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_schedule(value: str) -> str:
+        value = (value or "").strip()
+        if not value:
+            raise ServiceFlowError("select the new service date")
+        try:
+            datetime.fromisoformat(value)          # accepts YYYY-MM-DD and YYYY-MM-DDTHH:MM
+        except ValueError:
+            raise ServiceFlowError("invalid date, use the date picker")
+        return value
+
+    def reschedule_service(self, collection_name, service_id, scheduled_date: str, reason: str, by: str):
+        svc = self._get_one(collection_name, service_id)
+        if svc.get("status") in ("completed", "rejected"):
+            raise ServiceFlowError("a completed or rejected service cannot be rescheduled", 409)
+        scheduled_date = self._parse_schedule(scheduled_date)
+        reason = (reason or "").strip()
+        now = datetime.now(timezone.utc).isoformat()
+        history = list(svc.get("schedule_history") or []) + [{
+            "from": svc.get("scheduled_date"), "to": scheduled_date, "reason": reason, "by": by, "at": now,
+        }]
+        super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values={
+            "scheduled_date": scheduled_date,
+            "schedule_reason": reason,
+            "schedule_history": history,
+            "last_reminder_at": now,          # the 24h reminder clock restarts from the new schedule
+        })
+        logging.info(f"service {service_id} rescheduled to {scheduled_date} by {by}")
+        return svc
+
+    def services_due_for_reminder(self, collection_name, hours: int = 24):
+        """Services that are not completed/rejected and were not reminded about in the last `hours`."""
+        rows = super().get_data(collection_name=collection_name,
+                                query={"status": {"$in": ["active", "in_progress", "pending_approval"]}},
+                                projection=SERVICE_LIST_PROJECTION)
+        limit = datetime.now(timezone.utc) - timedelta(hours=hours)
+        due = []
+        for s in rows or []:
+            raw = s.get("last_reminder_at") or s.get("created_at")
+            try:
+                last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+            except Exception:
+                last = None
+            if last is None or last <= limit:
+                due.append(s)
+        return due
+
+    def mark_reminded(self, collection_name, service_id):
+        super().update_data(collection_name=collection_name, query={"service_id": service_id},
+                            update_values={"last_reminder_at": datetime.now(timezone.utc).isoformat()})
 
     def technician_location(self, user_id):
         pass

@@ -223,8 +223,8 @@ function renderPendingRequests() {
     const actions = r.status === 'partially_approved'
       ? `<span style="font-size:12px;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:999px;font-weight:600;">Awaiting distributor</span>`
       : r.request_type === 'status_update'
-      ? `<p style="font-size:11px;color:#94a3b8;">Complete this from the Service page's Update Status action.</p>`
-      : `<div style="display:flex;gap:8px;">
+        ? `<p style="font-size:11px;color:#94a3b8;">Complete this from the Service page's Update Status action.</p>`
+        : `<div style="display:flex;gap:8px;">
           <button class="req-approve-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">Approve</button>
           ${canPartial ? '<button class="req-partial-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d97706;color:#fff;cursor:pointer;">Partial</button>' : ''}
           <button class="req-reject-btn" style="padding:6px 12px;border:none;border-radius:8px;background:#d62828;color:#fff;cursor:pointer;">Reject</button>
@@ -737,7 +737,7 @@ function allocCvHead() {
 function allocCvCells(x) {
   if (allocCV.requests) {
     return [esc(ALLOC_REQ_LABELS[x.request_type] || x.request_type || '-'), requestSummary(x), esc(x.raised_by || '-'),
-      fmtReqDateTime(x.created_at)];
+    fmtReqDateTime(x.created_at)];
   }
   const meta = returnMeta(x);
   return [
@@ -953,17 +953,17 @@ function renderAllocationsTable(allocations) {
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
         ${window.__allocCanEdit && !isSpare && !a.dispatch && !meta.complete
-          ? '<button class="icon-btn edit-alloc-btn" title="Edit (serial / details)"><i class="fa-solid fa-pen"></i></button>' : ''}
+        ? '<button class="icon-btn edit-alloc-btn" title="Edit (serial / details)"><i class="fa-solid fa-pen"></i></button>' : ''}
         ${window.__allocCanEdit && !isSpare && !meta.complete
-          ? '<button class="icon-btn convert-alloc-btn" title="Convert to Order"><i class="fa-solid fa-file-invoice-dollar"></i></button>' : ''}
+        ? '<button class="icon-btn convert-alloc-btn" title="Convert to Order"><i class="fa-solid fa-file-invoice-dollar"></i></button>' : ''}
         ${!isSpare && !a.dispatch && !a.sent_to_dispatch && window.__allocCanCreate
-          ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}
+        ? '<button class="icon-btn dispatch-alloc-btn" title="Send to Dispatch"><i class="fa-solid fa-truck-fast"></i></button>' : ''}
         ${!isSpare && a.sent_to_dispatch && !a.dispatch
-          ? '<span class="stock pending" title="Waiting to be dispatched" style="padding:4px 8px;">In Dispatch Queue</span>' : ''}
+        ? '<span class="stock pending" title="Waiting to be dispatched" style="padding:4px 8px;">In Dispatch Queue</span>' : ''}
         ${!meta.complete && window.__allocCanReturnOrDamage ? '<button class="icon-btn return-alloc-btn"><i class="fa-solid fa-rotate-left"></i></button>' : ''}
         ${window.__allocCanReturnOrDamage ? (a.damage_report?.reported
-          ? '<button class="icon-btn damage-view-btn" title="Damage reported" style="color:#d62828;"><i class="fa-solid fa-triangle-exclamation"></i></button>'
-          : '<button class="icon-btn damage-report-btn" title="Report damaged product"><i class="fa-regular fa-triangle-exclamation"></i></button>') : ''}
+        ? '<button class="icon-btn damage-view-btn" title="Damage reported" style="color:#d62828;"><i class="fa-solid fa-triangle-exclamation"></i></button>'
+        : '<button class="icon-btn damage-report-btn" title="Report damaged product"><i class="fa-regular fa-triangle-exclamation"></i></button>') : ''}
       </td>`;
     tbody.appendChild(tr);
   });
@@ -1042,10 +1042,10 @@ function openViewAllocationModal(a) {
        <div class="detail"><small>Service ID</small><p>${a.spare_part?.service_id ?? ''}</p></div>`
     : `${(a.items || []).map(i => itemDetailBlock(i, false)).join('')}
        ${a.allocation_type === 'demo_unit'
-         ? customerDetailBlock(a.customer) + detailRow('Distributor', a.allocated_by)
-         : detailRow('Sales Person', [a.sales_person?.name, a.sales_person?.contact_number].filter(Boolean).join(' — '))
-           + detailRow('Company', a.company_name) + detailRow('Address', a.address)
-           + detailRow('GST No.', a.gst_number) + detailRow('Phone', a.phone_number)}
+      ? customerDetailBlock(a.customer) + detailRow('Distributor', a.allocated_by)
+      : detailRow('Sales Person', [a.sales_person?.name, a.sales_person?.contact_number].filter(Boolean).join(' — '))
+      + detailRow('Company', a.company_name) + detailRow('Address', a.address)
+      + detailRow('GST No.', a.gst_number) + detailRow('Phone', a.phone_number)}
        ${a.convert_request?.price ? detailRow('Requested Order Price', '₹' + a.convert_request.price + (a.convert_request.tax_rate ? ` (+${a.convert_request.tax_rate}% tax)` : '')) : ''}
        ${detailRow('Remarks', a.remarks)}`;
 
@@ -1419,7 +1419,7 @@ function exportAllocationsCSV() {
     withTypeFilter: true,
     getRows: getFilteredAllocations,
     onConfirm: (rows) => {
-      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.' ,'Allotment Date', 'Return Due', 'Created By', 'Returned By', 'Returned On', 'Status'];
+      const header = ['Allocation ID', 'Type', 'Product/Spare Part', 'Sales Person/Service', 'Serial_no.', 'Allotment Date', 'Return Due', 'Created By', 'Returned By', 'Returned On', 'Status'];
       const csvRows = rows.map(a => {
         const isSpare = a.allocation_type === 'spare_part';
         return [

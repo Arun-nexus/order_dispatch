@@ -10,11 +10,30 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <!-- sidebar scrollbar -->
   <style id="sidebar-scroll-fix">
-    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
-    .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
-    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+    .sidebar {
+      max-height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, .6) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .55);
+      border-radius: 999px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, .9);
+    }
   </style>
 </head>
 
@@ -35,7 +54,8 @@
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
         <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
-        <li class="active"><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+        <li class="active"><a href="attendance.html"><i
+              class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
 
         <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
         <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
@@ -80,25 +100,38 @@
 
       <section class="cards">
         <div class="card">
-          <div><span>Present Today</span><h2 id="cardPresentToday">0</h2><p id="cardDateLabel">-</p></div>
+          <div><span>Present Today</span>
+            <h2 id="cardPresentToday">0</h2>
+            <p id="cardDateLabel">-</p>
+          </div>
           <i class="fa-solid fa-user-check"></i>
         </div>
         <div class="card">
-          <div><span>Late Today</span><h2 id="cardLateToday">0</h2><p>After threshold time</p></div>
+          <div><span>Late Today</span>
+            <h2 id="cardLateToday">0</h2>
+            <p>After threshold time</p>
+          </div>
           <i class="fa-solid fa-clock" style="background:#fff4e5;color:#f59e0b;"></i>
         </div>
         <div class="card">
-          <div><span>Reminders Sent Today</span><h2 id="cardRemindersToday">0</h2><p>WhatsApp via Twilio</p></div>
+          <div><span>Reminders Sent Today</span>
+            <h2 id="cardRemindersToday">0</h2>
+            <p>WhatsApp via Twilio</p>
+          </div>
           <i class="fa-brands fa-whatsapp" style="background:#dcfce7;color:#16a34a;"></i>
         </div>
         <div class="card">
-          <div><span>Late Time Set At</span><h2 id="cardLateThreshold">10:00</h2><p id="cardMonthLabel">This month's report</p></div>
+          <div><span>Late Time Set At</span>
+            <h2 id="cardLateThreshold">10:00</h2>
+            <p id="cardMonthLabel">This month's report</p>
+          </div>
           <i class="fa-regular fa-clock"></i>
         </div>
       </section>
 
       <div class="top-actions">
-        <button class="add-product" id="uploadAttendanceBtn"><i class="fa-solid fa-upload"></i> Upload Today's Attendance</button>
+        <button class="add-product" id="uploadAttendanceBtn"><i class="fa-solid fa-upload"></i> Upload Today's
+          Attendance</button>
         <button class="export" id="setLateTimeBtn"><i class="fa-solid fa-clock"></i> Set Late Time</button>
       </div>
 
@@ -159,9 +192,11 @@
         <h3>Upload Today's Attendance</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Upload the biometric machine's "Daily Present List" export (.xls) as-is. The date is read from the file itself.</p>
+      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Upload the biometric machine's "Daily Present List"
+        export (.xls) as-is. The date is read from the file itself.</p>
       <input type="file" id="attendanceFileInput" accept=".xls,.html,.htm" style="width:100%;margin-bottom:14px;">
-      <button id="attendanceUploadSubmitBtn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Upload</button>
+      <button id="attendanceUploadSubmitBtn"
+        style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Upload</button>
       <div id="attendanceUploadResult" style="margin-top:12px;font-size:12px;color:#64748b;"></div>
     </div>
   </div>
@@ -174,9 +209,12 @@
         <h3>Late Time</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Anyone clocking in after this time is marked late and gets a WhatsApp reminder (if their number is saved).</p>
-      <input type="time" id="lateTimeInput" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px;">
-      <button id="lateTimeSaveBtn" style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
+      <p style="color:#64748b;font-size:13px;margin-bottom:12px;">Anyone clocking in after this time is marked late and
+        gets a WhatsApp reminder (if their number is saved).</p>
+      <input type="time" id="lateTimeInput"
+        style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px;">
+      <button id="lateTimeSaveBtn"
+        style="width:100%;padding:10px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Save</button>
     </div>
   </div>
 

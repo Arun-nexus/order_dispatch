@@ -6,7 +6,11 @@
     "dist": "electron-builder"
   },
   "build": {
-    "files": ["main.js", "package.json", "build/**/*"],
+    "files": [
+      "main.js",
+      "package.json",
+      "build/**/*"
+    ],
     "appId": "com.acer.erp",
     "productName": "Acer ERP",
     "icon": "build/icon.ico",

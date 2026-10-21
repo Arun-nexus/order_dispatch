@@ -398,12 +398,18 @@ function openCardDetailModal(cardType) {
     const partType = cardType === 'service_parts_status' ? 'service_parts' : 'spare_parts';
     const parts = products.filter(p => p.product_type === partType);
     const filters = [
-      { key: 'status', label: 'Status', options: [['active', 'Active'], ['pending', 'Pending']],
-        test: (p, v) => (statusFromHologram(p) === 'Active') === (v === 'active') },
-      { key: 'parent', label: 'Belongs To', options: ivUniq(parts.map(p => p.parent_product_name)).sort().map(s => [s, s]),
-        test: (p, v) => p.parent_product_name === v },
-      { key: 'warranty', label: 'Warranty', options: [['under warranty', 'Under Warranty'], ['over warranty', 'Over Warranty']],
-        test: (p, v) => p.warranty_status === v }
+      {
+        key: 'status', label: 'Status', options: [['active', 'Active'], ['pending', 'Pending']],
+        test: (p, v) => (statusFromHologram(p) === 'Active') === (v === 'active')
+      },
+      {
+        key: 'parent', label: 'Belongs To', options: ivUniq(parts.map(p => p.parent_product_name)).sort().map(s => [s, s]),
+        test: (p, v) => p.parent_product_name === v
+      },
+      {
+        key: 'warranty', label: 'Warranty', options: [['under warranty', 'Under Warranty'], ['over warranty', 'Over Warranty']],
+        test: (p, v) => p.warranty_status === v
+      }
     ];
     if (partType === 'service_parts') filters.push({ key: 'pc', label: 'Type', options: [['purchase', 'Purchase'], ['warranty', 'Warranty']], test: (p, v) => p.part_category === v });
     const holo = p => (typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length);
@@ -976,8 +982,8 @@ function renderInventoryTable(products) {
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
         ${canManage ? '<button class="icon-btn edit-btn"><i class="fa-solid fa-pen"></i></button>' : ''}
         ${isDamaged
-          ? (canManage ? '<button class="icon-btn repair-btn" title="Repair"><i class="fa-solid fa-screwdriver-wrench"></i></button>' : '')
-          : (canDelete ? '<button class="icon-btn delete delete-btn"><i class="fa-solid fa-trash"></i></button>' : '')}
+        ? (canManage ? '<button class="icon-btn repair-btn" title="Repair"><i class="fa-solid fa-screwdriver-wrench"></i></button>' : '')
+        : (canDelete ? '<button class="icon-btn delete delete-btn"><i class="fa-solid fa-trash"></i></button>' : '')}
       </td>`;
     tbody.appendChild(tr);
   });
@@ -1013,7 +1019,7 @@ async function fetchProductDetail(p) {
       // surface the backend's actual error (e.g. a 500's real cause) in the
       // console instead of silently falling back — makes it obvious when
       // the fallback (serial-less cached row) is being used, and why.
-      try { console.error('fetchProductDetail failed:', res.status, await res.json()); } catch (_) {}
+      try { console.error('fetchProductDetail failed:', res.status, await res.json()); } catch (_) { }
       return p;
     }
     const data = await res.json();
@@ -2074,7 +2080,7 @@ function initSupplierPicker(form, optional) {
     if (c) {
       existingBox.style.display = 'block';
       existingBox.innerHTML = [c.company_address, c.gst_number ? 'GST: ' + c.gst_number : '',
-        [c.contractor_person, c.contractor_number, c.contractor_email].filter(Boolean).join(' • ')]
+      [c.contractor_person, c.contractor_number, c.contractor_email].filter(Boolean).join(' • ')]
         .filter(Boolean).map(escapeHtmlInv).join('<br>') || 'No extra details on file for this company.';
     } else {
       existingBox.style.display = 'none';
@@ -2566,7 +2572,7 @@ function wireModals() {
       await loadInventory();
     } catch (err) {
       refreshIfMissing(err);
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
+      if (err.message !== 'unauthorized' && err.message !== 'forbidden') showResponseModal('Update failed', err.message, false);
     }
   }));
 

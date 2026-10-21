@@ -8,6 +8,36 @@
 
   <link rel="stylesheet" href="../css/accure.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <!-- Page-local styles: reuse inventory's .cards/.card look, only add the "selected" state + tab chips -->
+  <style>
+    .cards .card.cat-card{cursor:pointer;border:2px solid transparent;transition:border-color .15s,background .15s,transform .15s}
+    .cards .card.cat-card:hover{transform:translateY(-2px)}
+    .cards .card.cat-card.active{border-color:#1665ff;background:#f5f9ff}
+    .cards .card.cat-card.active>i{background:#1665ff;color:#fff}
+    .cards .card.cat-card p:empty::before{content:"\a0"}
+
+    .view-bar{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:18px 0 10px}
+    .view-bar h3{font-size:18px}
+    .view-bar p{font-size:13px;color:#64748b;margin-top:2px}
+
+    .chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+    .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;background:#fff;border-radius:10px;
+      padding:9px 14px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;transition:.15s}
+    .chip:hover{border-color:#1665ff;color:#1665ff}
+    .chip.active{background:#1665ff;border-color:#1665ff;color:#fff}
+    .chip:focus-visible,.cards .card.cat-card:focus-visible{outline:2px solid #1665ff;outline-offset:2px}
+
+    .table-container tbody tr[data-n]:hover{background:#f8fafc}
+    @media (prefers-reduced-motion:reduce){.cards .card.cat-card,.chip{transition:none}.cards .card.cat-card:hover{transform:none}}
+  </style>
+  <!-- sidebar scrollbar -->
+  <style id="sidebar-scroll-fix">
+    .sidebar{max-height:100vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.6) transparent}
+    .sidebar::-webkit-scrollbar{width:6px}
+    .sidebar::-webkit-scrollbar-track{background:transparent}
+    .sidebar::-webkit-scrollbar-thumb{background:rgba(148,163,184,.55);border-radius:999px}
+    .sidebar::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.9)}
+  </style>
 </head>
 
 <body>
@@ -48,12 +78,12 @@
       <header>
         <div>
           <h1>My Services</h1>
-          <p>Services allotted to you — update status, upload proof, request spare parts</p>
+          <p>Start a service, upload proof, and send your report for approval</p>
         </div>
         <div class="right-header">
           <div class="search">
             <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" placeholder="Search service ID or product...">
+            <input type="text" placeholder="Search service ID or product..." autocomplete="off">
           </div>
           <button id="msgBtn"><i class="fa-regular fa-envelope"></i></button>
           <button><i class="fa-regular fa-bell"></i></button>
@@ -67,103 +97,76 @@
         </div>
       </header>
 
-      <!-- SERVICE STATUS CARDS -->
-      <section class="cards">
-        <div class="card">
-          <div><span>Total Allotted</span>
-            <h2 id="cardTotal">0</h2>
-            <p>All services assigned to you</p>
+      <!-- CARDS (same .cards/.card pattern as Inventory) -->
+      <section class="cards" id="catCards">
+        <div class="card cat-card" data-view="services" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Services</span>
+            <h2 id="catServices">0</h2>
+            <p id="catServicesSub"></p>
           </div>
-          <i class="fa-solid fa-layer-group"></i>
+          <i class="fa-solid fa-screwdriver-wrench"></i>
         </div>
-        <div class="card">
-          <div><span>Active</span>
-            <h2 id="cardActive">0</h2>
-            <p>Not started yet</p>
+        <div class="card cat-card" data-view="installs" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Installations</span>
+            <h2 id="catInstalls">0</h2>
+            <p id="catInstallsSub"></p>
           </div>
-          <i class="fa-solid fa-circle-check"></i>
+          <i class="fa-solid fa-box-open"></i>
         </div>
-        <div class="card">
-          <div><span>Completed</span>
-            <h2 id="cardCompleted">0</h2>
-            <p>Closed successfully</p>
+        <div class="card cat-card" data-view="demo" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Demo Units</span>
+            <h2 id="catDemo">0</h2>
+            <p id="catDemoSub"></p>
           </div>
-          <i class="fa-solid fa-check-double"></i>
+          <i class="fa-solid fa-handshake"></i>
         </div>
-        <div class="card">
-          <div><span>Rejected</span>
-            <h2 id="cardRejected">0</h2>
-            <p>Could not be completed</p>
+        <div class="card cat-card" data-view="parts" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>Allocated Parts</span>
+            <h2 id="catParts">0</h2>
+            <p id="catPartsSub"></p>
           </div>
-          <i class="fa-solid fa-circle-xmark"></i>
+          <i class="fa-solid fa-gears"></i>
         </div>
-        <div class="card">
-          <div><span>Service Cost</span>
-            <h2 id="cardServiceCost">₹0</h2>
-            <p>Total earned from completed services</p>
+        <div class="card cat-card" data-view="requests" tabindex="0" style="cursor:pointer;">
+          <div>
+            <span>My Requests</span>
+            <h2 id="catRequests">0</h2>
+            <p id="catRequestsSub"></p>
           </div>
-          <i class="fa-solid fa-indian-rupee-sign"></i>
-        </div>
-      </section>
-      <!-- MY SPARE PART REQUESTS -->
-      <section class="dashboard-grid">
-        <div class="panel" style="width:100%; margin-bottom:5px;">
-          <div class="panel-header">
-            <h3>My Spare Part Requests</h3>
-            <p style="color:#64748b;font-size:13px;">Sent to admin/employee for approval</p>
-          </div>
-          <div class="order-list" id="myRequestsList"></div>
+          <i class="fa-solid fa-paper-plane"></i>
         </div>
       </section>
 
+      <!-- TOP ACTIONS -->
       <div class="top-actions">
-        <button class="new-service" id="requestServiceBtn" style="border:none;background:linear-gradient(135deg, #1665ff, #4c92ff);color:white;padding:14px 28px;border-radius:var(--radius-sm);cursor:pointer;font-size:15px;font-weight:600;"><i class="fa-solid fa-plus"></i> Request New Service</button>
+        <button type="button" id="viewAction" class="add-product"></button>
       </div>
 
-      <!-- FILTER -->
-      <section class="filter-section">
-        <div class="filter-box">
-          <i class="fa-solid fa-filter"></i>
-          <select id="statusFilter">
-            <option>All Status</option>
-            <option value="active">Active</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-            <option value="rejected">Rejected</option>
-          </select>
+      <!-- VIEW HEADING -->
+      <section class="view-bar">
+        <div>
+          <h3 id="viewTitle">Services</h3>
+          <p id="viewInfo"></p>
         </div>
-        <button class="filter-btn"><i class="fa-solid fa-magnifying-glass"></i> Apply Filter</button>
       </section>
+
+      <!-- STATUS TABS -->
+      <section class="chips" id="statusChips"></section>
 
       <!-- TABLE -->
       <div class="table-container">
         <table>
-          <thead>
-            <tr>
-              <th>Service ID</th>
-              <th>Product ID</th>
-              <th>Serial No.</th>
-              <th>Issue</th>
-              <th>Location</th>
-              <th>Status</th>
-              <th>Service Charges</th>
-              <th>Warranty</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- rows rendered dynamically by technician.js -->
-          </tbody>
+          <thead id="mainHead"></thead>
+          <tbody id="mainBody"></tbody>
         </table>
       </div>
 
-      <div class="pagination">
-        <button class="page-btn"><i class="fa-solid fa-angle-left"></i></button>
-        <button class="page active-page">1</button>
-        <button class="page">2</button>
-        <button class="page">3</button>
-        <button class="page-btn"><i class="fa-solid fa-angle-right"></i></button>
-      </div>
+      <!-- PAGINATION -->
+      <div class="pagination"></div>
     </main>
 
   </div>
@@ -187,7 +190,9 @@
   <!-- View Service Modal -->
   <div id="viewModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:440px;"></div>
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:480px;max-width:94vw;max-height:90vh;overflow-y:auto;">
+    </div>
   </div>
 
   <!-- Image / Video Modal -->
@@ -203,7 +208,23 @@
     </div>
   </div>
 
-  <!-- Action Modal (upload / spare part / status update, built dynamically) -->
+  <!-- Service wizard: damaged product proof -> spare part -> service report (built dynamically) -->
+  <div id="wizardModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:600px;max-width:96vw;max-height:92vh;overflow-y:auto;">
+    </div>
+  </div>
+
+  <!-- Detail modal (card lists, demo units, parts, installations; built dynamically) -->
+  <div id="detailModal" class="modal"
+    style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:1000;">
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:760px;max-width:96vw;max-height:92vh;overflow-y:auto;">
+    </div>
+  </div>
+
+  <!-- Action Modal (Request New Service, built dynamically) -->
   <div id="actionModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:420px;"></div>

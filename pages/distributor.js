@@ -480,7 +480,7 @@ function dcvFiltered() {
     if (f.to && day > f.to) return false;
     if (q) {
       const hay = [r.id, creatorLabel(creator), isReq ? d.details?.remarks : d.remarks,
-        ...dcvItems(r).map(i => `${i.product_name} ${i.product_id || ''} ${i.model_no || ''} ${dcvIdent(i)} ${(i.serial_numbers || []).join(' ')}`)].join(' ').toLowerCase();
+      ...dcvItems(r).map(i => `${i.product_name} ${i.product_id || ''} ${i.model_no || ''} ${dcvIdent(i)} ${(i.serial_numbers || []).join(' ')}`)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -528,11 +528,11 @@ function dcvExport(list, base) {
   const rows = list.map(r => {
     const d = r.data, isReq = r.kind === 'req', st = rowStatus(r);
     return [isReq ? 'Request' : 'Allocation', r.id, creatorLabel(isReq ? d.raised_by : d.allocated_by),
-      dcvItems(r).map(i => `${i.product_name} x ${i.quantity}${dcvIdent(i) ? ' - ' + dcvIdent(i) : ''}${(i.serial_numbers || []).length ? ' - ' + i.serial_numbers.join('/') : ''}`).join(' | '),
-      (isReq ? d.details?.remarks : d.remarks) || '',
-      (r.date || '').slice(0, 10), !isReq ? (d.return_due_date || '').slice(0, 10) : '', st.label,
-      isReq && d.status === 'rejected' ? (d.reason || '') : '',
-      d.dispatch?.docket_no || '', d.dispatch?.invoice_no || '', d.dispatch?.mode_of_delivery || ''];
+    dcvItems(r).map(i => `${i.product_name} x ${i.quantity}${dcvIdent(i) ? ' - ' + dcvIdent(i) : ''}${(i.serial_numbers || []).length ? ' - ' + i.serial_numbers.join('/') : ''}`).join(' | '),
+    (isReq ? d.details?.remarks : d.remarks) || '',
+    (r.date || '').slice(0, 10), !isReq ? (d.return_due_date || '').slice(0, 10) : '', st.label,
+    isReq && d.status === 'rejected' ? (d.reason || '') : '',
+    d.dispatch?.docket_no || '', d.dispatch?.invoice_no || '', d.dispatch?.mode_of_delivery || ''];
   });
   const csv = '﻿' + [head, ...rows].map(r => r.map(dcvCsvCell).join(',')).join('\r\n');
   const a = document.createElement('a');

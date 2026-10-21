@@ -39,7 +39,7 @@ const PAGE_CATALOG = [
   { file: 'attendance.html',           label: 'Attendance',           icon: 'fa-calendar-check' },
   { file: 'users.html',                label: 'Users',                icon: 'fa-users' },
   { file: 'reports.html',              label: 'Reports',              icon: 'fa-chart-column' },
-  { file: 'qc.html',                   label: 'QA',                   icon: 'fa-clipboard-check' },
+  { file: 'qc.html',                   label: 'QC',                   icon: 'fa-clipboard-check' },
   { file: 'work_report.html',          label: 'Work Report',          icon: 'fa-list-check' },
   { file: 'distributor.html',          label: 'Distributor',          icon: 'fa-handshake' },
   { file: 'distributor_orders.html',   label: 'Distributor Orders',   icon: 'fa-cart-flatbed' },
@@ -394,6 +394,53 @@ function notifItemHtml(r, isManager) {
 
 let _notifData = {};
 
+// In-app notifications (e.g. "New service assigned to you"), stored per user on the server.
+let _noteData = {};
+
+function noteAgo(iso) {
+  if (!iso) return '';
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)} h ago`;
+  return new Date(iso).toLocaleDateString('en-GB');
+}
+
+function noteItemHtml(n) {
+  return `
+    <div class="note-item" data-nid="${rqEsc(n.notification_id)}" style="border-bottom:1px solid #eef1f6;padding:10px 4px;cursor:pointer;background:${n.read ? 'transparent' : '#eef5ff'};border-radius:8px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <strong style="font-size:13px;">${n.read ? '' : '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#1665ff;margin-right:6px;"></span>'}${rqEsc(n.title)}</strong>
+        <span style="font-size:11px;color:#94a3b8;white-space:nowrap;">${noteAgo(n.created_at)}</span>
+      </div>
+      <p style="font-size:12px;color:#64748b;margin-top:2px;">${rqEsc(n.body || '')}</p>
+    </div>`;
+}
+
+async function openNotification(n) {
+  if (!n) return;
+  if (!n.read) {
+    n.read = true;
+    try { await apiFetch(`/notification/read/${encodeURIComponent(n.notification_id)}`, { method: 'POST' }); } catch (e) { /* ignore */ }
+  }
+  if (n.link) location.href = n.link;
+  else loadNotifications();
+}
+
+function showNoteToast(n, extra) {
+  const old = document.getElementById('noteToast');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.id = 'noteToast';
+  el.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:2500;background:#0f172a;color:#fff;border-radius:12px;padding:14px 18px;max-width:340px;box-shadow:0 12px 30px rgba(0,0,0,.3);cursor:pointer;';
+  el.innerHTML = `<div style="font-weight:600;font-size:14px;"><i class="fa-regular fa-bell"></i> ${rqEsc(n.title)}</div>
+    <div style="font-size:12px;color:#cbd5e1;margin-top:4px;">${rqEsc(n.body || '')}</div>
+    ${extra ? `<div style="font-size:11px;color:#93c5fd;margin-top:6px;">+${extra} more notification${extra > 1 ? 's' : ''}</div>` : ''}`;
+  el.addEventListener('click', () => { el.remove(); openNotification(n); });
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 9000);
+}
+
 async function loadNotifications() {
   const role = getRole();
   const ui = ensureBellUI();
@@ -401,11 +448,16 @@ async function loadNotifications() {
 
   try {
     const isManager = ['admin', 'accounts', 'service_manager', 'employee'].includes(role);
-    const res = await apiFetch(isManager ? '/request/' : '/request/mine');
+    const [res, noteRes] = await Promise.all([
+      apiFetch(isManager ? '/request/' : '/request/mine'),
+      apiFetch('/notification/mine').catch(() => null)
+    ]);
     if (!res.ok) throw new Error('failed');
     const data = await res.json();
     const all = data.dataset || [];
-    const badgeCount = all.filter(r => r.status === (isManager ? 'pending' : 'partially_approved')).length;
+    const notes = noteRes && noteRes.ok ? ((await noteRes.json()).dataset || []) : [];
+    const unreadNotes = notes.filter(n => !n.read);
+    const badgeCount = all.filter(r => r.status === (isManager ? 'pending' : 'partially_approved')).length + unreadNotes.length;
 
     ui.badge.textContent = badgeCount;
     ui.badge.style.display = badgeCount ? 'block' : 'none';
@@ -413,14 +465,44 @@ async function loadNotifications() {
     const sorted = [...all].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 25);
     _notifData = {};
     sorted.forEach(r => { _notifData[r.request_id] = r; });
-    ui.panel.innerHTML = sorted.length
-      ? `<h4 style="padding:6px 4px 10px;">Notifications</h4>` + sorted.map(r => notifItemHtml(r, isManager)).join('')
-      : '<p style="padding:16px;color:#94a3b8;font-size:13px;">No notifications yet.</p>';
+    _noteData = {};
+    notes.forEach(n => { _noteData[n.notification_id] = n; });
+
+    const notesHtml = notes.length
+      ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px 6px;">
+           <h4>Updates</h4>
+           ${unreadNotes.length ? '<a href="#" id="noteReadAll" style="font-size:12px;color:#1665ff;">Mark all read</a>' : ''}
+         </div>` + notes.map(noteItemHtml).join('')
+      : '';
+    const reqHtml = sorted.length
+      ? `<h4 style="padding:10px 4px;">Requests</h4>` + sorted.map(r => notifItemHtml(r, isManager)).join('')
+      : '';
+    ui.panel.innerHTML = (notesHtml + reqHtml) || '<p style="padding:16px;color:#94a3b8;font-size:13px;">No notifications yet.</p>';
 
     ui.panel.querySelectorAll('.notif-item').forEach(el => el.addEventListener('click', () => {
       ui.panel.style.display = 'none';
       openRequestPopup(_notifData[el.dataset.rid]);
     }));
+    ui.panel.querySelectorAll('.note-item').forEach(el => el.addEventListener('click', () => {
+      ui.panel.style.display = 'none';
+      openNotification(_noteData[el.dataset.nid]);
+    }));
+    const readAll = document.getElementById('noteReadAll');
+    if (readAll) readAll.addEventListener('click', async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { await apiFetch('/notification/read_all', { method: 'POST' }); } catch (err) { /* ignore */ }
+      loadNotifications();
+    });
+
+    // pop up once per browser tab for notifications the user has not been shown yet
+    let shown = [];
+    try { shown = JSON.parse(sessionStorage.getItem('acer_toasted') || '[]'); } catch (e) { shown = []; }
+    const fresh = unreadNotes.filter(n => !shown.includes(n.notification_id));
+    if (fresh.length) {
+      showNoteToast(fresh[0], fresh.length - 1);
+      sessionStorage.setItem('acer_toasted', JSON.stringify([...shown, ...fresh.map(n => n.notification_id)].slice(-100)));
+    }
   } catch (err) {
     console.error(err);
   }
@@ -1557,7 +1639,7 @@ window.addEventListener('load', () => {
     if (!ul || ul.querySelector('a[href$="qc.html"]')) return;
     const inPages = location.pathname.includes('/pages/');
     const li = document.createElement('li');
-    li.innerHTML = `<a href="${inPages ? 'qc.html' : 'pages/qc.html'}"><i class="fa-solid fa-clipboard-check"></i><span>QA</span></a>`;
+    li.innerHTML = `<a href="${inPages ? 'qc.html' : 'pages/qc.html'}"><i class="fa-solid fa-clipboard-check"></i><span>QC</span></a>`;
     const logout = [...ul.querySelectorAll('li')].find(x => x.querySelector('a[onclick*="openLogoutModal"]'));
     if (logout) ul.insertBefore(li, logout); else ul.appendChild(li);
   };

@@ -397,12 +397,12 @@ function renderOverdueBanner() {
   banner.innerHTML = `
     <div style="font-weight:700;color:#b91c1c;margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Payment due — credit time is over for ${due.length} ${due.length === 1 ? 'company' : 'companies'}</div>
     ${due.map(({ c, s }) => {
-      const worst = Math.max(...s.overduePurchases.map(x => x.info.lateDays));
-      return `<div style="font-size:13px;color:#7f1d1d;padding:2px 0;">
+    const worst = Math.max(...s.overduePurchases.map(x => x.info.lateDays));
+    return `<div style="font-size:13px;color:#7f1d1d;padding:2px 0;">
         <a href="#" class="due-open" data-id="${esc(c.customer_id)}" style="color:#b91c1c;font-weight:600;">${esc(c.company_name)}</a>
         — ${nw(s.overdueAmount)} pending, ${worst} day${worst === 1 ? '' : 's'} late
         (${s.overduePurchases.length} purchase${s.overduePurchases.length === 1 ? '' : 's'})</div>`;
-    }).join('')}`;
+  }).join('')}`;
   banner.querySelectorAll('.due-open').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
     openCustomerHistory(userState.customers.find(c => c.customer_id === a.dataset.id));
@@ -1073,13 +1073,13 @@ function openUserExportModal(opts) {
       <form id="exportForm" style="display:flex;flex-direction:column;gap:8px;">
         <label style="${lbl}">What do you want to export?</label>
         ${Object.entries(EXPORT_KINDS).map(([v, k], i) =>
-          radioCard('what', v, `<strong style="font-size:14px;"><i class="${k.icon}"></i> ${k.label}</strong><br><small style="color:#64748b;">${k.sub}</small>`, i === 0)).join('')}
+    radioCard('what', v, `<strong style="font-size:14px;"><i class="${k.icon}"></i> ${k.label}</strong><br><small style="color:#64748b;">${k.sub}</small>`, i === 0)).join('')}
 
         ${fixed ? '' : `
           <label style="${lbl};margin-top:6px;">Role</label>
           <select name="role" style="${inp}">
             ${[['', 'All Roles'], ['admin', 'Admin'], ['accounts', 'Accounts'], ['service_manager', 'Service Manager'], ['assembly', 'Assembly'], ['technician', 'Technician'], ['distributor', 'Employee-Sales Person'], ['inventory_manager', 'Inventory Manager'], ['qc', 'QC']]
-              .map(([v, l]) => `<option value="${v}" ${(roleNow === v || (v === '' && roleNow === 'All Roles')) ? 'selected' : ''}>${l}</option>`).join('')}
+        .map(([v, l]) => `<option value="${v}" ${(roleNow === v || (v === '' && roleNow === 'All Roles')) ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
           <label style="${lbl}">Search (username or name)</label>
           <input name="text" style="${inp}" placeholder="Search username or name" value="${esc(userState.userSearch)}">`}
@@ -1155,7 +1155,7 @@ function openUserExportModal(opts) {
       if (what === 'details') {
         downloadCSV(['Username', 'Name', 'Role', 'Company', 'Mobile', 'Email', 'GST Number', 'Team Manager'],
           list.map(u => [u.username, nameOf(u), displayRole(u.role), u.company_name, u.mobile_no ?? u.phone,
-            u.email_id ?? u.email ?? '', u.gst_number ?? '', u.role === 'distributor' ? (u.manager || '') : '']),
+          u.email_id ?? u.email ?? '', u.gst_number ?? '', u.role === 'distributor' ? (u.manager || '') : '']),
           `users_${stamp}.csv`);
       } else if (what === 'orders') {
         const rows = [];
@@ -1165,10 +1165,10 @@ function openUserExportModal(opts) {
           const items = o.items || [];
           const cr = o.creator || {};
           rows.push([u.username, nameOf(u), o.order_id, fmtDate(o.order_date), o.customer?.company_name, o.customer?.gst_number,
-            items.map(i => `${i.product_name} x${i.quantity}`).join('; '),
-            items.flatMap(i => i.serial_numbers || []).join('; '),
-            o.payment_mode, o.total_mrp, o.status,
-            cr.type === 'request' ? `Request (approved by ${cr.approved_by || '-'})` : 'Direct']);
+          items.map(i => `${i.product_name} x${i.quantity}`).join('; '),
+          items.flatMap(i => i.serial_numbers || []).join('; '),
+          o.payment_mode, o.total_mrp, o.status,
+          cr.type === 'request' ? `Request (approved by ${cr.approved_by || '-'})` : 'Direct']);
         });
         if (!rows.length) { alert('No orders found for the selected users.'); return; }
         downloadCSV(['Username', 'Name', 'Order ID', 'Order Date', 'Company', 'GST', 'Items', 'Serial Numbers', 'Payment Mode', 'Order Total', 'Status', 'Created Via'],
@@ -1186,10 +1186,10 @@ function openUserExportModal(opts) {
             ? `${a.spare_part?.part_name || ''} x${a.spare_part?.quantity || 1}`
             : items.map(i => `${i.product_name} x${i.quantity}`).join('; ');
           rows.push([u.username, nameOf(u), a.allocation_id, allocTypeLabel(a), fmtDate(a.allotment_date),
-            a.customer?.company_name || a.company_name || '', what2,
-            items.flatMap(i => i.serial_numbers || []).join('; '),
-            a.sales_person?.name || a.allocated_by || '', a.created_by || '',
-            a.return_status === 'returned' ? 'Returned' : (a.dispatch ? 'With customer' : 'Allocated'), a.dispatch ? 'Yes' : 'No', a.dispatch?.invoice_no || '']);
+          a.customer?.company_name || a.company_name || '', what2,
+          items.flatMap(i => i.serial_numbers || []).join('; '),
+          a.sales_person?.name || a.allocated_by || '', a.created_by || '',
+          a.return_status === 'returned' ? 'Returned' : (a.dispatch ? 'With customer' : 'Allocated'), a.dispatch ? 'Yes' : 'No', a.dispatch?.invoice_no || '']);
         });
         if (!rows.length) { alert('No allocations / demo units found for the selected users.'); return; }
         downloadCSV(['Username', 'Name', 'Allocation ID', 'Type', 'Date', 'Company / Customer', 'Items / Part', 'Serial Numbers', 'Allocated To', 'Created By', 'Return Status', 'Dispatched', 'Invoice No'],
@@ -1211,7 +1211,7 @@ function exportCompaniesCsv(rows) {
   const stamp = new Date().toISOString().slice(0, 10);
   downloadCSV(['Company', 'Address', 'GST Number', 'Contact Person', 'Contact Number', 'Contact Email', 'Credit Limit', 'Debit', 'Credit', 'Overall', 'Total Orders'],
     rows.map(({ c, s }) => [c.company_name, c.company_address, c.gst_number, c.contractor_person, c.contractor_number, c.contractor_email,
-      s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
+    s.limit, s.creditGiven, s.returned, overallInfo(s).text, s.totalOrders]),
     `companies_${stamp}.csv`);
   return true;
 }

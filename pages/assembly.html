@@ -12,11 +12,30 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <!-- sidebar scrollbar -->
   <style id="sidebar-scroll-fix">
-    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
-    .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
-    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+    .sidebar {
+      max-height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, .6) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .55);
+      border-radius: 999px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, .9);
+    }
   </style>
 </head>
 
@@ -32,17 +51,17 @@
         <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
         <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-                <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo
+        <li><a href="distributor.html"><i class="fa-solid fa-handshake"></i><span>My Demo
               Units</span></a></li>
         <li><a href="distributor_orders.html"><i class="fa-solid fa-cart-shopping"></i><span>My Orders</span></a></li>
         <li><a href="technician.html"><i class="fa-solid fa-user-gear"></i><span>My Services</span></a></li>
         <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
         <li class="active"><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
-        
+
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
         <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
-                <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+        <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
 
         <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
         <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
@@ -205,7 +224,9 @@
   <!-- View Assembly Modal -->
   <div id="viewAssemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(800px,96vw);max-height:92vh;overflow-y:auto;"></div>
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:min(800px,96vw);max-height:92vh;overflow-y:auto;">
+    </div>
   </div>
 
   <!-- Delete Assembly Modal -->
@@ -213,7 +234,8 @@
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:380px;text-align:center;">
       <h3 style="margin-bottom:10px;">Delete Assembly?</h3>
-      <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone. Parts already deducted from the shipment are not restored.</p>
+      <p style="color:#64748b;margin-bottom:20px;">This action cannot be undone. Parts already deducted from the
+        shipment are not restored.</p>
       <div style="display:flex;justify-content:center;gap:10px;">
         <button class="cancel-btn" id="deleteAssemblyCancel"
           style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
@@ -227,7 +249,8 @@
   <div id="assemblyModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
     <div class="modal-content"
-      style="background:#fff;border-radius:16px;padding:26px;width:min(1000px,96vw);max-height:92vh;overflow-y:auto;"></div>
+      style="background:#fff;border-radius:16px;padding:26px;width:min(1000px,96vw);max-height:92vh;overflow-y:auto;">
+    </div>
   </div>
 
   <script>
@@ -248,7 +271,9 @@
   </script>
   <div id="assemblyCardDetailModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(860px,96vw);max-height:92vh;overflow-y:auto;"></div>
+    <div class="modal-content"
+      style="background:#fff;border-radius:16px;padding:26px;width:min(860px,96vw);max-height:92vh;overflow-y:auto;">
+    </div>
   </div>
 
   <script src="assembly.js"></script>

@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Login | Acer Biomedical</title>
-  
+
   <link rel="stylesheet" href="css/accure.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
+
 <body class="login-body">
   <div class="login-container">
-        <div class="login-left">
+    <div class="login-left">
       <div>
         <div class="logo">
           <img src="images/comapny_logo-Photoroom.png" alt="Acer Biomedical">
@@ -18,7 +20,7 @@
         <h1>Acer Biomedicals</h1>
         <p style="color: #005ca9; font-weight: 500;">Caring For Life</p>
       </div>
-      
+
       <div class="login-features">
         <div class="feature">
           <i class="fa-solid fa-shield-heart"></i>
@@ -49,7 +51,7 @@
         <p class="subtitle">Sign in to your Acer Biomedical Account</p>
 
         <p id="loginError" style="color:#d62828; display:none; margin-bottom:12px;"></p>
-        
+
         <form id="loginForm">
           <div class="input-box">
             <label>Username</label>
@@ -58,7 +60,7 @@
               <input type="text" id="username" placeholder="Enter your username" required>
             </div>
           </div>
-          
+
           <div class="input-box">
             <label>Password</label>
             <div class="input-field">
@@ -66,7 +68,7 @@
               <input type="password" id="password" placeholder="Enter your password" required>
             </div>
           </div>
-          
+
           <div class="input-box">
             <label>User Type</label>
             <div class="input-field">
@@ -83,7 +85,7 @@
               </select>
             </div>
           </div>
-          
+
           <button type="submit" class="login-btn" id="loginBtn">
             <i class="fa-solid fa-arrow-right-to-bracket"></i> Login
           </button>
@@ -92,13 +94,13 @@
         <p class="login-link" style="margin-top:14px; color:#64748b; font-size:13px;">
           New accounts are created by an Admin from Users → Add User.
         </p>
-        
+
         <div class="footer">
           &copy; 2025 Acer Biomedical. All Rights Reserved.
         </div>
       </div>
     </div>
-    
+
   </div>
 
   <script>
@@ -126,7 +128,7 @@
         qc: 'pages/qc.html'
       };
       let custom = null;
-      try { custom = JSON.parse(localStorage.getItem('acer_pages')); } catch (e) {}
+      try { custom = JSON.parse(localStorage.getItem('acer_pages')); } catch (e) { }
       if (token && role) window.location.href = pickHome(roleHome[role] || 'main_dashboard.html', custom);
     })();
 
@@ -191,4 +193,5 @@
     });
   </script>
 </body>
+
 </html>

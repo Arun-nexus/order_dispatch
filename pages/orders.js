@@ -373,7 +373,7 @@ function openEditOrderModal(o) {
         <input name="discount" type="number" min="0" placeholder="Discount" value="${o.discount ?? 0}" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
         <select name="payment_mode" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;">
           ${PAYMENT_MODES.filter(m => m.value !== 'Partial' || o.payment_mode === 'Partial')
-            .map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
+      .map(m => `<option value="${m.value}" ${m.value === o.payment_mode ? 'selected' : ''}>${m.label}</option>`).join('')}
         </select>
         <textarea name="remark" class="edit-remark" placeholder="Remark for this edit (required)" rows="2" required
           style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;resize:vertical;"></textarea>
@@ -775,12 +775,12 @@ function orderCardRowsHtml(list) {
   <div class="ov-scroll"><table class="ov-table">
     <thead><tr><th>Product</th><th>Qty</th><th>Company</th><th>Order Date</th><th>Status</th><th>Amount</th></tr></thead>
     <tbody>${list.map((o, i) => {
-      const items = o.items || [];
-      const qty = items.length ? items.reduce((s, it) => s + (Number(it.quantity) || 0), 0) : (o.quantity ?? '-');
-      const prod = items.length
-        ? items.map(it => `<div style="margin-bottom:6px;">${productCellHtml(it)}</div>`).join('')
-        : `<strong>${escapeHtml(o.product_name ?? '')}</strong>`;
-      return `<tr class="ov-row" data-i="${i}">
+    const items = o.items || [];
+    const qty = items.length ? items.reduce((s, it) => s + (Number(it.quantity) || 0), 0) : (o.quantity ?? '-');
+    const prod = items.length
+      ? items.map(it => `<div style="margin-bottom:6px;">${productCellHtml(it)}</div>`).join('')
+      : `<strong>${escapeHtml(o.product_name ?? '')}</strong>`;
+    return `<tr class="ov-row" data-i="${i}">
         <td>${prod}</td>
         <td>${qty}</td>
         <td>${escapeHtml(o.customer?.company_name ?? o.company_name ?? '')}</td>
@@ -788,7 +788,7 @@ function orderCardRowsHtml(list) {
         <td><span class="${statusClass(o.status)}">${statusLabel(o.status)}</span></td>
         <td>${orderMoney(o.total_mrp ?? o.price)}</td>
       </tr>`;
-    }).join('')}</tbody>
+  }).join('')}</tbody>
   </table></div>`;
 }
 
@@ -1002,9 +1002,9 @@ function openViewOrderModal(o) {
 
   const itemsRows = items.length
     ? items.map(it => {
-        const lineTotal = it.line_total ?? ((it.price || 0) * (it.quantity || 0));
-        const serials = (it.serial_numbers || []).map(s => `<span class="ov-serial">${e(s)}</span>`).join('');
-        return `<tr>
+      const lineTotal = it.line_total ?? ((it.price || 0) * (it.quantity || 0));
+      const serials = (it.serial_numbers || []).map(s => `<span class="ov-serial">${e(s)}</span>`).join('');
+      return `<tr>
           <td>${productCellHtml(it)}</td>
           <td>${serials || '<span class="ov-sub">—</span>'}</td>
           <td>${it.quantity ?? 0}</td>
@@ -1012,7 +1012,7 @@ function openViewOrderModal(o) {
           <td>${it.tax_rate ?? 0}%</td>
           <td><strong>${orderMoney(lineTotal)}</strong></td>
         </tr>`;
-      }).join('')
+    }).join('')
     : `<tr><td colspan="6" style="text-align:center;color:var(--text-light);">No items</td></tr>`;
 
   const returnedHtml = (o.returned_items || []).length ? `

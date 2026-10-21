@@ -8,17 +8,83 @@
   <link rel="stylesheet" href="../css/accure.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <style>
-    .work-panel { background: var(--bg-white); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
-    .work-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .work-filters input, .work-filters select { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--bg-white); }
-    .work-filters input[type=text] { flex: 1; min-width: 160px; }
-    .wr-btn { padding: 8px 14px; border: none; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); font-size: 12.5px; font-weight: 600; cursor: pointer; }
-    .work-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .work-table th { text-align: left; padding: 9px 8px; background: var(--bg-light); color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap; }
-    .work-table td { padding: 9px 8px; border-bottom: 1px solid var(--bg-hover); color: var(--text-primary); vertical-align: middle; }
-    .work-table tbody tr { cursor: pointer; }
-    .work-table tbody tr:hover { background: var(--bg-light); }
-    .dot-new { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-left: 6px; }
+    .work-panel {
+      background: var(--bg-white);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .work-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .work-filters input,
+    .work-filters select {
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      background: var(--bg-white);
+    }
+
+    .work-filters input[type=text] {
+      flex: 1;
+      min-width: 160px;
+    }
+
+    .wr-btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 8px;
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .work-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .work-table th {
+      text-align: left;
+      padding: 9px 8px;
+      background: var(--bg-light);
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .work-table td {
+      padding: 9px 8px;
+      border-bottom: 1px solid var(--bg-hover);
+      color: var(--text-primary);
+      vertical-align: middle;
+    }
+
+    .work-table tbody tr {
+      cursor: pointer;
+    }
+
+    .work-table tbody tr:hover {
+      background: var(--bg-light);
+    }
+
+    .dot-new {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+      margin-left: 6px;
+    }
   </style>
 </head>
 
@@ -121,14 +187,33 @@
       <div class="work-panel">
         <div class="work-filters">
           <input type="text" id="tblSearch" placeholder="Search title, details...">
-          <select id="fStatus"><option value="">All Status</option><option value="open">Open</option><option value="in_progress">In Progress</option><option value="done">Done</option></select>
-          <select id="fPriority"><option value="">All Priority</option><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select>
+          <select id="fStatus">
+            <option value="">All Status</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="done">Done</option>
+          </select>
+          <select id="fPriority">
+            <option value="">All Priority</option>
+            <option value="urgent">Urgent</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
           <button type="button" id="fReset" class="wr-btn">Reset</button>
         </div>
         <div style="overflow-x:auto;">
           <table class="work-table">
             <thead>
-              <tr><th>Work</th><th>From</th><th>Priority</th><th>Due</th><th>Status</th><th>Replies</th><th>Updated</th></tr>
+              <tr>
+                <th>Work</th>
+                <th>From</th>
+                <th>Priority</th>
+                <th>Due</th>
+                <th>Status</th>
+                <th>Replies</th>
+                <th>Updated</th>
+              </tr>
             </thead>
             <tbody id="workBody"></tbody>
           </table>

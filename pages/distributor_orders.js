@@ -279,7 +279,7 @@ function ocvFiltered() {
     if (f.to && ocvDay(o) > f.to) return false;
     if (q) {
       const hay = [o.order_id, o.customer?.company_name, o.customer?.gst_number,
-        ...(o.items || []).map(i => `${i.product_name} ${i.product_id || ''} ${i.model_no || ''} ${ocvIdent(i)} ${(i.serial_numbers || []).join(' ')}`)].join(' ').toLowerCase();
+      ...(o.items || []).map(i => `${i.product_name} ${i.product_id || ''} ${i.model_no || ''} ${ocvIdent(i)} ${(i.serial_numbers || []).join(' ')}`)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -397,8 +397,10 @@ function ensureRequestCards() {
 
 function wireOrderCardClicks() {
   ocvEnsure();
-  const map = { cardTotalOrders: 'total', cardTodayAmount: 'todayAmount', cardTodayOrders: 'today', cardDelivered: 'delivered',
-    cardPendingOrders: 'pending', cardPendingRequests: 'pendingReq', cardRejectedRequests: 'rejectedReq' };
+  const map = {
+    cardTotalOrders: 'total', cardTodayAmount: 'todayAmount', cardTodayOrders: 'today', cardDelivered: 'delivered',
+    cardPendingOrders: 'pending', cardPendingRequests: 'pendingReq', cardRejectedRequests: 'rejectedReq'
+  };
   Object.entries(map).forEach(([id, key]) => {
     const card = document.getElementById(id)?.closest('.card');
     if (!card) return;
@@ -495,7 +497,7 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Mode of Delivery</small><p>${esc(o.dispatch.mode_of_delivery || '-')}</p></div>` : ''}
     ${o.converted_from_demo ? '<div class="detail"><small>Source</small><p>Converted from demo unit</p></div>' : ''}
     ${(o.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${o.attachments.map((a, i) =>
-      `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(a.name)}</a>`).join('')}</p></div>` : ''}
+    `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(a.name)}</a>`).join('')}</p></div>` : ''}
     <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
     <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;

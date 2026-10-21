@@ -130,7 +130,7 @@ function dispCvFiltered() {
     if (f.to && day > f.to) return false;
     if (q) {
       const hay = [d.dispatch?.docket_no, d.dispatch?.dispatched_through, d.dispatch?.invoice_no, cvPlain(productLabel(row)), cvPlain(billToLabel(row)),
-        ...rowSerialNumbers(row)].join(' ').toLowerCase();
+      ...rowSerialNumbers(row)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;

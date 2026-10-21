@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from mongodb.mongodb_connection import mongodbclient
 from user.company import login
 from order.manage_order import order_manager
-from service.service_details import service_detail, GDRIVE_PLACEHOLDER
+from service.service_details import service_detail, GDRIVE_PLACEHOLDER, ServiceFlowError, SERVICE_LIST_PROJECTION
 from gdrive_media import upload_base64_to_drive
 from inventory.inventory_handling import inventory_manager
 from user.customer_details import customer_manager
@@ -98,12 +98,14 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
+NOTIFICATIONS_COLLECTION = params.get("notification_collection_name", "notifications")
 ORDERS_COLLECTION = params["order_collection_name"]
 SERVICE_COLLECTION = params["service_collection_name"]
 INVENTORY_COLLECTION = params["inventory_collection_name"]
 CUSTOMER_COLLECTION = params.get("customer_collection_name", "customers")
 SALESPERSON_COLLECTION = params.get("salesperson_collection_name", "sales_persons")
 ALLOCATION_COLLECTION = params.get("allocation_collection_name", "allocations")
+INSTALLATION_COLLECTION = params.get("installation_collection_name", "installations")
 REQUESTS_COLLECTION = params.get("requests_collection_name", "requests")
 SHIPMENT_COLLECTION = params.get("shipment_collection_name", "shipments")
 ASSEMBLY_COLLECTION = params.get("assembly_collection_name", "assemblies")
@@ -156,6 +158,7 @@ class ServiceRequest(BaseModel):
     video: str
     location: str = "indoor"
     spare_parts: str = ""
+    address: str = ""
 
 
 class OrderItem(BaseModel):
@@ -293,6 +296,84 @@ class SparePartRequest(BaseModel):
 
 class ExtendWarrantyRequest(BaseModel):
     warranty_until: str
+
+
+# ---- technician service workflow ----
+class ServiceStartRequest(BaseModel):
+    damage_image: str
+    serial_no: str
+
+
+class FaultyPartIn(BaseModel):
+    part_name: str
+    old_hologram_number: str
+    image: str
+
+
+class SpareDecisionRequest(BaseModel):
+    spare_needed: bool
+    parts: List[FaultyPartIn] = []
+
+
+class NewHologramIn(BaseModel):
+    old_hologram_number: str
+    new_hologram_number: str
+
+
+class ServiceReportRequest(BaseModel):
+    work_done: str
+    parts: List[NewHologramIn] = []
+    final_image: Optional[str] = None
+
+
+class ServiceApproveRequest(BaseModel):
+    service_charges: Optional[float] = None
+
+
+class ServiceSendBackRequest(BaseModel):
+    reason: str
+
+
+class ServiceRescheduleRequest(BaseModel):
+    scheduled_date: str
+    reason: str = ""
+
+
+class InstallationCreateRequest(BaseModel):
+    product_name: str
+    model_no: str = ""
+    serial_no: str = ""
+    company_name: str
+    address: str = ""
+    contact_person: str = ""
+    contact_number: str = ""
+    technician_id: str = ""
+    preferred_date: str = ""
+    notes: str = ""
+
+
+class InstallationAssignRequest(BaseModel):
+    technician_id: str
+
+
+class AssignDemoRequest(BaseModel):
+    technician_id: str
+    items: list[AllocationItem]
+    remarks: str = ""
+
+
+class ReassignDemoRequest(BaseModel):
+    technician_id: str
+
+
+class InstallationScheduleRequest(BaseModel):
+    scheduled_date: str
+    note: str = ""
+
+
+class InstallationStatusRequest(BaseModel):
+    status: str
+    note: str = ""
 
 
 class OrderUpdatedValue(BaseModel):
@@ -441,7 +522,7 @@ def login_page(request: LoginRequest, http_request: Request):
         if user["password"] != request.password or user["role"] != request.role:
             raise HTTPException(status_code=401, detail="details did not match")
 
-        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username not in("arun","prashant","amit"):
+        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username not in("arun","prashant","amit","sachin"):
             ua = http_request.headers.get("user-agent", "")
             if f"key={APP_CLIENT_KEY}" not in ua:
                 raise HTTPException(status_code=403, detail="this role can log in only from the desktop app")
@@ -2521,6 +2602,7 @@ def ensure_indexes():
         ACCOUNTS_COLLECTION: ["username", "role"],
         CUSTOMER_COLLECTION: ["customer_id"],
         SERVICE_COLLECTION: ["service_id"],
+        INSTALLATION_COLLECTION: ["installation_id", "technician_id", "status"],
     }
     db = mongodbclient().database
     for coll, fields in wanted.items():
@@ -2545,6 +2627,7 @@ def _warm_up_db():
 @app.on_event("startup")
 def _create_indexes_on_startup():
     threading.Thread(target=_warm_up_db, daemon=True).start()
+    threading.Thread(target=_reminder_loop, daemon=True).start()
 
 
 def purge_stale_damage_images():
@@ -3018,7 +3101,7 @@ def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequ
 def services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
-        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={})
+        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={}, projection=SERVICE_LIST_PROJECTION)
         logging.info("service dataset was fetched successfully")
         return {"message": "service dataset", "dataset": dataset}
     except Exception as e:
@@ -3026,9 +3109,23 @@ def services(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="service dataset cannot be fetched")
 
 
+def _check_field_address(location: str, address: str) -> str:
+    address = (address or "").strip()
+    if location == "outdoor" and not address:
+        raise HTTPException(status_code=400, detail="enter the address for a field service")
+    return address if location == "outdoor" else ""
+
+
+def _save_service_address(service_id: str, address: str):
+    if address:
+        service_detail().update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
+                                     update_values={"address": address})
+
+
 @app.post("/services/create")
 def create_service(request: ServiceRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
+        address = _check_field_address(request.location, request.address)
         service = service_detail(product_id=request.product_id, serial_no=request.serial_no)
         service.add_service(
             collection_name=SERVICE_COLLECTION,
@@ -3043,7 +3140,12 @@ def create_service(request: ServiceRequest, user: dict = Depends(require_role("s
             product_name=request.product_name,
             model_no=request.model_no
         )
+        _save_service_address(service.service_id, address)
         logging.info(f"service creation was successful with service_id {service.service_id}!")
+
+        _notify([request.technician_id], kind="service_assigned", title="New service assigned to you",
+                body=f"{request.product_name or request.product_id} (serial {request.serial_no}) - {request.issue}",
+                service_id=service.service_id, link=f"/pages/technician.html?service={service.service_id}")
 
         if request.video:
             _raise_media_review_request(service.service_id, user["username"])
@@ -3137,7 +3239,7 @@ def request_status_update(service_id: str, request: ServiceUpdateRequest, user: 
 def my_services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
-        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={"technician_alloted": user["username"]})
+        dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={"technician_alloted": user["username"]}, projection=SERVICE_LIST_PROJECTION)
         logging.info(f"service dataset fetched for technician {user['username']}")
         return {"message": "my service dataset", "dataset": dataset}
     except Exception as e:
@@ -3210,6 +3312,512 @@ def extend_warranty(service_id: str, request: ExtendWarrantyRequest, user: dict 
     except Exception as e:
         logging.error("warranty extension failed!")
         raise HTTPException(status_code=500, detail="warranty extension failed")
+
+
+# ---------------------------------------------------------------------------
+# In-app notifications (bell icon) - e.g. "New service assigned to you"
+# ---------------------------------------------------------------------------
+def _notify(usernames, kind: str, title: str, body: str = "", link: str = "", service_id: str = ""):
+    """Never raises: a notification problem must not break the action that caused it."""
+    try:
+        db = mongodbclient()
+        now = datetime.now(timezone.utc).isoformat()
+        for name in {u for u in usernames if u}:
+            db.add(collection_name=NOTIFICATIONS_COLLECTION, dictionary={
+                "notification_id": str(uuid.uuid4()), "username": name, "kind": kind,
+                "title": title, "body": body, "link": link, "service_id": service_id,
+                "read": False, "created_at": now})
+    except Exception:
+        logging.error("notification could not be saved")
+
+
+def _service_reviewers(created_by: str = None) -> list:
+    names = set()
+    try:
+        for row in mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION, query={"role": "service_manager"}):
+            names.add(row.get("username"))
+    except Exception:
+        logging.error("service managers could not be listed for notification")
+    if created_by:
+        names.add(created_by)
+    return [n for n in names if n]
+
+
+@app.get("/notification/mine")
+def my_notifications(user: dict = Depends(get_current_user)):
+    try:
+        run_in_background("service_reminders", send_service_reminders, 1800)
+        rows = mongodbclient().get_data(collection_name=NOTIFICATIONS_COLLECTION, query={"username": user["username"]})
+        rows = sorted(rows, key=lambda r: r.get("created_at") or "", reverse=True)[:30]
+        return {"message": "my notifications", "dataset": rows}
+    except Exception:
+        logging.error("notifications cannot be fetched")
+        raise HTTPException(status_code=500, detail="notifications cannot be fetched")
+
+
+@app.post("/notification/read/{notification_id}")
+def read_notification(notification_id: str, user: dict = Depends(get_current_user)):
+    try:
+        mongodbclient().update_data(collection_name=NOTIFICATIONS_COLLECTION,
+                                    query={"notification_id": notification_id, "username": user["username"]},
+                                    update_values={"read": True})
+        return {"message": "marked as read"}
+    except Exception:
+        logging.error("notification could not be marked read")
+        raise HTTPException(status_code=500, detail="notification cannot be updated")
+
+
+@app.post("/notification/read_all")
+def read_all_notifications(user: dict = Depends(get_current_user)):
+    try:
+        mongodbclient().update_data(collection_name=NOTIFICATIONS_COLLECTION,
+                                    query={"username": user["username"], "read": False},
+                                    update_values={"read": True}, many=True)
+        return {"message": "all marked as read"}
+    except Exception:
+        logging.error("notifications could not be marked read")
+        raise HTTPException(status_code=500, detail="notifications cannot be updated")
+
+
+# ---------------------------------------------------------------------------
+# Technician service workflow
+#   start (damaged product image + serial) -> spare part decision -> service report
+#   -> pending_approval -> service manager approves the faulty part return -> completed
+# ---------------------------------------------------------------------------
+def _flow_http_error(e: Exception, fallback: str):
+    if isinstance(e, ServiceFlowError):
+        return HTTPException(status_code=e.status_code, detail=str(e))
+    logging.error(fallback)
+    return HTTPException(status_code=500, detail=fallback)
+
+
+@app.post("/service/start/{service_id}")
+def flow_start(service_id: str, request: ServiceStartRequest, user: dict = Depends(require_role("technician", "distributor"))):
+    try:
+        mismatch = service_detail().start_service(SERVICE_COLLECTION, service_id, user["username"],
+                                                  request.damage_image, request.serial_no)
+        return {"message": "service started", "service_id": service_id, "serial_mismatch": mismatch}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "service could not be started")
+
+
+@app.post("/service/spare_decision/{service_id}")
+def flow_spare_decision(service_id: str, request: SpareDecisionRequest, user: dict = Depends(require_role("technician", "distributor"))):
+    try:
+        db = service_detail()
+        before = db._get_one(SERVICE_COLLECTION, service_id)
+        parts = db.save_spare_decision(SERVICE_COLLECTION, service_id, user["username"], request.spare_needed,
+                                       [p.dict() for p in request.parts])
+        if request.spare_needed:
+            note = "; ".join(f"{p['part_name']} (old hologram {p['old_hologram_number']})" for p in parts)
+            if note != (before.get("spare_parts_requested") or ""):
+                # same request the old "Request Spare Part" button raised, so the service manager can allocate the part
+                db.request_spare_part(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, note=note)
+                req = request_manager(request_type="spare_part", raised_by=user["username"],
+                                      details={"service_id": service_id, "note": note})
+                req.add(collection_name=REQUESTS_COLLECTION)
+        return {"message": "spare part decision saved", "service_id": service_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "spare part decision could not be saved")
+
+
+@app.post("/service/submit_report/{service_id}")
+def flow_submit_report(service_id: str, request: ServiceReportRequest, user: dict = Depends(require_role("technician", "distributor"))):
+    try:
+        db = service_detail()
+        svc = db.submit_report(SERVICE_COLLECTION, service_id, user["username"], request.work_done,
+                               {p.old_hologram_number: p.new_hologram_number for p in request.parts}, request.final_image)
+        _notify(_service_reviewers(svc.get("created_by")), kind="service_report", title="Service report waiting for approval",
+                body=f"{user['username']} submitted the report for {svc.get('product_name') or svc.get('product_id')} "
+                     f"(serial {svc.get('serial_no')}). Approve once the faulty part is returned.",
+                service_id=service_id, link=f"/pages/service.html?review={service_id}")
+        return {"message": "report sent for approval", "service_id": service_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "service report could not be submitted")
+
+
+@app.post("/service/approve_completion/{service_id}")
+def flow_approve(service_id: str, request: ServiceApproveRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    try:
+        db = service_detail()
+        svc = db._get_one(SERVICE_COLLECTION, service_id)
+        if svc.get("status") != "pending_approval":
+            raise ServiceFlowError("only a service whose report is waiting for approval can be approved", 409)
+        charges = request.service_charges if request.service_charges is not None else svc.get("service_charges")
+        if charges is None or float(charges) < 0:
+            raise ServiceFlowError("enter the service charges before approving")
+
+        # faulty part(s) go into the Damaged inventory and the assembly hologram rolls forward
+        hologram_mismatch = False
+        parts = db.pending_parts_for_swap(svc)
+        if parts:
+            hologram_mismatch = _swap_faulty_part(service_id, parts)
+        db.approve_completion(SERVICE_COLLECTION, service_id, user["username"], request.service_charges)
+
+        _notify([svc.get("technician_alloted")], kind="service_completed", title="Service completed",
+                body=f"{svc.get('product_name') or svc.get('product_id')} (serial {svc.get('serial_no')}) was approved by {user['username']}.",
+                service_id=service_id, link=f"/pages/technician.html?service={service_id}")
+        return {"message": "service approved and completed", "service_id": service_id, "hologram_mismatch": hologram_mismatch}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "service could not be approved")
+
+
+@app.post("/service/send_back/{service_id}")
+def flow_send_back(service_id: str, request: ServiceSendBackRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    try:
+        db = service_detail()
+        svc = db.reject_report(SERVICE_COLLECTION, service_id, request.reason)
+        _notify([svc.get("technician_alloted")], kind="service_sent_back", title="Service report sent back",
+                body=f"{user['username']}: {request.reason.strip()}",
+                service_id=service_id, link=f"/pages/technician.html?service={service_id}")
+        return {"message": "report sent back to the technician", "service_id": service_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "report could not be sent back")
+
+
+def _file_reschedule_request(kind: str, target_id: str, label: str, when: str, note: str, current, user: dict) -> str:
+    db = request_manager()
+    pending = db.get_data(collection_name=REQUESTS_COLLECTION,
+                          query={"request_type": "reschedule", "status": "pending", "details.target_id": target_id})
+    if pending:
+        raise HTTPException(status_code=409, detail="a reschedule request for this is already waiting for approval")
+    req = request_manager(request_type="reschedule", raised_by=user["username"], details={
+        "kind": kind, "target_id": target_id, "label": label, "requested_date": when,
+        "current_date": current, "reason": (note or "").strip()})
+    req.add(collection_name=REQUESTS_COLLECTION)
+    _notify(_service_reviewers(), kind="reschedule_request", title="Reschedule request",
+            body=f"{user['username']}: {label} -> {when}" + (f" - {note.strip()}" if note and note.strip() else ""),
+            service_id=target_id, link="/pages/service.html?tab=requests")
+    return req.request_id
+
+
+def _apply_installation_schedule(inst: dict, when: str, note: str, by: str):
+    now = datetime.now(timezone.utc).isoformat()
+    history = list(inst.get("schedule_history") or []) + [
+        {"from": inst.get("scheduled_date"), "to": when, "note": (note or "").strip(), "by": by, "at": now}]
+    mongodbclient().update_data(collection_name=INSTALLATION_COLLECTION, query={"installation_id": inst["installation_id"]},
+                                update_values={"technician_id": inst.get("technician_id"), "scheduled_date": when,
+                                               "schedule_history": history, "last_reminder_at": now,
+                                               "status": "scheduled" if inst.get("status") == "requested" else inst.get("status")})
+
+
+def _apply_reschedule_request(details: dict, raised_by: str):
+    kind, target, when, reason = details.get("kind"), details.get("target_id"), details.get("requested_date"), details.get("reason", "")
+    if kind == "service":
+        service_detail().reschedule_service(SERVICE_COLLECTION, target, when, reason, raised_by)
+    elif kind == "installation":
+        inst = _get_installation(target)
+        if inst.get("status") == "completed":
+            raise HTTPException(status_code=409, detail="a completed installation cannot be rescheduled")
+        _apply_installation_schedule(inst, _valid_schedule(when), reason, raised_by)
+    else:
+        raise HTTPException(status_code=400, detail="unknown reschedule request")
+
+
+@app.post("/service/reschedule/{service_id}")
+def flow_reschedule(service_id: str, request: ServiceRescheduleRequest,
+                    user: dict = Depends(require_role("technician", "distributor", "service_manager", "admin", "accounts"))):
+    try:
+        db = service_detail()
+        existing = db.get_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="service not found")
+        svc = existing[0]
+        tech = svc.get("technician_alloted")
+        if user["role"] in ("technician", "distributor") and tech != user["username"]:
+            raise HTTPException(status_code=403, detail="this service is not assigned to you")
+        when = _valid_schedule(request.scheduled_date)
+        if user["role"] in ("technician", "distributor"):
+            if svc.get("status") in ("completed", "rejected"):
+                raise HTTPException(status_code=409, detail="this service can no longer be rescheduled")
+            label = f"{svc.get('product_name') or svc.get('product_id') or 'Service'} (serial {svc.get('serial_no') or '-'})"
+            request_id = _file_reschedule_request("service", service_id, label, when, request.reason, svc.get("scheduled_date"), user)
+            return {"message": "reschedule request sent for approval", "pending_approval": True, "request_id": request_id}
+        db.reschedule_service(SERVICE_COLLECTION, service_id, when, request.reason, user["username"])
+        body = f"{when}" + (f" - {request.reason.strip()}" if request.reason.strip() else "")
+        _notify([tech], kind="service_rescheduled", title="Service rescheduled",
+                body=f"{user['username']}: {body}", service_id=service_id, link=f"/pages/technician.html?service={service_id}")
+        return {"message": "service rescheduled", "service_id": service_id, "scheduled_date": when}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "service could not be rescheduled")
+
+
+@app.get("/allocation/technician")
+def technician_allocations(user: dict = Depends(get_current_user)):
+    """Demo units held by this technician + spare parts allocated against their services."""
+    try:
+        db = mongodbclient()
+        demo = db.get_data(collection_name=ALLOCATION_COLLECTION,
+                           query={"allocation_type": {"$in": ["demo_unit", "product"]}, "allocated_by": user["username"]},
+                           projection={"damage_report.image": 0, "dispatch.image": 0})
+        my_ids = [s.get("service_id") for s in db.get_data(
+            collection_name=SERVICE_COLLECTION, query={"technician_alloted": user["username"]},
+            projection={"service_id": 1}) if s.get("service_id")]
+        parts = []
+        if my_ids:
+            parts = db.get_data(collection_name=ALLOCATION_COLLECTION,
+                                query={"allocation_type": "spare_part", "spare_part.service_id": {"$in": my_ids}},
+                                projection={"damage_report.image": 0, "dispatch.image": 0})
+        for rows in (demo, parts):
+            for r in rows:
+                r.pop("_id", None)
+        return {"message": "technician allocations", "demo_units": demo, "spare_parts": parts}
+    except Exception:
+        logging.error("technician allocations cannot be fetched")
+        raise HTTPException(status_code=500, detail="technician allocations cannot be fetched")
+
+
+# ---------------------------------------------------------------------------
+# Installations: product installation requests that a technician can schedule
+# ---------------------------------------------------------------------------
+INSTALLATION_STATUSES = ("requested", "scheduled", "in_progress", "completed")
+INSTALLATION_MANAGERS = ("service_manager", "admin", "accounts")
+
+
+def _clean(row: dict) -> dict:
+    row.pop("_id", None)
+    return row
+
+
+def _get_installation(installation_id: str) -> dict:
+    rows = mongodbclient().get_data(collection_name=INSTALLATION_COLLECTION, query={"installation_id": installation_id})
+    if not rows:
+        raise HTTPException(status_code=404, detail="installation not found")
+    return rows[0]
+
+
+def _check_install_access(inst: dict, user: dict):
+    if user["role"] in INSTALLATION_MANAGERS:
+        return
+    if inst.get("technician_id") != user["username"]:
+        raise HTTPException(status_code=403, detail="this installation is not assigned to you")
+
+
+def _valid_schedule(value: str) -> str:
+    try:
+        datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="enter a valid date and time")
+    return str(value)
+
+
+@app.post("/installation/create")
+def create_installation(request: InstallationCreateRequest,
+                        user: dict = Depends(require_role("technician", "distributor", "service_manager", "admin", "accounts", "sales"))):
+    try:
+        if not request.product_name.strip() or not request.company_name.strip():
+            raise HTTPException(status_code=400, detail="product name and customer are required")
+        now = datetime.now(timezone.utc).isoformat()
+        tech = request.technician_id.strip()
+        if user["role"] in ("technician", "distributor") and not tech:
+            tech = user["username"]
+        installation_id = str(uuid.uuid4())
+        doc = {
+            "installation_id": installation_id, "product_name": request.product_name.strip(),
+            "model_no": request.model_no.strip(), "serial_no": request.serial_no.strip(),
+            "company_name": request.company_name.strip(), "address": request.address.strip(),
+            "contact_person": request.contact_person.strip(), "contact_number": request.contact_number.strip(),
+            "technician_id": tech or None, "preferred_date": request.preferred_date, "notes": request.notes.strip(),
+            "status": "requested", "scheduled_date": None, "schedule_history": [], "history": [],
+            "requested_by": user["username"], "created_at": now, "last_reminder_at": None,
+        }
+        mongodbclient().add(collection_name=INSTALLATION_COLLECTION, dictionary=doc)
+        _notify([tech] if tech else _service_reviewers(), kind="installation_requested", title="New installation request",
+                body=f"{doc['product_name']} - {doc['company_name']}", service_id=installation_id,
+                link=f"/pages/technician.html?installation={installation_id}")
+        return {"message": "installation requested", "installation_id": installation_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("installation could not be created")
+        raise HTTPException(status_code=500, detail="installation could not be created")
+
+
+@app.get("/installation/")
+def list_installations(user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    try:
+        rows = mongodbclient().get_data(collection_name=INSTALLATION_COLLECTION, query={})
+        rows = sorted((_clean(r) for r in rows), key=lambda r: r.get("created_at") or "", reverse=True)
+        return {"message": "installations", "dataset": rows}
+    except Exception:
+        logging.error("installations cannot be fetched")
+        raise HTTPException(status_code=500, detail="installations cannot be fetched")
+
+
+@app.get("/installation/mine")
+def my_installations(user: dict = Depends(get_current_user)):
+    """Installations assigned to me, plus unassigned requests (so any technician can pick them up)."""
+    try:
+        rows = mongodbclient().get_data(collection_name=INSTALLATION_COLLECTION, query={
+            "$or": [{"technician_id": user["username"]}, {"technician_id": None}, {"technician_id": ""}]})
+        rows = sorted((_clean(r) for r in rows), key=lambda r: r.get("created_at") or "", reverse=True)
+        return {"message": "my installations", "dataset": rows}
+    except Exception:
+        logging.error("my installations cannot be fetched")
+        raise HTTPException(status_code=500, detail="installations cannot be fetched")
+
+
+@app.post("/installation/assign/{installation_id}")
+def assign_installation(installation_id: str, request: InstallationAssignRequest,
+                        user: dict = Depends(require_role("technician", "distributor", "service_manager", "admin", "accounts"))):
+    try:
+        inst = _get_installation(installation_id)
+        # a technician may only take an unassigned request (or hand over their own)
+        if user["role"] in ("technician", "distributor") and inst.get("technician_id") not in (None, "", user["username"]):
+            raise HTTPException(status_code=403, detail="this installation is assigned to someone else")
+        tech = request.technician_id.strip()
+        if not tech:
+            raise HTTPException(status_code=400, detail="select a technician")
+        mongodbclient().update_data(collection_name=INSTALLATION_COLLECTION, query={"installation_id": installation_id},
+                                    update_values={"technician_id": tech, "last_reminder_at": datetime.now(timezone.utc).isoformat()})
+        _notify([tech], kind="installation_assigned", title="Installation assigned to you",
+                body=f"{inst.get('product_name')} - {inst.get('company_name')}", service_id=installation_id,
+                link=f"/pages/technician.html?installation={installation_id}")
+        return {"message": "installation assigned", "installation_id": installation_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("installation could not be assigned")
+        raise HTTPException(status_code=500, detail="installation could not be assigned")
+
+
+@app.post("/installation/schedule/{installation_id}")
+def schedule_installation(installation_id: str, request: InstallationScheduleRequest,
+                          user: dict = Depends(require_role("technician", "distributor", "service_manager", "admin", "accounts"))):
+    try:
+        inst = _get_installation(installation_id)
+        is_tech = user["role"] in ("technician", "distributor")
+        if is_tech and not inst.get("technician_id"):
+            inst["technician_id"] = user["username"]
+        _check_install_access(inst, user)
+        if inst.get("status") == "completed":
+            raise HTTPException(status_code=409, detail="a completed installation cannot be rescheduled")
+        when = _valid_schedule(request.scheduled_date)
+        if is_tech and inst.get("scheduled_date"):
+            label = f"Installation: {inst.get('product_name')} - {inst.get('company_name')}"
+            request_id = _file_reschedule_request("installation", installation_id, label, when, request.note, inst.get("scheduled_date"), user)
+            return {"message": "reschedule request sent for approval", "pending_approval": True, "request_id": request_id}
+        _apply_installation_schedule(inst, when, request.note, user["username"])
+        notify_to = _service_reviewers() if user["username"] == inst.get("technician_id") else [inst.get("technician_id")]
+        _notify(notify_to, kind="installation_scheduled", title="Installation scheduled",
+                body=f"{inst.get('product_name')} - {inst.get('company_name')} on {when}", service_id=installation_id,
+                link=f"/pages/technician.html?installation={installation_id}")
+        return {"message": "installation scheduled", "installation_id": installation_id, "scheduled_date": when}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("installation could not be scheduled")
+        raise HTTPException(status_code=500, detail="installation could not be scheduled")
+
+
+@app.post("/installation/status/{installation_id}")
+def installation_status(installation_id: str, request: InstallationStatusRequest,
+                        user: dict = Depends(require_role("technician", "distributor", "service_manager", "admin", "accounts"))):
+    try:
+        if request.status not in INSTALLATION_STATUSES:
+            raise HTTPException(status_code=400, detail="invalid status")
+        inst = _get_installation(installation_id)
+        _check_install_access(inst, user)
+        if request.status in ("in_progress", "completed") and not inst.get("technician_id"):
+            raise HTTPException(status_code=409, detail="assign a technician first")
+        now = datetime.now(timezone.utc).isoformat()
+        history = list(inst.get("history") or []) + [
+            {"status": request.status, "note": request.note.strip(), "by": user["username"], "at": now}]
+        update = {"status": request.status, "history": history}
+        if request.status == "completed":
+            update["completed_at"] = now
+        mongodbclient().update_data(collection_name=INSTALLATION_COLLECTION, query={"installation_id": installation_id},
+                                    update_values=update)
+        if user["username"] == inst.get("technician_id"):
+            _notify(_service_reviewers(), kind="installation_status", title=f"Installation {request.status.replace('_', ' ')}",
+                    body=f"{inst.get('product_name')} - {inst.get('company_name')}", service_id=installation_id,
+                    link=f"/pages/service.html?installation={installation_id}")
+        return {"message": "installation updated", "installation_id": installation_id, "status": request.status}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("installation status could not be updated")
+        raise HTTPException(status_code=500, detail="installation status could not be updated")
+
+
+# ---------------------------------------------------------------------------
+# 24h reminders for every service / installation that is not completed
+# ---------------------------------------------------------------------------
+REMINDER_HOURS = 24
+
+
+def send_service_reminders():
+    """Never raises. Each pending item notifies its owner once per REMINDER_HOURS until completed."""
+    try:
+        db = service_detail(product_id="", serial_no="")
+        for svc in db.services_due_for_reminder(SERVICE_COLLECTION, REMINDER_HOURS):
+            sid = svc.get("service_id")
+            tech = svc.get("technician_alloted")
+            label = f"{svc.get('product_name') or svc.get('product_id') or 'Service'} ({svc.get('company_name') or sid})"
+            if svc.get("status") == "pending_approval" or not tech:
+                who, link = _service_reviewers(), f"/pages/service.html?service={sid}"
+                title = "Service waiting for your review" if tech else "Service not assigned yet"
+            else:
+                who, link = [tech], f"/pages/technician.html?service={sid}"
+                title = "Reminder: service not completed"
+            _notify(who, kind="service_reminder", title=title, body=f"{label} is still {svc.get('status')}",
+                    service_id=sid, link=link)
+            db.mark_reminded(SERVICE_COLLECTION, sid)
+    except Exception as e:
+        logging.error(f"service reminders failed: {e}")
+    try:
+        mdb = mongodbclient()
+        limit = datetime.now(timezone.utc) - timedelta(hours=REMINDER_HOURS)
+        for inst in mdb.get_data(collection_name=INSTALLATION_COLLECTION, query={"status": {"$ne": "completed"}}):
+            raw = inst.get("last_reminder_at") or inst.get("created_at")
+            try:
+                last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+            except Exception:
+                last = None
+            if last is not None and last > limit:
+                continue
+            iid, tech = inst.get("installation_id"), inst.get("technician_id")
+            _notify([tech] if tech else _service_reviewers(), kind="installation_reminder",
+                    title="Reminder: installation not completed",
+                    body=f"{inst.get('product_name')} - {inst.get('company_name')} is still {inst.get('status')}",
+                    service_id=iid, link=f"/pages/technician.html?installation={iid}")
+            mdb.update_data(collection_name=INSTALLATION_COLLECTION, query={"installation_id": iid},
+                            update_values={"last_reminder_at": datetime.now(timezone.utc).isoformat()})
+    except Exception as e:
+        logging.error(f"installation reminders failed: {e}")
+
+
+def _reminder_loop():
+    while True:
+        send_service_reminders()
+        time.sleep(1800)
+
+
+@app.get("/service/media/{service_id}")
+def flow_media(service_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
+    try:
+        media = service_detail().get_media(SERVICE_COLLECTION, service_id)
+        if user["role"] in ("technician", "distributor") and media["technician_alloted"] != user["username"]:
+            raise HTTPException(status_code=403, detail="this service is not assigned to you")
+        return media
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "service images cannot be fetched")
 
 
 @app.get("/inventory/")
@@ -4706,6 +5314,48 @@ def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id:
     return ids
 
 
+@app.post("/allocation/assign_demo")
+def assign_demo_unit(request: AssignDemoRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    try:
+        tech = request.technician_id.strip()
+        if not tech:
+            raise HTTPException(status_code=400, detail="select a technician")
+        ids = _fulfill_demo_request([i.dict() for i in request.items], tech, request.remarks.strip(), "")
+        _notify([tech], kind="demo_assigned", title="Demo unit assigned to you",
+                body=", ".join(f"{i.product_name} x{i.quantity}" for i in request.items),
+                link="/pages/technician.html?tab=demo")
+        return {"message": "demo unit assigned", "allocation_ids": ids}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("demo unit assignment failed")
+        raise HTTPException(status_code=500, detail="demo unit could not be assigned")
+
+
+@app.post("/allocation/reassign_demo/{allocation_id}")
+def reassign_demo_unit(allocation_id: str, request: ReassignDemoRequest,
+                       user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    try:
+        tech = request.technician_id.strip()
+        if not tech:
+            raise HTTPException(status_code=400, detail="select a technician")
+        rows = mongodbclient().get_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id})
+        if not rows or rows[0].get("allocation_type") not in ("demo_unit", "product"):
+            raise HTTPException(status_code=404, detail="demo unit not found")
+        if rows[0].get("return_status"):
+            raise HTTPException(status_code=409, detail="this demo unit is already returned")
+        mongodbclient().update_data(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": allocation_id},
+                                    update_values={"allocated_by": tech, "sales_person": _user_snapshot(tech)})
+        _notify([tech], kind="demo_assigned", title="Demo unit assigned to you", body="A demo unit was handed over to you",
+                link="/pages/technician.html?tab=demo")
+        return {"message": "demo unit reassigned", "allocation_id": allocation_id}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("demo unit reassignment failed")
+        raise HTTPException(status_code=500, detail="demo unit could not be reassigned")
+
+
 @app.post("/allocation/create_demo_unit")
 def create_demo_unit_allocation(request: CreateDemoUnitRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
@@ -4740,6 +5390,7 @@ class ServiceRequestModel(BaseModel):
     video: str = ""
     location: str = "indoor"
     spare_parts: str = ""
+    address: str = ""
 
 
 class SparePartRequestFlagModel(BaseModel):
@@ -5074,6 +5725,7 @@ def raise_order_request(request: OrderRequestModel, user: dict = Depends(require
 @app.post("/request/service")
 def raise_service_request(request: ServiceRequestModel, user: dict = Depends(require_role("technician", "distributor"))):
     try:
+        address = _check_field_address(request.location, request.address)
         req = request_manager(
             request_type="service",
             raised_by=user["username"],
@@ -5087,7 +5739,8 @@ def raise_service_request(request: ServiceRequestModel, user: dict = Depends(req
                 "image": request.image,
                 "video": request.video,
                 "location": request.location,
-                "spare_parts": request.spare_parts
+                "spare_parts": request.spare_parts,
+                "address": address
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
@@ -5231,11 +5884,22 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                 product_name=details.get("product_name", ""),
                 model_no=details.get("model_no", "")
             )
+            _save_service_address(service.service_id, details.get("address", ""))
             if details.get("video"):
                 _raise_media_review_request(service.service_id, user["username"])
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and service created", "service_id": service.service_id}
+
+        if req["request_type"] == "reschedule":
+            details = req["details"]
+            _apply_reschedule_request(details, req["raised_by"])
+            db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
+                           status="approved", resolved_by=user["username"])
+            _notify([req["raised_by"]], kind="reschedule_approved", title="Reschedule approved",
+                    body=f"{details.get('label')} is now on {details.get('requested_date')}",
+                    service_id=details.get("target_id", ""), link="/pages/technician.html?tab=requests")
+            return {"message": "reschedule approved"}
 
         # media_review: approving means admin/accounts confirmed they downloaded the
         # video — it's cleared from the database afterwards to free up storage.
@@ -5317,6 +5981,12 @@ def reject_request(request_id: str, request: RequestRejectModel, user: dict = De
                 svc_db = service_detail()
                 svc_db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
                                     update_values={"video": ""})
+
+        if existing[0]["request_type"] == "reschedule":
+            d = existing[0]["details"]
+            _notify([existing[0]["raised_by"]], kind="reschedule_rejected", title="Reschedule request rejected",
+                    body=f"{d.get('label')}" + (f" - {request.reason.strip()}" if request.reason.strip() else ""),
+                    service_id=d.get("target_id", ""), link="/pages/technician.html?tab=requests")
 
         if existing[0]["request_type"] in ("convert_to_order", "return_demo"):
             aid = existing[0]["details"].get("allocation_id")

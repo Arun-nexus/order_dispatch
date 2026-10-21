@@ -267,8 +267,8 @@ function shipFiltered() {
     if (f.to && (s.dispatchDate || '') > f.to) return false;
     if (q) {
       const hay = [s.id, s.companyName, s.companyAddress,
-        ...(s.products || []).map(p => p.name),
-        ...shipPartsOf(s).map(p => p.name)].join(' ').toLowerCase();
+      ...(s.products || []).map(p => p.name),
+      ...shipPartsOf(s).map(p => p.name)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -501,7 +501,7 @@ function openViewModal(id) {
       <div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;font-weight:600;">
           <span>${p.name}</span>
-          <span>${curMoney(p.price, s.currency)} x ${p.quantity} = ${curMoney((Number(p.price)||0)*(Number(p.quantity)||0), s.currency)}</span>
+          <span>${curMoney(p.price, s.currency)} x ${p.quantity} = ${curMoney((Number(p.price) || 0) * (Number(p.quantity) || 0), s.currency)}</span>
         </div>
         ${p.warranty ? `<p style="font-size:12px;color:#64748b;margin-top:4px;">Warranty: ${p.warranty}</p>` : ''}
         ${(p.parts && p.parts.length) ? `
@@ -855,7 +855,7 @@ function renderStep2() {
 
   // seed with one row if nothing added yet
   if (!shipmentDraft.products.length) addProductRow();
-  else shipmentDraft.products.forEach(() => {}); // rows are rebuilt below from state
+  else shipmentDraft.products.forEach(() => { }); // rows are rebuilt below from state
 
   renderProductRows();
 

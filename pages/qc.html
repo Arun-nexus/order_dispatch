@@ -10,11 +10,30 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <!-- sidebar scrollbar -->
   <style id="sidebar-scroll-fix">
-    .sidebar { max-height: 100vh; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.6) transparent; }
-    .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(148,163,184,.55); border-radius: 999px; }
-    .sidebar::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,.9); }
+    .sidebar {
+      max-height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, .6) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, .55);
+      border-radius: 999px;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, .9);
+    }
   </style>
 </head>
 
@@ -30,13 +49,13 @@
         <li><a href="../main_dashboard.html"><i class="fa-solid fa-house"></i><span>Dashboard</span></a></li>
         <li><a href="orders.html"><i class="fa-solid fa-cart-shopping"></i><span>Orders</span></a></li>
         <li><a href="inventory.html"><i class="fa-solid fa-boxes-stacked"></i><span>Inventory</span></a></li>
-                <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
+        <li><a href="shipment.html"><i class="fa-solid fa-boxes-packing"></i><span>Shipment</span></a></li>
         <li><a href="assembly.html"><i class="fa-solid fa-gears"></i><span>Assembly</span></a></li>
 
         <li><a href="service.html"><i class="fa-solid fa-screwdriver-wrench"></i><span>Service</span></a></li>
         <li><a href="allocated.html"><i class="fa-solid fa-people-carry-box"></i><span>Allocated</span></a></li>
         <li><a href="dispatch.html"><i class="fa-solid fa-truck-fast"></i><span>Dispatch</span></a></li>
-                <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
+        <li><a href="attendance.html"><i class="fa-solid fa-calendar-check"></i><span>Attendance</span></a></li>
 
         <li><a href="users.html"><i class="fa-solid fa-users"></i><span>Users</span></a></li>
         <li><a href="reports.html"><i class="fa-solid fa-chart-column"></i><span>Reports</span></a></li>
@@ -83,12 +102,42 @@
       </header>
 
       <section class="cards" id="qcCards">
-        <div class="card" data-type="" data-status="" style="cursor:pointer;"><div><span>Total Records</span><h2 id="cTotal">0</h2><p>All modules</p></div><i class="fa-solid fa-layer-group"></i></div>
-        <div class="card" data-type="inventory" data-status="" style="cursor:pointer;"><div><span>Inventory</span><h2 id="cInventory">0</h2><p>Stock items</p></div><i class="fa-solid fa-boxes-stacked"></i></div>
-        <div class="card" data-type="order" data-status="" style="cursor:pointer;"><div><span>Orders</span><h2 id="cOrder">0</h2><p>All orders</p></div><i class="fa-solid fa-cart-shopping"></i></div>
-        <div class="card" data-type="dispatch" data-status="" style="cursor:pointer;"><div><span>Dispatch</span><h2 id="cDispatch">0</h2><p>All dispatch records</p></div><i class="fa-solid fa-truck-fast"></i></div>
-        <div class="card" data-type="dispatch" data-status="pending" style="cursor:pointer;"><div><span>Pending Dispatch</span><h2 id="cPending">0</h2><p>Awaiting dispatch</p></div><i class="fa-regular fa-clock"></i></div>
-        <div class="card" data-type="service" data-status="" style="cursor:pointer;"><div><span>Services</span><h2 id="cService">0</h2><p>All services</p></div><i class="fa-solid fa-screwdriver-wrench"></i></div>
+        <div class="card" data-type="" data-status="" style="cursor:pointer;">
+          <div><span>Total Records</span>
+            <h2 id="cTotal">0</h2>
+            <p>All modules</p>
+          </div><i class="fa-solid fa-layer-group"></i>
+        </div>
+        <div class="card" data-type="inventory" data-status="" style="cursor:pointer;">
+          <div><span>Inventory</span>
+            <h2 id="cInventory">0</h2>
+            <p>Stock items</p>
+          </div><i class="fa-solid fa-boxes-stacked"></i>
+        </div>
+        <div class="card" data-type="order" data-status="" style="cursor:pointer;">
+          <div><span>Orders</span>
+            <h2 id="cOrder">0</h2>
+            <p>All orders</p>
+          </div><i class="fa-solid fa-cart-shopping"></i>
+        </div>
+        <div class="card" data-type="dispatch" data-status="" style="cursor:pointer;">
+          <div><span>Dispatch</span>
+            <h2 id="cDispatch">0</h2>
+            <p>All dispatch records</p>
+          </div><i class="fa-solid fa-truck-fast"></i>
+        </div>
+        <div class="card" data-type="dispatch" data-status="pending" style="cursor:pointer;">
+          <div><span>Pending Dispatch</span>
+            <h2 id="cPending">0</h2>
+            <p>Awaiting dispatch</p>
+          </div><i class="fa-regular fa-clock"></i>
+        </div>
+        <div class="card" data-type="service" data-status="" style="cursor:pointer;">
+          <div><span>Services</span>
+            <h2 id="cService">0</h2>
+            <p>All services</p>
+          </div><i class="fa-solid fa-screwdriver-wrench"></i>
+        </div>
       </section>
 
       <div class="top-actions">
@@ -107,7 +156,9 @@
           </select>
         </div>
         <div class="filter-box"><i class="fa-solid fa-circle-half-stroke"></i>
-          <select id="fStatus"><option value="">All Status</option></select>
+          <select id="fStatus">
+            <option value="">All Status</option>
+          </select>
         </div>
         <div class="filter-box"><i class="fa-solid fa-calendar-days"></i><input type="date" id="fFrom"></div>
         <div class="filter-box"><i class="fa-solid fa-calendar-days"></i><input type="date" id="fTo"></div>
@@ -156,7 +207,9 @@
 
   <div id="qcViewModal" class="modal"
     style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:999;">
-    <div class="modal-content" id="qcViewContent" style="background:#fff;border-radius:16px;padding:26px;width:min(980px,96vw);max-height:88vh;overflow-y:auto;"></div>
+    <div class="modal-content" id="qcViewContent"
+      style="background:#fff;border-radius:16px;padding:26px;width:min(980px,96vw);max-height:88vh;overflow-y:auto;">
+    </div>
   </div>
 
   <script>

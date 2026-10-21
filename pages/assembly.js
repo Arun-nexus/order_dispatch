@@ -215,8 +215,8 @@ function asmFiltered() {
     if (f.to && (a.createdAt || '').slice(0, 10) > f.to) return false;
     if (q) {
       const hay = [a.id, a.productName, a.productId, a.modelNumber,
-        ...(a.partsUsed || []).map(p => `${p.name} ${p.belongsTo || ''}`),
-        ...(a.serials || []).map(s => `${s.serial} ${s.hologram || ''}`)].join(' ').toLowerCase();
+      ...(a.partsUsed || []).map(p => `${p.name} ${p.belongsTo || ''}`),
+      ...(a.serials || []).map(s => `${s.serial} ${s.hologram || ''}`)].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -409,7 +409,7 @@ function renderTable() {
     const usesLocal = (a.partsUsed || []).some(p => p.source === 'local');
     const sourceSummary = usesInventory && usesLocal ? 'Inventory + Local'
       : usesInventory ? 'Inventory (spare parts)'
-      : usesLocal ? 'Local parts' : '—';
+        : usesLocal ? 'Local parts' : '—';
     return `
       <tr>
         <td>${a.productName}</td>
