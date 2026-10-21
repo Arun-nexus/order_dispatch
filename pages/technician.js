@@ -221,6 +221,7 @@ function openViewModal(s) {
     ${s.report_rejected_reason ? `<div style="background:#fee2e2;color:#991b1b;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:10px;"><b>Sent back by service manager:</b> ${techEsc(s.report_rejected_reason)}</div>` : ''}
     ${row('Status', techEsc(statusLabel(s)))}
     ${row('Service ID', techEsc(s.service_id))}
+    ${row('Company', techEsc(s.company_name || '-'))}
     ${row('Product', techEsc(productLabel(s)))}
     ${row('Model No.', techEsc(modelLabel(s)))}
     ${row('Scheduled For', fmtWhen(s.scheduled_date))}
@@ -615,6 +616,7 @@ function openRequestServiceModal() {
     </div>
     <p style="color:#64748b;font-size:13px;margin-bottom:10px;">This will be sent to admin/employee for approval. It will not appear in your active services until approved.</p>
     <form id="requestServiceForm" style="display:flex;flex-direction:column;gap:10px;">
+      <input name="company_name" placeholder="Company name *" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
       <input name="product_id" placeholder="Product name" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
       <input name="model_no" placeholder="Model No." style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
       <select name="location" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
@@ -676,6 +678,7 @@ function openRequestServiceModal() {
 
     const payload = {
       product_id: fd.get('product_id'),
+      company_name: (fd.get('company_name') || '').trim(),
       product_name: (fd.get('product_id') || '').trim(),
       model_no: (fd.get('model_no') || '').trim(),
       location: fd.get('location'),
@@ -819,6 +822,54 @@ function allocWhen(a) {
   return a.created_at || a.allocated_at || a.allocation_date || (a.dispatch && a.dispatch.dispatched_at) || '';
 }
 
+const demoCanReturn = a => !a.return_status;
+function openDemoReturn(a) {
+  if (!a) return;
+  const it = demoItems(a);
+  const modal = document.getElementById('actionModal');
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>Return Demo Unit</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <p style="font-size:13px;color:#64748b;">${it.map(x => techEsc(x.name) + (x.serials ? ' (' + techEsc(x.serials) + ')' : '')).join(', ')}</p>
+    <div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:8px;padding:8px 12px;font-size:12px;margin-top:8px;">The unit is marked returned and goes back to inventory only after the service manager approves.</div>
+    <label style="${LBL}">Returned through *</label>
+    <select id="retVia" style="${INP}">
+      <option value="">Select</option><option>Courier</option><option>Hand delivery</option><option>Dropped at office</option><option>Other</option>
+    </select>
+    <label style="${LBL}">Proof photo (optional, max 2MB)</label>
+    <input type="file" id="retImg" accept="image/*" style="${INP}">
+    <label style="${LBL}">Note (optional)</label>
+    <textarea id="retNote" rows="2" style="${INP}"></textarea>
+    <p id="retErr" style="color:#dc2626;font-size:13px;min-height:16px;margin-top:6px;"></p>
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button type="button" class="cancel-btn" style="${BTN_GREY}">Cancel</button>
+      <button type="button" id="retSave" style="${BTN_BLUE}">Send return request</button>
+    </div>`;
+  const close = () => modal.style.display = 'none';
+  content.querySelector('.close').addEventListener('click', close);
+  content.querySelector('.cancel-btn').addEventListener('click', close);
+  const save = content.querySelector('#retSave');
+  save.addEventListener('click', async () => {
+    const err = content.querySelector('#retErr');
+    const via = content.querySelector('#retVia').value;
+    const f = content.querySelector('#retImg').files[0];
+    if (!via) { err.textContent = 'Select how the unit was returned.'; return; }
+    if (f && f.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 2MB or under.'; return; }
+    save.disabled = true;
+    try {
+      const proof = { note: content.querySelector('#retNote').value.trim() };
+      if (f) proof.image = await readFileAsBase64(f);
+      await postJson(`/allocation/return_request/${encodeURIComponent(a.allocation_id)}`, { returned_through: via, proof });
+      close(); await loadAllocations(); renderAll();
+      showResponseModal('Return request sent', 'The service manager will approve it. The unit is marked returned after that.', true);
+    } catch (e) { err.textContent = e.message; save.disabled = false; }
+  });
+  modal.style.display = 'flex';
+}
+
 function demoStatus(a) {
   if (a.return_status) return String(a.return_status).replace(/_/g, ' ');
   return 'with you';
@@ -838,7 +889,10 @@ function openDemoDetail(a) {
       <tbody>${it.map(x => `<tr><td ${TD}>${techEsc(x.name)}</td><td ${TD}>${techEsc(x.model)}</td><td ${TD}>${techEsc(x.serials)}</td><td ${TD}>${techEsc(x.qty)}</td></tr>`).join('')}</tbody></table></div>
     ${cust.company_name ? dRow('Customer', techEsc(cust.company_name) + (cust.company_address ? ' - ' + techEsc(cust.company_address) : '')) : ''}
     ${a.remarks ? dRow('Remarks', techEsc(a.remarks)) : ''}
+    ${demoCanReturn(a) ? `<div style="margin-top:12px;"><button type="button" id="demoRetBtn" style="${BTN_GREY}"><i class="fa-solid fa-rotate-left"></i> Return this unit</button></div>` : '<div style="background:#eff6ff;color:#1e3a8a;border-radius:8px;padding:8px 12px;font-size:12px;margin-top:12px;">Return request: ' + techEsc(demoStatus(a)) + '</div>'}
     ${a.dispatch ? dRow('Dispatch', techEsc([a.dispatch.courier_name, a.dispatch.tracking_number || a.dispatch.docket_no].filter(Boolean).join(' · ') || 'Dispatched')) : ''}`);
+  const rb = document.getElementById('demoRetBtn');
+  if (rb) rb.addEventListener('click', () => { document.getElementById('detailModal').style.display = 'none'; openDemoReturn(a); });
 }
 
 
@@ -871,7 +925,7 @@ function openPartDetail(a) {
 // ======================================================================
 // Installations
 // ======================================================================
-const INSTALL_LABEL = { requested: 'Requested', scheduled: 'Scheduled', in_progress: 'In progress', completed: 'Completed' };
+const INSTALL_LABEL = { requested: 'Requested', scheduled: 'Scheduled', in_progress: 'In progress', pending_approval: 'Completion in review', completed: 'Completed' };
 
 async function loadInstallations() {
   try {
@@ -914,11 +968,13 @@ function openInstallDetail(i) {
       : `<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center;">
       ${i.scheduled_date ? `<button type="button" id="instSched" style="${BTN_BLUE}"><i class="fa-solid fa-calendar-days"></i> Request Reschedule</button>` : '<span style="font-size:12px;color:#64748b;">The service manager sets the date.</span>'}
       ${i.status === 'scheduled' ? `<button type="button" class="inst-st" data-st="in_progress" style="${BTN_GREEN}">Start Installation</button>` : ''}
-      ${i.status === 'in_progress' ? `<button type="button" class="inst-st" data-st="completed" style="${BTN_GREEN}">Mark Completed</button>` : ''}
+      ${i.status === 'in_progress' ? `<button type="button" class="inst-st" data-st="completed" style="${BTN_GREEN}">Complete with photo</button>` : ''}
+      ${i.status === 'pending_approval' ? '<span style="font-size:12px;color:#64748b;">Completion proof sent — waiting for the service manager.</span>' : ''}
     </div>`}`);
   const sb = c.querySelector('#instSched');
   if (sb) sb.addEventListener('click', () => { document.getElementById('detailModal').style.display = 'none'; openInstallSchedule(i); });
   c.querySelectorAll('.inst-st').forEach(b => b.addEventListener('click', async () => {
+    if (b.dataset.st === 'completed') { document.getElementById('detailModal').style.display = 'none'; openInstallComplete(i); return; }
     try {
       await postJson(`/installation/status/${encodeURIComponent(i.installation_id)}`, { status: b.dataset.st });
       document.getElementById('detailModal').style.display = 'none';
@@ -1012,12 +1068,12 @@ const viewBtn = '<button type="button" data-act="view" title="View" style="' + B
 const TECH_VIEWS = {
   services: {
     title: 'Services', info: 'Start a service, upload proof, and send your report for approval',
-    cols: ['Service ID', 'Product', 'Model No.', 'Serial No.', 'Issue', 'Type / Address', 'Status', 'Scheduled', 'Charges', 'Warranty', 'Actions'],
+    cols: ['Service ID', 'Company', 'Product', 'Model No.', 'Serial No.', 'Issue', 'Type / Address', 'Status', 'Scheduled', 'Charges', 'Warranty', 'Actions'],
     list: () => techState.services.slice().sort((a, b) => new Date(b.created_at || b.purchase_date || 0) - new Date(a.created_at || a.purchase_date || 0)),
     statuses: [['all', 'All'], ['active', 'New'], ['in_progress', 'In Progress'], ['pending_approval', 'Awaiting Approval'], ['completed', 'Completed'], ['rejected', 'Rejected']],
     statusOf: s => s.status,
-    text: s => [productLabel(s), s.model_no, s.serial_no, s.service_id, s.issue, s.address].join(' '),
-    cells: s => [techEsc((s.service_id || '').slice(0, 8)), techEsc(productLabel(s)), techEsc(modelLabel(s)), techEsc(s.serial_no || ''), techEsc(s.issue || ''),
+    text: s => [s.company_name, productLabel(s), s.model_no, s.serial_no, s.service_id, s.issue, s.address].join(' '),
+    cells: s => [techEsc((s.service_id || '').slice(0, 8)), techEsc(s.company_name || '-'), techEsc(productLabel(s)), techEsc(modelLabel(s)), techEsc(s.serial_no || ''), techEsc(s.issue || ''),
     `${FIELD_LABEL(s)}${s.address ? '<br><small style="color:#64748b;">' + techEsc(s.address) + '</small>' : ''}`,
     `<span class="stock ${statusBadgeClass(s.status)}">${techEsc(statusLabel(s))}</span>`, s.scheduled_date ? fmtWhen(s.scheduled_date) : '-',
     s.service_charges != null ? '₹' + s.service_charges : 'Not set', techEsc(s.warranty_until ?? '-')],
@@ -1031,7 +1087,7 @@ const TECH_VIEWS = {
     title: 'Installations', info: 'Request an installation or work on the ones assigned to you — dates are set by the service manager',
     cols: ['Product', 'Model No.', 'Customer', 'Address', 'Status', 'Scheduled', 'Technician', 'Actions'],
     list: () => techState.installs,
-    statuses: [['all', 'All'], ['pending', 'Awaiting approval'], ['requested', 'Assigned'], ['scheduled', 'Scheduled'], ['in_progress', 'In Progress'], ['completed', 'Completed']],
+    statuses: [['all', 'All'], ['pending', 'Awaiting approval'], ['requested', 'Assigned'], ['scheduled', 'Scheduled'], ['in_progress', 'In Progress'], ['pending_approval', 'Completion in review'], ['completed', 'Completed']],
     statusOf: i => instStatusKey(i),
     text: i => [i.product_name, i.model_no, i.company_name, i.address, i.serial_no].join(' '),
     cells: i => [techEsc(i.product_name), techEsc(i.model_no || '-'), techEsc(i.company_name), techEsc(i.address || '-'),
@@ -1040,10 +1096,11 @@ const TECH_VIEWS = {
       + (instAwaiting(i) ? '<span style="font-size:12px;color:#64748b;">Waiting for approval</span>' : '')
       + (!instAwaiting(i) && i.status === 'requested' ? '<span style="font-size:12px;color:#64748b;">Waiting for schedule</span>' : '')
       + (!instAwaiting(i) && i.status === 'scheduled' ? `<button type="button" data-act="sched" style="${BTN_GREY}">Request Reschedule</button><button type="button" data-act="start" style="${BTN_GREEN}">Start</button>` : '')
-      + (!instAwaiting(i) && i.status === 'in_progress' ? `<button type="button" data-act="done" style="${BTN_GREEN}">Complete</button>` : ''),
+      + (!instAwaiting(i) && i.status === 'in_progress' ? `<button type="button" data-act="done" style="${BTN_GREEN}">Complete</button>` : '')
+      + (!instAwaiting(i) && i.status === 'pending_approval' ? '<span style="font-size:12px;color:#64748b;">Waiting for review</span>' : ''),
     act: {
       view: openInstallDetail, sched: openInstallSchedule,
-      start: i => setInstallStatus(i, 'in_progress'), done: i => setInstallStatus(i, 'completed')
+      start: i => setInstallStatus(i, 'in_progress'), done: i => openInstallComplete(i)
     },
     open: openInstallDetail,
     button: { label: '<i class="fa-solid fa-plus"></i> Request Installation', fn: () => openNewInstallModal() },
@@ -1061,8 +1118,8 @@ const TECH_VIEWS = {
       return [techEsc(f.name) + (it.length > 1 ? ` <small style="color:#64748b;">+${it.length - 1} more</small>` : ''), techEsc(f.model), techEsc(f.serials),
       `<span class="stock medium">${techEsc(demoStatus(a))}</span>`, allocWhen(a) ? fmtWhen(allocWhen(a)) : '-'];
     },
-    actions: () => viewBtn,
-    act: { view: openDemoDetail },
+    actions: a => viewBtn + (demoCanReturn(a) ? `<button type="button" data-act="ret" style="${BTN_GREY}"><i class="fa-solid fa-rotate-left"></i> Return</button>` : ''),
+    act: { view: openDemoDetail, ret: openDemoReturn },
     open: openDemoDetail,
     empty: 'No demo units allocated to you.'
   },
@@ -1099,7 +1156,55 @@ const TECH_VIEWS = {
   }
 };
 
+function openInstallComplete(i) {
+  if (!i) return;
+  const modal = document.getElementById('actionModal');
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h3>Complete Installation</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <p style="font-size:13px;color:#64748b;">${techEsc(i.product_name)} · ${techEsc(i.company_name)}</p>
+    <div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:8px;padding:8px 12px;font-size:12px;margin-top:8px;">Upload a photo of the installed product. The installation is marked completed only after the service manager approves it.</div>
+    <label style="${LBL}">Installation photo * (max 2MB)</label>
+    <input type="file" id="instDoneImg" accept="image/*" style="${INP}">
+    <img id="instDonePrev" style="display:none;max-width:100%;max-height:200px;border-radius:10px;margin-top:8px;">
+    <label style="${LBL}">Note (optional)</label>
+    <textarea id="instDoneNote" rows="3" style="${INP}"></textarea>
+    <p id="instDoneErr" style="color:#dc2626;font-size:13px;min-height:16px;margin-top:6px;"></p>
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button type="button" class="cancel-btn" style="${BTN_GREY}">Cancel</button>
+      <button type="button" id="instDoneSave" style="${BTN_GREEN}">Send for approval</button>
+    </div>`;
+  const close = () => modal.style.display = 'none';
+  content.querySelector('.close').addEventListener('click', close);
+  content.querySelector('.cancel-btn').addEventListener('click', close);
+  const fileEl = content.querySelector('#instDoneImg'), prev = content.querySelector('#instDonePrev');
+  fileEl.addEventListener('change', () => {
+    const f = fileEl.files[0];
+    if (f) { prev.src = URL.createObjectURL(f); prev.style.display = 'block'; } else prev.style.display = 'none';
+  });
+  const save = content.querySelector('#instDoneSave');
+  save.addEventListener('click', async () => {
+    const err = content.querySelector('#instDoneErr');
+    const f = fileEl.files[0];
+    if (!f) { err.textContent = 'Upload the installation photo first.'; return; }
+    if (f.size > 2 * 1024 * 1024) { err.textContent = `Image is ${(f.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`; return; }
+    save.disabled = true; save.textContent = 'Sending...';
+    try {
+      const image = await readFileAsBase64(f);
+      await postJson(`/installation/status/${encodeURIComponent(i.installation_id)}`,
+        { status: 'pending_approval', image, note: content.querySelector('#instDoneNote').value.trim() });
+      close(); await loadInstallations();
+      showResponseModal('Sent for approval', 'The service manager will review your photo and mark the installation completed.', true);
+    } catch (e) { err.textContent = e.message; save.disabled = false; save.textContent = 'Send for approval'; }
+  });
+  modal.style.display = 'flex';
+}
+
 async function setInstallStatus(i, status) {
+  if (status === 'completed') return openInstallComplete(i);
   try {
     await postJson(`/installation/status/${encodeURIComponent(i.installation_id)}`, { status });
     await loadInstallations();

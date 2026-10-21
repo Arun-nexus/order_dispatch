@@ -74,7 +74,8 @@ function getFilteredServices() {
       (s.product_id || '').toLowerCase().includes(q) ||
       serviceProductInfo(s).name.toLowerCase().includes(q) ||
       serviceProductInfo(s).model.toLowerCase().includes(q) ||
-      (s.service_id || '').toLowerCase().includes(q)
+      (s.service_id || '').toLowerCase().includes(q) ||
+      (s.company_name || '').toLowerCase().includes(q)
     );
   }
   const f = svcState.filters;
@@ -304,6 +305,7 @@ function renderServiceTable(services) {
       : `<span class="${s.manager_confirmed_return ? 'confirmed' : 'pending'}">${s.manager_confirmed_return ? 'Confirmed' : 'Pending'}</span>`;
 
     tr.innerHTML = `
+      <td>${esc(s.company_name || '-')}</td>
       <td>${serviceProductInfo(s).name}</td>
       <td>${serviceProductInfo(s).model}</td>
       <td>${s.serial_no ?? ''}</td>
@@ -414,7 +416,7 @@ function openViewModal(s) {
   }
   const hist = (s.schedule_history || []).slice().reverse().map(h =>
     `<li style="margin-bottom:4px;">${fmtSchedule(h.from)} &rarr; <b>${fmtSchedule(h.to)}</b> by ${esc(h.by)}${h.reason ? ' - ' + esc(h.reason) : ''}</li>`).join('');
-  extra.innerHTML = `${s.address ? `<div class="detail"><small>Address</small><p>${esc(s.address)}</p></div>` : ''}<div class="detail"><small>Scheduled For</small><p>${fmtSchedule(s.scheduled_date)}</p></div>
+  extra.innerHTML = `<div class="detail"><small>Company</small><p>${esc(s.company_name || '-')}</p></div>${s.address ? `<div class="detail"><small>Address</small><p>${esc(s.address)}</p></div>` : ''}<div class="detail"><small>Scheduled For</small><p>${fmtSchedule(s.scheduled_date)}</p></div>
     <div class="detail"><small>Status</small><p>${esc((s.status || '').replace('_', ' '))}</p></div>
     ${hist ? `<div class="detail"><small>Reschedule History</small><ul style="font-size:13px;padding-left:18px;margin-top:4px;">${hist}</ul></div>` : ''}`;
   modal.style.display = 'flex';
@@ -728,6 +730,7 @@ async function openCreateModal() {
             <option value="outdoor">Field</option>
           </select>
           <textarea name="address" id="createAddress" placeholder="Field service address *" style="display:none;min-height:56px;"></textarea>
+          <input name="company_name" placeholder="Company Name" required>
           <input name="product_name" placeholder="Product Name" required>
           <input name="model_no" placeholder="Model No." required>
           <input name="serial_no" placeholder="Serial No" required>
@@ -786,6 +789,7 @@ async function openCreateModal() {
 
       const payload = {
         product_id: DEFAULT_PRODUCT_ID,
+        company_name: (fd.get('company_name') || '').trim(),
         product_name: (fd.get('product_name') || '').trim(),
         model_no: (fd.get('model_no') || '').trim(),
         location: fd.get('location'),
@@ -975,7 +979,7 @@ function wireModals() {
 let svcView = 'services';
 let svcSearch = '';
 
-const SVC_HEAD = ['Product Name', 'Model No.', 'Serial No.', 'Technician', 'Issue', 'Location', 'Warranty', 'Status', 'Return Approval', 'Created By', 'Listed On', 'Actions'];
+const SVC_HEAD = ['Company', 'Product Name', 'Model No.', 'Serial No.', 'Technician', 'Issue', 'Location', 'Warranty', 'Status', 'Return Approval', 'Created By', 'Listed On', 'Actions'];
 // A technician's own installation request = unassigned installation raised by somebody else.
 // Approving it assigns the installation to whoever raised it.
 const instMeS = () => (typeof getUsername === 'function' ? (getUsername() || '') : '');
@@ -986,7 +990,7 @@ async function approveInstallRequest(i) {
     await Promise.all([loadInstallations(), loadRequests()]);
   } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
 }
-const INST_LABEL = { requested: 'Requested', scheduled: 'Scheduled', in_progress: 'In progress', completed: 'Completed' };
+const INST_LABEL = { requested: 'Requested', scheduled: 'Scheduled', in_progress: 'In progress', pending_approval: 'Completion review', completed: 'Completed' };
 const IN_S = 'width:100%;padding:9px;margin:6px 0 10px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;';
 const B_PRI = 'padding:9px 16px;border:none;background:#1665ff;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;';
 const B_GRY = 'padding:9px 16px;border:none;background:#e2e8f0;color:#0f172a;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;';
@@ -1026,6 +1030,28 @@ function demoItemsS(a) {
   }));
 }
 const allocWhenS = a => a.created_at || a.allocated_at || a.allocation_date || '';
+const demoReturnPending = a => !!a.return_status && !/^(returned|approved|rejected)$/i.test(String(a.return_status));
+const demoReturnReq = a => (svcState.returnReqs || []).find(r => r.status === 'pending' && [r.allocation_id, (r.details || {}).allocation_id].includes(a.allocation_id));
+async function approveDemoReturn(a) {
+  try {
+    const r = demoReturnReq(a);
+    if (r) await svcPost(`/request/approve/${encodeURIComponent(r.request_id)}`, {});
+    else await svcPost(`/allocation/return/${encodeURIComponent(a.allocation_id)}`, {});
+    await Promise.all([loadDemo(), loadRequests()]);
+  } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
+}
+function rejectDemoReturn(a) {
+  const r = demoReturnReq(a);
+  if (!r) { alert('This return has no request to reject. Contact admin.'); return; }
+  const m = svcModal('Reject Return', `<p style="font-size:13px;color:var(--text-light);">Return requested by ${esc(a.allocated_by || '-')}</p>
+    <label style="font-size:13px;">Reason (shown to the technician)</label><textarea id="rjReason" rows="3" style="${IN_S}"></textarea>${formFooter('Reject')}`);
+  bindForm(m, async (mm, err) => {
+    const reason = mm.querySelector('#rjReason').value.trim();
+    if (!reason) { err.textContent = 'Write a reason.'; return; }
+    await svcPost(`/request/reject/${encodeURIComponent(r.request_id)}`, { reason });
+    mm.remove(); await Promise.all([loadDemo(), loadRequests()]);
+  });
+}
 const demoStatusS = a => (a.return_status ? String(a.return_status).replace(/_/g, ' ') : 'with technician');
 
 async function loadInstallations() {
@@ -1056,6 +1082,7 @@ async function loadRequests() {
   try {
     const res = await apiFetch('/request/');
     const data = await res.json();
+    svcState.returnReqs = res.ok ? (data.dataset || []).filter(r => /return/i.test(r.request_type || '')) : [];
     svcState.requests = res.ok ? (data.dataset || []).filter(r => r.request_type === 'reschedule')
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)) : [];
   } catch (e) { svcState.requests = []; }
@@ -1087,14 +1114,14 @@ const SVC_VIEWS = {
   installs: {
     title: 'Installations', info: 'Approve technician requests (assigned to the requester) or assign and schedule installations yourself',
     cols: ['Product', 'Model No.', 'Customer', 'Address', 'Technician', 'Status', 'Scheduled', 'Requested By', 'Actions'],
-    statuses: [['all', 'All'], ['requested', 'Requested'], ['scheduled', 'Scheduled'], ['in_progress', 'In Progress'], ['completed', 'Completed']],
+    statuses: [['all', 'All'], ['requested', 'Requested'], ['scheduled', 'Scheduled'], ['in_progress', 'In Progress'], ['pending_approval', 'Completion review'], ['completed', 'Completed']],
     list: () => svcState.installs, statusOf: i => i.status, techOf: i => i.technician_id || '',
     text: i => [i.product_name, i.model_no, i.company_name, i.address, i.serial_no, i.technician_id].join(' '),
     cells: i => [esc(i.product_name), esc(i.model_no || '-'), esc(i.company_name), esc(i.address || '-'),
     i.technician_id ? esc(i.technician_id) : (instIsRequest(i) ? `<span style="color:#d97706;font-weight:600;">Request from ${esc(i.requested_by)}</span>` : '<span style="color:#dc2626;font-weight:600;">Unassigned</span>'),
     `<span class="progress">${esc(INST_LABEL[i.status] || i.status)}</span>`, i.scheduled_date ? fmtSchedule(i.scheduled_date) : '-', esc(i.requested_by || '-')],
-    actions: i => V_BTN + (instIsRequest(i) ? `<button type="button" data-act="approve" style="${B_GRN}">Approve</button>` : '') + (i.status !== 'completed' ? `<button type="button" data-act="assign" style="${B_GRY}">${i.technician_id ? 'Reassign' : 'Assign'}</button><button type="button" data-act="sched" style="${B_GRY}">${i.scheduled_date ? 'Reschedule' : 'Schedule'}</button>` : ''),
-    act: { view: i => openInstallDetailS(i), approve: i => approveInstallRequest(i), assign: i => openAssignInstall(i), sched: i => openScheduleInstall(i) },
+    actions: i => V_BTN + (i.status === 'pending_approval' ? `<button type="button" data-act="review" style="${B_GRN}">Review</button>` : '') + (instIsRequest(i) ? `<button type="button" data-act="approve" style="${B_GRN}">Approve</button>` : '') + (i.status !== 'completed' ? `<button type="button" data-act="assign" style="${B_GRY}">${i.technician_id ? 'Reassign' : 'Assign'}</button><button type="button" data-act="sched" style="${B_GRY}">${i.scheduled_date ? 'Reschedule' : 'Schedule'}</button>` : ''),
+    act: { view: i => openInstallDetailS(i), review: i => openInstallReview(i), approve: i => approveInstallRequest(i), assign: i => openAssignInstall(i), sched: i => openScheduleInstall(i) },
     open: i => openInstallDetailS(i),
     button: { label: '<i class="fa-solid fa-plus"></i> New Installation', fn: () => openNewInstallS() },
     empty: 'No installations found.'
@@ -1110,8 +1137,8 @@ const SVC_VIEWS = {
       return [esc(f.name) + (it.length > 1 ? ` <small style="color:#64748b;">+${it.length - 1} more</small>` : ''), esc(f.model), esc(f.serials),
       esc(a.allocated_by || '-'), `<span class="progress">${esc(demoStatusS(a))}</span>`, allocWhenS(a) ? fmtSchedule(allocWhenS(a)) : '-'];
     },
-    actions: a => V_BTN + (!a.return_status ? `<button type="button" data-act="reassign" style="${B_GRY}">Reassign</button>` : ''),
-    act: { view: a => openDemoDetailS(a), reassign: a => openReassignDemo(a) },
+    actions: a => V_BTN + (demoReturnPending(a) ? `<button type="button" data-act="appr" style="${B_GRN}">Approve return</button><button type="button" data-act="rej" style="${B_RED}">Reject</button>` : '') + (!a.return_status ? `<button type="button" data-act="reassign" style="${B_GRY}">Reassign</button>` : ''),
+    act: { view: a => openDemoDetailS(a), reassign: a => openReassignDemo(a), appr: a => approveDemoReturn(a), rej: a => rejectDemoReturn(a) },
     open: a => openDemoDetailS(a),
     button: { label: '<i class="fa-solid fa-plus"></i> Assign Demo Unit', fn: () => openAssignDemo() },
     empty: 'No demo units found.'
@@ -1182,10 +1209,10 @@ function renderCats() {
   set('catServicesSub', `${sv.filter(s => s.status === 'pending_approval').length} awaiting approval`);
   const open = svcState.installs.filter(i => i.status !== 'completed');
   set('catInstalls', open.length);
-  set('catInstallsSub', `${open.filter(instIsRequest).length} awaiting approval · ${open.filter(i => !i.technician_id && !instIsRequest(i)).length} unassigned`);
+  set('catInstallsSub', `${open.filter(i => i.status === 'pending_approval').length} completion review · ${open.filter(instIsRequest).length} awaiting approval · ${open.filter(i => !i.technician_id && !instIsRequest(i)).length} unassigned`);
   const held = svcState.demo.filter(a => !a.return_status);
   set('catDemo', held.length);
-  set('catDemoSub', 'with technicians');
+  { const rp = svcState.demo.filter(demoReturnPending).length; set('catDemoSub', rp ? `${rp} return awaiting approval` : 'with technicians'); }
   set('catRequests', requestRowsS().filter(r => r.status === 'pending').length);
   set('catRequestsSub', 'waiting for you');
   document.querySelectorAll('#catCards .cat-card').forEach(c => c.classList.toggle('active', c.dataset.view === svcView));
@@ -1306,6 +1333,33 @@ async function openNewInstallS() {
     mm.remove();
     await loadInstallations();
   });
+}
+
+function openInstallReview(i) {
+  const img = i.completion_image || i.completion_proof || i.proof_image || i.image || '';
+  const m = svcModal('Review Installation Completion', `
+    <p style="font-size:13px;color:var(--text-light);">${esc(i.product_name)} · ${esc(i.company_name)} — by ${esc(i.technician_id || '-')}</p>
+    ${img ? `<img src="${esc(img)}" alt="Installation photo" style="max-width:100%;border-radius:10px;margin:10px 0;">` : '<p style="color:#94a3b8;font-size:13px;margin:10px 0;">Photo not available in the list response.</p>'}
+    ${i.completion_note || i.note_by_technician ? dRowS('Technician note', esc(i.completion_note || i.note_by_technician)) : ''}
+    <label style="font-size:13px;">Reason (needed only to reject)</label><textarea id="rvReason" rows="2" style="${IN_S}"></textarea>
+    <p class="m-err" style="color:#dc2626;font-size:13px;min-height:16px;"></p>
+    <div style="display:flex;justify-content:flex-end;gap:10px;">
+      <button type="button" id="rvReject" style="${B_RED}">Reject</button>
+      <button type="button" id="rvApprove" style="${B_GRN}">Approve &amp; complete</button>
+    </div>`, 520);
+  const err = m.querySelector('.m-err');
+  const run = async (status, note) => {
+    try {
+      await svcPost(`/installation/status/${encodeURIComponent(i.installation_id)}`, { status, note });
+      m.remove(); await loadInstallations();
+    } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') err.textContent = e.message; }
+  };
+  m.querySelector('#rvApprove').onclick = () => run('completed', 'Approved');
+  m.querySelector('#rvReject').onclick = () => {
+    const r = m.querySelector('#rvReason').value.trim();
+    if (!r) { err.textContent = 'Write a reason to reject.'; return; }
+    run('in_progress', r);
+  };
 }
 
 function openInstallDetailS(i) {
