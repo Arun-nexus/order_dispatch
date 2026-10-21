@@ -1972,31 +1972,105 @@ async function renderActiveServicesStep() {
   }
 }
 
-function renderSparePartFormStep() {
+// Spare part -> service. The part is picked from inventory (spare_parts / service_parts lots)
+// instead of being typed, quantity is capped at the available stock, and after the
+// allocation the inventory is re-read to confirm the stock really went down.
+async function renderSparePartFormStep() {
+  const svc = allocWiz.service || {};
   const body = allocModalBody();
-  allocWizTitle(`Spare Part — Service #${(allocWiz.service.service_id || '').slice(0, 8)}`);
+  allocWizTitle(`Spare Part — Service #${(svc.service_id || '').slice(0, 8)}`);
+  body.innerHTML = `<p style="color:#94a3b8;">Loading spare parts from inventory...</p>`;
+  await loadInventoryForAllocation();
+
+  const lotKey = p => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
+  const lotMap = new Map();
+  (allocState.products || [])
+    .filter(p => p.product_type === 'spare_parts' || p.product_type === 'service_parts')
+    .forEach(p => {
+      const k = lotKey(p), cur = lotMap.get(k);
+      if (cur) cur.stock += Number(p.quantity) || 0;
+      else lotMap.set(k, { key: k, product_id: p.product_id, name: p.product_name || '', model: p.model_no || '', parent: p.parent_product_name || '', stock: Number(p.quantity) || 0 });
+    });
+  const lots = [...lotMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const stockOf = key => (lotMap.get(key) || {}).stock || 0;
+
+  const svcNames = [svc.product_name, svc.product_id].filter(Boolean).map(x => String(x).trim().toLowerCase());
+  const forService = l => !!l.parent && svcNames.includes(l.parent.trim().toLowerCase());
+  const hasMatches = lots.some(forService);
+
   body.innerHTML = `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
-      Product: ${allocWiz.service.product_id ?? ''} • Serial: ${allocWiz.service.serial_no ?? ''}<br>
-      Issue: ${allocWiz.service.issue ?? ''}
+      Product: ${esc(svc.product_name || svc.product_id || '')} • Serial: ${esc(svc.serial_no || '')}<br>
+      Issue: ${esc(svc.issue || '')}
     </div>
-    <form id="sparePartForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="part_name" placeholder="Spare Part Name" required>
-      <input name="quantity" type="number" min="1" value="1" placeholder="Quantity" required>
-      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+    <form id="sparePartForm">
+      <input id="spFilter" placeholder="Search spare part in inventory..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+      ${hasMatches ? `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:8px 0;"><input type="checkbox" id="spOnlyFor" checked> Only parts that belong to this product</label>` : '<div style="height:8px;"></div>'}
+      <div id="spList" style="max-height:260px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;"></div>
+      <div id="spPicked" style="font-size:13px;color:#64748b;margin:10px 0 4px;">Select a part from the list.</div>
+      <input name="quantity" id="spQty" type="number" min="1" value="1" placeholder="Quantity" required disabled style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+      <div style="display:flex;justify-content:space-between;margin-top:14px;">
         <button type="button" id="backSpare" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Allocate</button>
+        <button type="submit" id="spSubmit" disabled style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;opacity:.5;">Allocate</button>
       </div>
     </form>`;
   document.getElementById('backSpare').addEventListener('click', renderActiveServicesStep);
+
+  const listEl = document.getElementById('spList'), pickedEl = document.getElementById('spPicked');
+  const qtyEl = document.getElementById('spQty'), submitEl = document.getElementById('spSubmit');
+  const filterEl = document.getElementById('spFilter'), onlyEl = document.getElementById('spOnlyFor');
+  let sel = null;
+
+  function pick(key) {
+    sel = lotMap.get(key) || null;
+    if (sel) {
+      pickedEl.innerHTML = `Selected: <b>${esc(sel.name)}</b>${sel.model ? ' · ' + esc(sel.model) : ''} — ${sel.stock} in stock`;
+      qtyEl.disabled = false; qtyEl.max = sel.stock;
+      qtyEl.value = Math.min(Math.max(1, Number(qtyEl.value) || 1), sel.stock);
+      submitEl.disabled = false; submitEl.style.opacity = '1';
+    }
+    draw();
+  }
+  function draw() {
+    const term = filterEl.value.trim().toLowerCase();
+    const only = onlyEl && onlyEl.checked;
+    const rows = lots.filter(l => (!only || forService(l)) &&
+      (!term || [l.name, l.model, l.parent, l.product_id].join(' ').toLowerCase().includes(term)));
+    if (!rows.length) { listEl.innerHTML = '<p style="padding:14px;color:#94a3b8;font-size:13px;">No spare parts found in inventory.</p>'; return; }
+    listEl.innerHTML = rows.map(l => `
+      <div class="sp-row" data-key="${esc(l.key)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f1f5f9;${l.stock < 1 ? 'opacity:.45;cursor:not-allowed;' : 'cursor:pointer;'}${sel && sel.key === l.key ? 'background:#eff6ff;' : ''}">
+        <div>
+          <strong style="font-size:13px;">${esc(l.name)}</strong>${l.model ? ` <small style="color:#64748b;">· ${esc(l.model)}</small>` : ''}
+          ${l.parent ? `<br><small style="color:#94a3b8;">Belongs to: ${esc(l.parent)}</small>` : ''}
+        </div>
+        <span style="font-size:12px;font-weight:600;white-space:nowrap;color:${l.stock < 1 ? '#dc2626' : '#16a34a'};">${l.stock < 1 ? 'Out of stock' : l.stock + ' in stock'}</span>
+      </div>`).join('');
+    listEl.querySelectorAll('.sp-row').forEach(r => r.addEventListener('click', () => {
+      if (stockOf(r.dataset.key) >= 1) pick(r.dataset.key);
+    }));
+  }
+  filterEl.addEventListener('input', draw);
+  if (onlyEl) onlyEl.addEventListener('change', draw);
+  qtyEl.addEventListener('input', () => {
+    if (!sel) return;
+    qtyEl.value = Math.max(1, Math.min(Number(qtyEl.value) || 1, sel.stock));
+  });
+  draw();
+
   document.getElementById('sparePartForm').addEventListener('submit', async e => {
     e.preventDefault();
-    const fd = new FormData(e.target);
+    if (!sel) { alert('Select a spare part from inventory.'); return; }
+    const qty = Number(qtyEl.value) || 1;
+    if (qty > sel.stock) { alert(`Only ${sel.stock} in stock.`); return; }
+    const before = sel.stock;
+    submitEl.disabled = true; submitEl.textContent = 'Allocating...';
     const payload = {
       spare_part: {
-        service_id: allocWiz.service.service_id,
-        part_name: fd.get('part_name'),
-        quantity: Number(fd.get('quantity')) || 1
+        service_id: svc.service_id,
+        part_name: sel.name,
+        quantity: qty,
+        product_id: sel.product_id,
+        model_no: sel.model
       }
     };
     try {
@@ -2005,11 +2079,18 @@ function renderSparePartFormStep() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'allocation failed');
+      // confirm the inventory really went down
+      await loadInventoryForAllocation();
+      const after = (allocState.products || [])
+        .filter(p => lotKey(p) === sel.key && (p.product_type === 'spare_parts' || p.product_type === 'service_parts'))
+        .reduce((n, p) => n + (Number(p.quantity) || 0), 0);
+      const name = sel.name;
       resetAllocWiz();
+      if (after >= before) alert(`Allocated, but the inventory stock of "${name}" did not go down (still ${after}). Please check inventory deduction on the server.`);
       window.location.href = data.redirect || 'service.html';
     } catch (err) {
+      submitEl.disabled = false; submitEl.textContent = 'Allocate';
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
     }
   });
 }
-window.refreshCurrentPageData = () => { loadPendingRequests(); loadAllocations(); };
