@@ -1972,9 +1972,39 @@ async function renderActiveServicesStep() {
   }
 }
 
-// Spare part -> service. The part is picked from inventory (spare_parts / service_parts lots)
-// instead of being typed, quantity is capped at the available stock, and after the
-// allocation the inventory is re-read to confirm the stock really went down.
+// Spare part -> service. The part is picked from inventory (only spare_parts / service_parts lots that
+// have hologram numbers on file), then the exact hologram number(s) to give are picked from a searchable
+// list. Those hologram numbers are sent to the server so exactly those units are deducted, and the
+// inventory is re-read afterwards to confirm they are gone.
+const isPartType = p => p.product_type === 'spare_parts' || p.product_type === 'service_parts';
+const holoCountOf = p => (typeof p.hologram_count === 'number' ? p.hologram_count
+  : (Array.isArray(p.hologram_numbers) ? p.hologram_numbers.length : (p.hologram_no ? 1 : 0)));
+
+// the list only carries hologram_count; the numbers themselves come from the lot detail
+async function allocFetchLotDetail(p) {
+  try {
+    const params = new URLSearchParams({
+      product_id: p.product_id || '', model_no: p.model_no || '', product_type: p.product_type || '', lot_id: p._id || ''
+    });
+    const res = await apiFetch(`/inventory/detail?${params}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (p._id && data.product && data.product._id && data.product._id !== p._id) return null;
+    return { ...p, ...data.product };
+  } catch (e) { console.error(e); return null; }
+}
+async function allocLotHolograms(lot) {
+  const out = [];
+  const seen = new Set();
+  const details = await Promise.all(lot.docs.filter(d => holoCountOf(d) > 0).map(allocFetchLotDetail));
+  details.forEach((d, n) => {
+    if (!d) return;
+    const arr = Array.isArray(d.hologram_numbers) ? d.hologram_numbers : (d.hologram_no ? [d.hologram_no] : []);
+    arr.forEach(h => { const k = String(h).trim(); if (k && !seen.has(k)) { seen.add(k); out.push({ no: k, lot_id: d._id || '' }); } });
+  });
+  return out;
+}
+
 async function renderSparePartFormStep() {
   const svc = allocWiz.service || {};
   const body = allocModalBody();
@@ -1984,15 +2014,13 @@ async function renderSparePartFormStep() {
 
   const lotKey = p => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
   const lotMap = new Map();
-  (allocState.products || [])
-    .filter(p => p.product_type === 'spare_parts' || p.product_type === 'service_parts')
-    .forEach(p => {
-      const k = lotKey(p), cur = lotMap.get(k);
-      if (cur) cur.stock += Number(p.quantity) || 0;
-      else lotMap.set(k, { key: k, product_id: p.product_id, name: p.product_name || '', model: p.model_no || '', parent: p.parent_product_name || '', stock: Number(p.quantity) || 0 });
-    });
+  (allocState.products || []).filter(p => isPartType(p) && holoCountOf(p) > 0).forEach(p => {
+    const k = lotKey(p);
+    let cur = lotMap.get(k);
+    if (!cur) { cur = { key: k, product_id: p.product_id, name: p.product_name || '', model: p.model_no || '', parent: p.parent_product_name || '', tagged: 0, docs: [] }; lotMap.set(k, cur); }
+    cur.tagged += holoCountOf(p); cur.docs.push(p);
+  });
   const lots = [...lotMap.values()].sort((a, b) => a.name.localeCompare(b.name));
-  const stockOf = key => (lotMap.get(key) || {}).stock || 0;
 
   const svcNames = [svc.product_name, svc.product_id].filter(Boolean).map(x => String(x).trim().toLowerCase());
   const forService = l => !!l.parent && svcNames.includes(l.parent.trim().toLowerCase());
@@ -2004,11 +2032,25 @@ async function renderSparePartFormStep() {
       Issue: ${esc(svc.issue || '')}
     </div>
     <form id="sparePartForm">
-      <input id="spFilter" placeholder="Search spare part in inventory..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+      <div style="font-size:12px;font-weight:600;color:#334155;margin-bottom:4px;">1. Spare part <small style="font-weight:400;color:#94a3b8;">(only parts with hologram numbers)</small></div>
+      <input id="spFilter" placeholder="Search spare part..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
       ${hasMatches ? `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:8px 0;"><input type="checkbox" id="spOnlyFor" checked> Only parts that belong to this product</label>` : '<div style="height:8px;"></div>'}
-      <div id="spList" style="max-height:260px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;"></div>
-      <div id="spPicked" style="font-size:13px;color:#64748b;margin:10px 0 4px;">Select a part from the list.</div>
-      <input name="quantity" id="spQty" type="number" min="1" value="1" placeholder="Quantity" required disabled style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+      <div id="spList" style="max-height:180px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;"></div>
+
+      <div id="spHoloBox" style="display:none;margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:12px;font-weight:600;color:#334155;">2. Hologram number(s) to give</span>
+          <span id="spHoloInfo" style="font-size:12px;color:#64748b;"></span>
+        </div>
+        <input id="spHoloSearch" placeholder="Search hologram number..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
+        <div style="display:flex;gap:8px;margin:8px 0;">
+          <button type="button" id="spSelShown" style="padding:5px 10px;border:none;border-radius:6px;background:#e2e8f0;cursor:pointer;font-size:12px;">Select shown</button>
+          <button type="button" id="spClear" style="padding:5px 10px;border:none;border-radius:6px;background:#e2e8f0;cursor:pointer;font-size:12px;">Clear</button>
+        </div>
+        <div id="spHoloList" style="max-height:170px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px;display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+
+      <div id="spPicked" style="font-size:13px;color:#64748b;margin:10px 0 0;">Select a part, then choose its hologram number(s).</div>
       <div style="display:flex;justify-content:space-between;margin-top:14px;">
         <button type="button" id="backSpare" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Back</button>
         <button type="submit" id="spSubmit" disabled style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;opacity:.5;">Allocate</button>
@@ -2016,61 +2058,94 @@ async function renderSparePartFormStep() {
     </form>`;
   document.getElementById('backSpare').addEventListener('click', renderActiveServicesStep);
 
-  const listEl = document.getElementById('spList'), pickedEl = document.getElementById('spPicked');
-  const qtyEl = document.getElementById('spQty'), submitEl = document.getElementById('spSubmit');
-  const filterEl = document.getElementById('spFilter'), onlyEl = document.getElementById('spOnlyFor');
-  let sel = null;
+  const $ = id => document.getElementById(id);
+  const listEl = $('spList'), pickedEl = $('spPicked'), submitEl = $('spSubmit');
+  const filterEl = $('spFilter'), onlyEl = $('spOnlyFor');
+  const holoBox = $('spHoloBox'), holoList = $('spHoloList'), holoSearch = $('spHoloSearch'), holoInfo = $('spHoloInfo');
+  let sel = null, holos = [], chosen = new Set();
+  const holoCache = new Map();
 
-  function pick(key) {
-    sel = lotMap.get(key) || null;
-    if (sel) {
-      pickedEl.innerHTML = `Selected: <b>${esc(sel.name)}</b>${sel.model ? ' · ' + esc(sel.model) : ''} — ${sel.stock} in stock`;
-      qtyEl.disabled = false; qtyEl.max = sel.stock;
-      qtyEl.value = Math.min(Math.max(1, Number(qtyEl.value) || 1), sel.stock);
-      submitEl.disabled = false; submitEl.style.opacity = '1';
-    }
-    draw();
+  function updateSummary() {
+    const n = chosen.size;
+    holoInfo.textContent = `${n} selected / ${holos.length} available`;
+    pickedEl.innerHTML = sel
+      ? `Giving <b>${n}</b> × <b>${esc(sel.name)}</b>${sel.model ? ' · ' + esc(sel.model) : ''}${n ? ' — ' + [...chosen].slice(0, 6).map(esc).join(', ') + (n > 6 ? ` +${n - 6} more` : '') : ''}`
+      : 'Select a part, then choose its hologram number(s).';
+    submitEl.disabled = !n; submitEl.style.opacity = n ? '1' : '.5';
   }
-  function draw() {
+  function drawHolos() {
+    const term = holoSearch.value.trim().toLowerCase();
+    const rows = holos.filter(h => !term || h.no.toLowerCase().includes(term));
+    holoList.innerHTML = rows.length ? rows.map(h => `
+      <label data-h="${esc(h.no)}" style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid ${chosen.has(h.no) ? '#2563eb' : '#e2e8f0'};background:${chosen.has(h.no) ? '#eff6ff' : '#fff'};">
+        <input type="checkbox" ${chosen.has(h.no) ? 'checked' : ''} style="margin:0;"> ${esc(h.no)}
+      </label>`).join('')
+      : `<span style="font-size:12px;color:#94a3b8;">${holos.length ? 'No hologram number matches your search.' : 'No hologram numbers on file for this part.'}</span>`;
+    holoList.querySelectorAll('label[data-h]').forEach(l => l.querySelector('input').addEventListener('change', e => {
+      const h = l.dataset.h;
+      if (e.target.checked) chosen.add(h); else chosen.delete(h);
+      drawHolos(); updateSummary();
+    }));
+    holoList._shown = rows;
+  }
+  async function pick(key) {
+    sel = lotMap.get(key) || null;
+    chosen = new Set(); holos = []; holoSearch.value = '';
+    drawLots();
+    if (!sel) return;
+    holoBox.style.display = 'block';
+    holoList.innerHTML = '<span style="font-size:12px;color:#94a3b8;">Loading hologram numbers...</span>';
+    updateSummary();
+    if (!holoCache.has(key)) holoCache.set(key, await allocLotHolograms(sel));
+    if (!sel || sel.key !== key) return;       // user picked something else meanwhile
+    holos = holoCache.get(key);
+    drawHolos(); updateSummary();
+  }
+  function drawLots() {
     const term = filterEl.value.trim().toLowerCase();
     const only = onlyEl && onlyEl.checked;
     const rows = lots.filter(l => (!only || forService(l)) &&
       (!term || [l.name, l.model, l.parent, l.product_id].join(' ').toLowerCase().includes(term)));
-    if (!rows.length) { listEl.innerHTML = '<p style="padding:14px;color:#94a3b8;font-size:13px;">No spare parts found in inventory.</p>'; return; }
+    if (!rows.length) {
+      listEl.innerHTML = `<p style="padding:14px;color:#94a3b8;font-size:13px;">${lots.length ? 'No spare part matches.' : 'No spare parts with hologram numbers in inventory.'}</p>`;
+      return;
+    }
     listEl.innerHTML = rows.map(l => `
-      <div class="sp-row" data-key="${esc(l.key)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f1f5f9;${l.stock < 1 ? 'opacity:.45;cursor:not-allowed;' : 'cursor:pointer;'}${sel && sel.key === l.key ? 'background:#eff6ff;' : ''}">
+      <div class="sp-row" data-key="${esc(l.key)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;${sel && sel.key === l.key ? 'background:#eff6ff;' : ''}">
         <div>
           <strong style="font-size:13px;">${esc(l.name)}</strong>${l.model ? ` <small style="color:#64748b;">· ${esc(l.model)}</small>` : ''}
           ${l.parent ? `<br><small style="color:#94a3b8;">Belongs to: ${esc(l.parent)}</small>` : ''}
         </div>
-        <span style="font-size:12px;font-weight:600;white-space:nowrap;color:${l.stock < 1 ? '#dc2626' : '#16a34a'};">${l.stock < 1 ? 'Out of stock' : l.stock + ' in stock'}</span>
+        <span style="font-size:12px;font-weight:600;white-space:nowrap;color:#16a34a;">${l.tagged} hologram${l.tagged === 1 ? '' : 's'}</span>
       </div>`).join('');
-    listEl.querySelectorAll('.sp-row').forEach(r => r.addEventListener('click', () => {
-      if (stockOf(r.dataset.key) >= 1) pick(r.dataset.key);
-    }));
+    listEl.querySelectorAll('.sp-row').forEach(r => r.addEventListener('click', () => pick(r.dataset.key)));
   }
-  filterEl.addEventListener('input', draw);
-  if (onlyEl) onlyEl.addEventListener('change', draw);
-  qtyEl.addEventListener('input', () => {
-    if (!sel) return;
-    qtyEl.value = Math.max(1, Math.min(Number(qtyEl.value) || 1, sel.stock));
+  filterEl.addEventListener('input', drawLots);
+  if (onlyEl) onlyEl.addEventListener('change', drawLots);
+  holoSearch.addEventListener('input', drawHolos);
+  $('spSelShown').addEventListener('click', () => {
+    const shown = holoList._shown || [];
+    if (shown.length > 25 && !confirm(`Select all ${shown.length} shown hologram numbers?`)) return;
+    shown.forEach(h => chosen.add(h.no)); drawHolos(); updateSummary();
   });
-  draw();
+  $('spClear').addEventListener('click', () => { chosen.clear(); drawHolos(); updateSummary(); });
+  drawLots(); updateSummary();
 
-  document.getElementById('sparePartForm').addEventListener('submit', async e => {
+  $('sparePartForm').addEventListener('submit', async e => {
     e.preventDefault();
-    if (!sel) { alert('Select a spare part from inventory.'); return; }
-    const qty = Number(qtyEl.value) || 1;
-    if (qty > sel.stock) { alert(`Only ${sel.stock} in stock.`); return; }
-    const before = sel.stock;
+    if (!sel || !chosen.size) { alert('Select the hologram number(s) to give.'); return; }
+    const picked = holos.filter(h => chosen.has(h.no));
+    const part = sel;
     submitEl.disabled = true; submitEl.textContent = 'Allocating...';
     const payload = {
       spare_part: {
         service_id: svc.service_id,
-        part_name: sel.name,
-        quantity: qty,
-        product_id: sel.product_id,
-        model_no: sel.model
+        part_name: part.name,
+        quantity: picked.length,
+        product_id: part.product_id,
+        model_no: part.model,
+        hologram_numbers: picked.map(h => h.no),
+        holograms: picked.map(h => ({ hologram_number: h.no, lot_id: h.lot_id }))
       }
     };
     try {
@@ -2079,14 +2154,15 @@ async function renderSparePartFormStep() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'allocation failed');
-      // confirm the inventory really went down
+      // confirm those exact hologram numbers left inventory
       await loadInventoryForAllocation();
-      const after = (allocState.products || [])
-        .filter(p => lotKey(p) === sel.key && (p.product_type === 'spare_parts' || p.product_type === 'service_parts'))
-        .reduce((n, p) => n + (Number(p.quantity) || 0), 0);
-      const name = sel.name;
+      const lotsTouched = part.docs.filter(d => picked.some(h => h.lot_id === d._id));
+      const fresh = await Promise.all(lotsTouched.map(allocFetchLotDetail));
+      const left = new Set(picked.map(h => h.no));
+      const stillThere = [];
+      fresh.forEach(d => { if (d) (Array.isArray(d.hologram_numbers) ? d.hologram_numbers : []).forEach(h => { if (left.has(String(h).trim())) stillThere.push(h); }); });
       resetAllocWiz();
-      if (after >= before) alert(`Allocated, but the inventory stock of "${name}" did not go down (still ${after}). Please check inventory deduction on the server.`);
+      if (stillThere.length) alert(`Allocated, but these hologram numbers are still in inventory: ${stillThere.slice(0, 10).join(', ')}${stillThere.length > 10 ? '…' : ''}. Please check the deduction on the server.`);
       window.location.href = data.redirect || 'service.html';
     } catch (err) {
       submitEl.disabled = false; submitEl.textContent = 'Allocate';
