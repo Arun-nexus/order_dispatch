@@ -1,5 +1,5 @@
 {
-  "name": "acer-erp",
+  "name": "ABM-erp",
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
@@ -11,8 +11,8 @@
       "package.json",
       "build/**/*"
     ],
-    "appId": "com.acer.erp",
-    "productName": "Acer ERP",
+    "appId": "com.ABM.erp",
+    "productName": "ABM ERP",
     "icon": "build/icon.ico",
     "win": {
       "target": "nsis",

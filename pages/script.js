@@ -4,7 +4,7 @@ function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
 function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
 function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
-const svcState = { services: [], orders: [], activeServiceId: null, assignees: [], hologramPool: [], search: '', filters: null, installs: [], demo: [], requests: [], inventory: [], view: 'services', status: 'all' };
+const svcState = { services: [], orders: [], activeServiceId: null, assignees: [], hologramPool: [], search: '', filters: null, installs: [], demo: [], partAllocs: [], requests: [], inventory: [], view: 'services', status: 'all' };
 
 function esc(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -22,12 +22,13 @@ function readFileAsBase64(file) {
 document.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(location.search);
   const tab = params.get('tab');
-  if (['services', 'installs', 'demo', 'requests'].includes(tab)) svcView = tab;
+  if (['services', 'installs', 'demo', 'parts', 'requests'].includes(tab)) svcView = tab;
   if (params.get('installation')) svcView = 'installs';
   svcState.status = svcView === 'requests' ? 'pending' : 'all';
   loadServices();
   loadInstallations();
   loadDemo();
+  loadPartAllocs();
   loadRequests();
   wireModals();
   wireHeaderSearch();
@@ -37,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderAll();
 });
 
-window.refreshCurrentPageData = () => { loadServices(); loadInstallations(); loadDemo(); loadRequests(); };
+window.refreshCurrentPageData = () => { loadServices(); loadInstallations(); loadDemo(); loadPartAllocs(); loadRequests(); };
 
 // Powers the part-swap rows in the "Update Status" -> Completed form: only
 // service_parts that actually have a hologram number on file can be picked,
@@ -359,7 +360,7 @@ function openActionMenu(s, evt) {
     { label: 'View Details', action: () => openViewModal(s) },
     { label: 'Update Status', action: () => openStatusModal(s) },
   ];
-  if (s.status !== 'rejected' && typeof openAllocatePartModal === 'function') items.push({ label: 'Allocate Spare Part', action: () => openAllocatePartModal({ service: s, onDone: () => loadServices() }) });
+  if (s.status !== 'rejected' && typeof openAllocatePartModal === 'function') items.push({ label: 'Allocate Spare Part', action: () => openAllocatePartModal({ service: s, onDone: () => Promise.all([loadServices(), loadPartAllocs()]) }) });
   if (s.status !== 'completed' && s.status !== 'rejected') items.push({ label: 'Reschedule', action: () => openRescheduleModal(s) });
   if (s.status === 'pending_approval') items.unshift({ label: 'Review & Approve', action: () => openReviewModal(s) });
   if (canManage) {
@@ -740,7 +741,13 @@ async function openCreateModal() {
           </select>
           <input name="purchase_date" type="date" required>
           <textarea name="issue" placeholder="Issue description" required style="min-height:80px;"></textarea>
-          <textarea name="spare_parts" placeholder="Spare parts requested (optional)" style="min-height:50px;"></textarea>
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <span style="font-size:13px;font-weight:600;">Spare parts <small style="font-weight:400;color:var(--text-muted);">(optional — allocated to the selected person for this service)</small></span>
+              <button type="button" id="createAddPart" style="padding:7px 12px;border:1px dashed #1665ff;border-radius:8px;background:#fff;color:#1665ff;cursor:pointer;font-size:13px;white-space:nowrap;">+ Add spare part</button>
+            </div>
+            <div id="createPartList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;"></div>
+          </div>
           <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 2MB)</label>
           <input type="file" name="image_file" accept="image/*">
           <label style="font-size:12px;color:var(--text-muted);">Video proof (optional, max 20MB)</label>
@@ -755,6 +762,21 @@ async function openCreateModal() {
     document.body.appendChild(modal);
 
     modal.querySelector('#cancelCreateService').addEventListener('click', () => modal.style.display = 'none');
+    // spare parts picked while filling the form; they are allocated right after the service is created
+    modal._parts = [];
+    const partList = modal.querySelector('#createPartList');
+    const drawParts = () => {
+      partList.innerHTML = modal._parts.map((p, i) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:#f8fafc;border-radius:8px;padding:8px 10px;font-size:13px;">
+        <div><b>${esc(p.part_name)}</b> × ${p.quantity}${p.hologram_numbers.length ? `<br><small style="color:#64748b;">Hologram: ${p.hologram_numbers.map(esc).join(', ')}</small>` : (p.manual_holograms.length ? `<br><small style="color:#64748b;">Hologram: ${p.manual_holograms.map(esc).join(', ')}</small>` : '')}</div>
+        <button type="button" data-i="${i}" class="createRmPart" style="border:none;background:none;color:#d62828;cursor:pointer;font-size:18px;">&times;</button></div>`).join('');
+      partList.querySelectorAll('.createRmPart').forEach(b => b.addEventListener('click', () => { modal._parts.splice(Number(b.dataset.i), 1); drawParts(); }));
+    };
+    modal._drawParts = drawParts;
+    modal.querySelector('#createAddPart').addEventListener('click', () => {
+      const reserved = {};
+      modal._parts.forEach(p => { if (p.lot_id) reserved[p.lot_id] = (reserved[p.lot_id] || 0) + p.quantity; });
+      openAllocatePartModal({ pick: true, reserved, exclude: modal._parts.flatMap(p => p.hologram_numbers), onPick: p => { modal._parts.push(p); drawParts(); } });
+    });
     const locSel = modal.querySelector('select[name="location"]');
     const addrBox = modal.querySelector('#createAddress');
     locSel.addEventListener('change', () => { addrBox.style.display = locSel.value === 'outdoor' ? 'block' : 'none'; });
@@ -798,7 +820,7 @@ async function openCreateModal() {
         technician_id: fd.get('technician_id'),
         purchase_date: fd.get('purchase_date'),
         issue: fd.get('issue'),
-        spare_parts: fd.get('spare_parts') || '',
+        spare_parts: modal._parts.map(p => p.part_name).join(', '),
         address: fd.get('location') === 'outdoor' ? (fd.get('address') || '').trim() : ''
       };
 
@@ -817,13 +839,24 @@ async function openCreateModal() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'service creation failed');
+        // allocate the spare parts picked in the form to the new service (deducts inventory)
+        const failed = [];
+        for (const p of modal._parts) {
+          try {
+            const r2 = await apiFetch('/allocation/create', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ spare_part: { ...p, service_id: data.service_id } }) });
+            if (!r2.ok) { const d2 = await r2.json().catch(() => ({})); throw new Error(typeof d2.detail === 'string' ? d2.detail : 'allocation failed'); }
+          } catch (e2) { failed.push(`${p.part_name}: ${e2.message}`); }
+        }
         modal.style.display = 'none';
         form.reset();
+        modal._parts = []; modal._drawParts();
         addrBox.style.display = 'none';
+        if (failed.length) alert('Service was created, but these spare parts could not be allocated — use "Allocate Spare Part" on the service:\n' + failed.join('\n'));
         if (payload.video) {
           showResponseModal('Service created', 'Service was created. Admin/employee have been notified to review the uploaded video.', true);
         }
-        await loadServices();
+        await Promise.all([loadServices(), loadPartAllocs()]);
       } catch (err) {
         if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
       } finally {
@@ -1144,6 +1177,28 @@ const SVC_VIEWS = {
     button: { label: '<i class="fa-solid fa-plus"></i> Assign Demo Unit', fn: () => openAssignDemo() },
     empty: 'No demo units found.'
   },
+  parts: {
+    title: 'Allocated Parts', info: 'Spare parts given against a service — usage, old (faulty) hologram, return approval and faulty stock',
+    cols: ['Service', 'Product / Serial', 'Technician', 'Part', 'Qty', 'Hologram (issued)', 'Usage', 'Return', 'Allocated On', 'Actions'],
+    statuses: [['all', 'All'], ['not_used', 'Not used'], ['used', 'Used'], ['returned', 'Return approved']],
+    list: () => partRowsS(), statusOf: r => r.state, techOf: r => r.svc.technician_alloted || '',
+    text: r => [r.svc.service_id, r.svc.product_name, r.svc.serial_no, r.svc.technician_alloted, r.part_name, r.issued.join(' '), r.uses.map(u => u.old).join(' ')].join(' '),
+    cells: r => [
+      `#${esc(String(r.svc.service_id || '').slice(0, 8))}<br><small style="color:#64748b;">${esc(r.svc.issue || '')}</small>`,
+      `${esc(r.svc.product_name || r.svc.product_id || '-')}<br><small style="color:#64748b;">${esc(r.svc.serial_no || '-')}</small>`,
+      esc(r.svc.technician_alloted || '-'),
+      `<b>${esc(r.part_name)}</b>`, r.qty,
+      r.issued.length ? r.issued.map(esc).join('<br>') : '-',
+      r.uses.length ? r.uses.map(u => `<span class="completed">Used</span><br><small style="color:#64748b;">Old hologram: <b>${esc(u.old)}</b>${u.filed ? ' · <span style="color:#16a34a;">in faulty stock</span>' : ''}</small>`).join('<br>') : '<span class="pending">Not used yet</span>',
+      `<span class="${r.returned ? 'confirmed' : 'pending'}">${r.returned ? 'Approved' : 'Pending'}</span>`,
+      r.created_at ? fmtSchedule(r.created_at) : '-'],
+    actions: r => V_BTN
+      + (r.returned ? '' : `<button type="button" data-act="ret" style="${B_GRN}">Approve return</button>`)
+      + (r.uses.some(u => !u.filed) ? `<button type="button" data-act="faulty" style="${B_GRY}">Add to faulty</button>` : ''),
+    act: { view: r => openPartRowDetailS(r), ret: r => approvePartReturnS(r), faulty: r => addPartToFaultyS(r) },
+    open: r => openPartRowDetailS(r),
+    empty: 'No spare parts have been allocated against a service yet.'
+  },
   requests: {
     title: 'Technician Requests', info: 'Technicians cannot change a date or take an installation themselves — approve or reject their requests here',
     cols: ['Raised By', 'Type', 'Item', 'Current Date', 'Requested Date', 'Reason', 'Status', 'Raised On', 'Actions'],
@@ -1167,6 +1222,64 @@ const SVC_VIEWS = {
     empty: 'No requests from technicians.'
   }
 };
+
+// ---- Allocated Parts card ----
+async function loadPartAllocs() {
+  try {
+    const res = await apiFetch('/allocation/');
+    const data = await res.json();
+    svcState.partAllocs = res.ok ? (data.dataset || []).filter(a => a.allocation_type === 'spare_part') : [];
+  } catch (e) { svcState.partAllocs = []; }
+  renderAll();
+}
+
+// one row per spare-part allocation, joined with its service and what the technician reported on it
+function partRowsS() {
+  return svcState.partAllocs.map(a => {
+    const sp = a.spare_part || {};
+    const svc = svcState.services.find(x => x.service_id === sp.service_id) || { service_id: sp.service_id };
+    const issued = [...(sp.hologram_numbers || []), ...(sp.manual_holograms || [])].map(String);
+    const faulty = svc.faulty_parts || [];
+    const filed = new Set((svc.faulty_filed || []).map(String));
+    const mk = f => ({ name: f.part_name, old: String(f.old_hologram_number || ''), neu: String(f.new_hologram_number || ''), filed: filed.has(String(f.old_hologram_number || '')) });
+    let uses;
+    if (issued.length) uses = issued.map(h => faulty.find(f => String(f.new_hologram_number || '') === h)).filter(Boolean).map(mk);
+    else uses = faulty.filter(f => String(f.part_name || '').trim().toLowerCase() === String(sp.part_name || '').trim().toLowerCase() && f.new_hologram_number).map(mk);
+    const returned = !!svc.manager_confirmed_return;
+    return { alloc: a, svc, part_name: sp.part_name || '-', qty: sp.quantity ?? 1, issued, uses, returned,
+      state: returned ? 'returned' : (uses.length ? 'used' : 'not_used'), created_at: a.created_at || a.allocated_at || '' };
+  }).sort((x, y) => new Date(y.created_at || 0) - new Date(x.created_at || 0));
+}
+
+function openPartRowDetailS(r) {
+  const s = r.svc;
+  svcModal('Allocated Part', `${dRowS('Service ID', esc(s.service_id))}${dRowS('Product', esc(s.product_name || s.product_id || '-'))}
+    ${dRowS('Serial No.', esc(s.serial_no || '-'))}${dRowS('Technician', esc(s.technician_alloted || '-'))}${dRowS('Issue', esc(s.issue || '-'))}
+    ${dRowS('Service Status', esc(String(s.status || '-').replace(/_/g, ' ')))}
+    ${dRowS('Part', esc(r.part_name) + ' × ' + r.qty)}${dRowS('Hologram issued', r.issued.length ? r.issued.map(esc).join(', ') : '-')}
+    ${dRowS('Usage', r.uses.length ? r.uses.map(u => 'Used — old hologram ' + esc(u.old) + (u.filed ? ' (in faulty stock)' : '')).join('<br>') : 'Not used yet')}
+    ${dRowS('Return', r.returned ? 'Approved' : 'Pending')}${dRowS('Allocated By', esc(r.alloc.created_by || '-'))}`, 520);
+}
+
+// same flag as "Manager Confirm Return" on the Services table, so approving here or there updates both
+async function approvePartReturnS(r) {
+  if (!confirm('Approve the return of the faulty part for this service?')) return;
+  try {
+    await svcPost(`/service/manager_confirm/${encodeURIComponent(r.svc.service_id)}`, {});
+    await Promise.all([loadServices(), loadPartAllocs()]);
+  } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
+}
+
+async function addPartToFaultyS(r) {
+  const todo = r.uses.filter(u => !u.filed);
+  if (!todo.length) return;
+  if (!confirm(`Add ${todo.length} faulty part(s) to inventory?\n` + todo.map(u => `${u.name} — hologram ${u.old}`).join('\n'))) return;
+  try {
+    const out = await svcPost(`/service/add_faulty/${encodeURIComponent(r.svc.service_id)}`, { parts: todo.map(u => ({ part_name: u.name, old_hologram_number: u.old })) });
+    await Promise.all([loadServices(), loadPartAllocs()]);
+    alert(out.message || 'Done');
+  } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
+}
 
 // reschedule requests + technicians' installation requests, in one list
 function requestRowsS() {
@@ -1217,6 +1330,7 @@ function renderCats() {
   const held = svcState.demo.filter(a => !a.return_status);
   set('catDemo', held.length);
   { const rp = svcState.demo.filter(demoReturnPending).length; set('catDemoSub', rp ? `${rp} return awaiting approval` : 'with technicians'); }
+  { const pr = partRowsS(); set('catParts', pr.length); const rp = pr.filter(r => !r.returned).length; set('catPartsSub', rp ? `${rp} return pending` : 'all returns confirmed'); }
   set('catRequests', requestRowsS().filter(r => r.status === 'pending').length);
   set('catRequestsSub', 'waiting for you');
   document.querySelectorAll('#catCards .cat-card').forEach(c => c.classList.toggle('active', c.dataset.view === svcView));
@@ -1246,7 +1360,7 @@ function renderChipsS() {
     ap = document.createElement('button');
     ap.type = 'button'; ap.id = 'allocPartBtn'; ap.className = 'add-product';
     ap.innerHTML = '<i class="fa-solid fa-gears"></i> Allocate Spare Part';
-    ap.addEventListener('click', () => { if (typeof openAllocatePartModal === 'function') openAllocatePartModal({ onDone: () => Promise.all([loadServices(), loadRequests()]) }); });
+    ap.addEventListener('click', () => { if (typeof openAllocatePartModal === 'function') openAllocatePartModal({ onDone: () => Promise.all([loadServices(), loadRequests(), loadPartAllocs()]) }); });
     btn.parentNode.insertBefore(ap, btn);
   }
   ap.style.display = svcView === 'services' && typeof openAllocatePartModal === 'function' ? '' : 'none';
@@ -1469,7 +1583,7 @@ async function approveReschedule(r) {
     if (out && out.pending_allocation) {
       const svc = svcState.services.find(x => x.service_id === (out.service_id || (r.details || {}).service_id)) || { service_id: out.service_id || (r.details || {}).service_id };
       if (typeof openAllocatePartModal === 'function') {
-        openAllocatePartModal({ service: svc, requestId: r.request_id, parts: out.parts || [], onDone: () => Promise.all([loadRequests(), loadServices()]) });
+        openAllocatePartModal({ service: svc, requestId: r.request_id, parts: out.parts || [], onDone: () => Promise.all([loadRequests(), loadServices(), loadPartAllocs()]) });
         return;
       }
       if (out.redirect) { window.location.href = out.redirect; return; }

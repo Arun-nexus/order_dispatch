@@ -5,6 +5,9 @@
  *     requestId  - technician spare_part request being fulfilled (closed by the server when done)
  *     parts      - names the technician asked for; the first one is pre-selected in the list
  *     onDone     - called after a successful allocation of everything
+ *     pick       - true: no service yet (service form). Nothing is posted; onPick(selection) gets the chosen item
+ *                  {part_name, quantity, product_id, model_no, product_type, lot_id, hologram_numbers, holograms, manual_holograms}
+ *     reserved   - {lot_id: qty} and exclude - [hologram numbers] already chosen in the form (so they are not offered twice)
  *
  * Needs apiFetch() from common_auth.js. Posts to /allocation/create (same payload as the Allocated page).
  */
@@ -79,15 +82,15 @@
     // ---------- step 2: pick the item, hologram(s) / quantity ----------
     async function partStep() {
       const svc = st.service || {};
-      title(`Allocate to Service #${String(svc.service_id || '').slice(0, 8)}`);
+      title(opts.pick ? 'Add Spare Part' : `Allocate to Service #${String(svc.service_id || '').slice(0, 8)}`);
       body.innerHTML = '<p style="color:#94a3b8;">Loading inventory...</p>';
       let inv = [];
       try { const r = await apiFetch('/inventory/'); const d = await r.json(); inv = r.ok ? (d.dataset || []) : []; } catch (e) { }
 
       const lotMap = new Map();
-      inv.filter(p => LABELS[p.product_type] && (Number(p.quantity) || 0) > 0).forEach(p => {
+      inv.filter(p => LABELS[p.product_type] && (Number(p.quantity) || 0) - ((opts.reserved || {})[p._id] || 0) > 0).forEach(p => {
         const k = String(p._id || `${p.product_id}||${p.product_name}||${p.model_no}`);
-        lotMap.set(k, { key: k, product_id: p.product_id, type: p.product_type, name: p.product_name || '', model: p.model_no || '', parent: p.parent_product_name || '', stock: Number(p.quantity) || 0, tagged: holoCountOf(p), doc: p });
+        lotMap.set(k, { key: k, product_id: p.product_id, type: p.product_type, name: p.product_name || '', model: p.model_no || '', parent: p.parent_product_name || '', stock: (Number(p.quantity) || 0) - ((opts.reserved || {})[p._id] || 0), tagged: Math.max(0, holoCountOf(p) - ((opts.exclude || []).length ? 0 : 0)), doc: p });
       });
       const lots = [...lotMap.values()].sort((a, b) => a.name.localeCompare(b.name));
       const names = [svc.product_name, svc.product_id].filter(Boolean).map(x => String(x).trim().toLowerCase());
@@ -96,8 +99,8 @@
       const requested = st.requestId && st.queue.length;
 
       body.innerHTML = `
-        <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
-          Product: ${esc(svc.product_name || svc.product_id || '')} • Serial: ${esc(svc.serial_no || '')}<br>Issue: ${esc(svc.issue || '')}</div>
+        ${opts.pick ? '' : `<div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
+          Product: ${esc(svc.product_name || svc.product_id || '')} • Serial: ${esc(svc.serial_no || '')}<br>Issue: ${esc(svc.issue || '')}</div>`}
         ${requested ? `<div style="background:#eef5ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;color:#1e3a8a;">Technician requested: <b>${st.queue.map(esc).join(', ')}</b>. The item is pre-selected — just choose the hologram number(s).</div>` : ''}
         <form id="apmForm">
           <div style="font-size:12px;font-weight:600;color:#334155;margin-bottom:4px;">1. Select item <small style="font-weight:400;color:#94a3b8;">(spare parts, service parts, accessories)</small></div>
@@ -118,12 +121,12 @@
           </div>
           <div id="apmPicked" style="font-size:13px;color:#64748b;margin:10px 0 0;">Select an item to allocate.</div>
           <div style="display:flex;justify-content:space-between;margin-top:14px;">
-            <button type="button" id="apmBack" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">${opts.service || requested ? 'Cancel' : 'Back'}</button>
+            <button type="button" id="apmBack" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">${opts.service || requested || opts.pick ? 'Cancel' : 'Back'}</button>
             <button type="submit" id="apmSubmit" disabled style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;opacity:.5;">Allocate</button>
           </div>
         </form>`;
       const $ = id => body.querySelector('#' + id);
-      $('apmBack').addEventListener('click', () => (opts.service || requested) ? close() : serviceStep());
+      $('apmBack').addEventListener('click', () => (opts.service || requested || opts.pick) ? close() : serviceStep());
       const listEl = $('apmList'), pickedEl = $('apmPicked'), submitEl = $('apmSubmit'), filterEl = $('apmQ'), onlyEl = $('apmOnly');
       const holoBox = $('apmHoloBox'), holoEl = $('apmHolos'), holoQ = $('apmHoloQ'), holoInfo = $('apmHoloInfo');
       const qtyBox = $('apmQtyBox'), qtyEl = $('apmQty'), qtyInfo = $('apmQtyInfo'), manualEl = $('apmManual'), manualInfo = $('apmManualInfo');
@@ -166,7 +169,8 @@
           cache.set(key, [...new Set(arr.map(h => String(h).trim()).filter(Boolean))].map(no => ({ no, lot_id: sel.doc._id || '' })));
         }
         if (!sel || sel.key !== key) return;
-        holos = cache.get(key); drawHolos(); summary();
+        const ex = new Set(opts.exclude || []);
+        holos = cache.get(key).filter(h => !ex.has(h.no)); drawHolos(); summary();
       }
       function drawLots() {
         const t = filterEl.value.trim().toLowerCase(), only = onlyEl && onlyEl.checked;
@@ -201,6 +205,12 @@
         const quantity = withHolo ? picked.length : qtyVal();
         if (!quantity) return alert(withHolo ? 'Select the hologram number(s) to give.' : 'Enter a valid quantity.');
         if (!withHolo && manual().length > quantity) return alert('You typed more hologram numbers than the quantity. Increase the quantity or remove some numbers.');
+        if (opts.pick) {   // service form: just hand the choice back, it is allocated when the service is created
+          close();
+          return opts.onPick && opts.onPick({ part_name: sel.name, quantity, product_id: sel.product_id, model_no: sel.model, product_type: sel.type,
+            lot_id: sel.doc._id || '', hologram_numbers: picked.map(h => h.no), holograms: picked.map(h => ({ hologram_number: h.no, lot_id: h.lot_id })),
+            manual_holograms: withHolo ? [] : manual() });
+        }
         submitEl.disabled = true; submitEl.textContent = 'Allocating...';
         const payload = { spare_part: {
           service_id: svc.service_id, part_name: sel.name, quantity, product_id: sel.product_id, model_no: sel.model, product_type: sel.type,
@@ -220,6 +230,6 @@
       });
     }
 
-    if (st.service && st.service.service_id) partStep(); else serviceStep();
+    if ((st.service && st.service.service_id) || opts.pick) partStep(); else serviceStep();
   };
 })();

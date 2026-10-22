@@ -907,6 +907,29 @@ def _damaged_part_warranty(old_hologram: str):
     return entries[0].get("warranty_until")
 
 
+def _faulty_already_filed(part_name: str, old_hologram: str) -> bool:
+    """True when this removed part (name + old hologram number) already sits in the Damaged inventory."""
+    if not old_hologram:
+        return False
+    found = inventory_manager().get_data(
+        collection_name=INVENTORY_COLLECTION,
+        query={"product_type": "damaged", "product_id": old_hologram, "product_name": part_name})
+    return bool(found)
+
+
+def _record_faulty_filed(service_id: str, holograms: list):
+    """Remember on the service which old hologram numbers were filed as faulty (shown on the Allocated Parts card)."""
+    try:
+        svc_db = service_detail()
+        svc = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
+        have = list((svc[0].get("faulty_filed") if svc else None) or [])
+        merged = have + [h for h in holograms if h and h not in have]
+        svc_db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
+                           update_values={"faulty_filed": merged})
+    except Exception as e:
+        logging.error(f"could not record faulty_filed for {service_id}: {e}")
+
+
 def _swap_faulty_part(service_id: str, parts_used: list):
     """When a service is closed with spare part(s) used: for each part,
     checks the entered old hologram number against the hologram currently
@@ -950,6 +973,7 @@ def _swap_faulty_part(service_id: str, parts_used: list):
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     mismatch = False
+    filed_now = []
     for part in parts_used:
         part_name = part.get("part_name")
         old_hologram = part.get("old_hologram_number")
@@ -973,10 +997,16 @@ def _swap_faulty_part(service_id: str, parts_used: list):
         # trail, its warranty_until on the entry already tells the story
         reason = "" if under_warranty else f"damaged part removed during service {service_id}"
 
-        inv_db = inventory_manager(product_name=part_name, product_id=old_hologram,
-                                    quantity=1, product_type="damaged",
-                                    warranty_until=warranty_until, reason=reason)
-        inv_db.add(collection_name=INVENTORY_COLLECTION)
+        # already filed as faulty (e.g. the manager used "Add to faulty" on the service page) -> don't add it twice
+        if not _faulty_already_filed(part_name, old_hologram):
+            inv_db = inventory_manager(product_name=part_name, product_id=old_hologram,
+                                        quantity=1, product_type="damaged",
+                                        warranty_until=warranty_until, reason=reason)
+            inv_db.add(collection_name=INVENTORY_COLLECTION)
+        filed_now.append(old_hologram)
+
+    if filed_now:
+        _record_faulty_filed(service_id, filed_now)
 
     if assembly is not None and serials is not None:
         asm_db.update(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly["assembly_id"]},
@@ -3312,6 +3342,46 @@ def manager_confirm(service_id: str, user: dict = Depends(require_role("service_
     except Exception as e:
         logging.error("manager confirmation failed!")
         raise HTTPException(status_code=500, detail="manager confirmation failed")
+
+
+class AddFaultyPartsRequest(BaseModel):
+    parts: list[dict] = []   # [{part_name, old_hologram_number}] - must be parts the technician reported on this service
+
+
+@app.post("/service/add_faulty/{service_id}")
+def add_faulty_parts(service_id: str, request: AddFaultyPartsRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    """Files the faulty (removed) part(s) of a service into the Damaged inventory right away: same name as the
+    part, the old hologram number as its id. The warranty of the lot it came from is carried over, exactly like
+    the automatic filing on completion (which skips anything already filed here)."""
+    try:
+        svc = service_detail()._get_one(SERVICE_COLLECTION, service_id)
+        reported = {(str(p.get("part_name") or "").strip().lower(), str(p.get("old_hologram_number") or "").strip()): p
+                    for p in (svc.get("faulty_parts") or [])}
+        if not request.parts:
+            raise HTTPException(status_code=400, detail="no faulty part selected")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        added, skipped = [], []
+        for item in request.parts:
+            name = str(item.get("part_name") or "").strip()
+            old = str(item.get("old_hologram_number") or "").strip()
+            if not old or (name.lower(), old) not in reported:
+                raise HTTPException(status_code=400, detail=f"{name or 'part'} / hologram {old or '-'} was not reported faulty on this service")
+            if _faulty_already_filed(name, old):
+                skipped.append(old)
+                continue
+            warranty_until = _damaged_part_warranty(old)
+            under_warranty = bool(warranty_until) and warranty_until >= today
+            reason = "" if under_warranty else f"damaged part removed during service {service_id}"
+            inventory_manager(product_name=name, product_id=old, quantity=1, product_type="damaged",
+                              warranty_until=warranty_until, reason=reason).add(collection_name=INVENTORY_COLLECTION)
+            added.append(old)
+        _record_faulty_filed(service_id, added + skipped)
+        return {"message": "faulty part(s) added to inventory" if added else "already in faulty inventory",
+                "added": added, "already_filed": skipped, "service_id": service_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _flow_http_error(e, "faulty part could not be added to inventory")
 
 
 @app.post("/service/extend_warranty/{service_id}")
