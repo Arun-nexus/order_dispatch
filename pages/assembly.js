@@ -238,7 +238,7 @@ function asmRowsHtml(list) {
       <div class="as-line">${aesc(p.name)} × ${aesc(p.quantity)}<span class="as-chip ${p.source === 'local' ? 'local' : ''}">${p.source === 'local' ? 'Local' : 'Inventory'}</span>
         ${p.belongsTo ? `<span class="as-sub">Belongs to: ${aesc(p.belongsTo)}</span>` : ''}</div>`).join('') || '<span style="color:#94a3b8;">—</span>';
     return `<tr class="clk" data-id="${aesc(a.id)}">
-      <td><b>${aesc(a.productName)}</b><span class="as-sub">${aesc((a.productId || '').trim() || '—')} · ${aesc(a.modelNumber || '—')}</span></td>
+      <td><b>${aesc(a.productName)}</b><span class="as-sub">${aesc(a.modelNumber || '—')}</span></td>
       <td>${aesc(a.quantity)}</td>
       <td>${parts}</td>
       <td>${(a.serials || []).length}${a.hologramPart ? `<span class="as-sub">Hologram from: ${aesc(a.hologramPart)}${a.hologramPartBelongs ? ' (' + aesc(a.hologramPartBelongs) + ')' : ''}</span>` : ''}</td>
@@ -273,11 +273,11 @@ function asmDownloadCsv(head, rows, fileBase) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 function asmExportAssemblies(list, fileBase) {
-  const head = ['Assembly ID', 'Product Name', 'Product ID', 'Model No.', 'Quantity',
+  const head = ['Assembly ID', 'Product Name', 'Model No.', 'Quantity',
     'Parts Used (name x qty - source - belongs to)', 'Parts Source', 'Hologram Part', 'Hologram Part Belongs To',
     'Status', 'Serials Approved', 'Total Serials', 'Created', 'Serial (Hologram) Numbers'];
   const rows = list.map(a => [
-    a.id, a.productName, a.productId || '', a.modelNumber || '', a.quantity,
+    a.id, a.productName, a.modelNumber || '', a.quantity,
     (a.partsUsed || []).map(p => `${p.name} x ${p.quantity} - ${p.source === 'local' ? 'Local' : 'Inventory'}${p.belongsTo ? ' - belongs to ' + p.belongsTo : ''}`).join(' | '),
     ASM_SOURCE_LABEL[asmSource(a)], a.hologramPart || '', a.hologramPartBelongs || '',
     ASM_STATUS_LABEL[a.status] || a.status, (a.approvedSerials || []).length, (a.serials || []).length,
@@ -399,7 +399,7 @@ function renderTable() {
   const rows = asmTableRows();
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No assemblies yet</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px;">No assemblies yet</td></tr>`;
     return;
   }
 
@@ -413,7 +413,6 @@ function renderTable() {
     return `
       <tr>
         <td>${a.productName}</td>
-        <td>${(a.productId || '').trim() || '—'}</td>
         <td>${a.modelNumber || '—'}</td>
         <td>${a.quantity}</td>
         <td>${sourceSummary}</td>
@@ -451,7 +450,7 @@ function openViewAssemblyModal(id) {
       <h3>Assembly Details</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <div class="detail"><small>Product</small><p>${a.productName} (${(a.productId || '').trim() || '—'})</p></div>
+    <div class="detail"><small>Product</small><p>${a.productName}</p></div>
     <div class="detail"><small>Model Number</small><p>${a.modelNumber || '—'}</p></div>
     <div class="detail"><small>Quantity</small><p>${a.quantity}</p></div>
     ${(a.editHistory || []).length ? (() => {

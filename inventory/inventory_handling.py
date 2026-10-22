@@ -445,7 +445,7 @@ class inventory_manager(mongodbclient):
                 query=self._part_query(product_name, product_type, parent_product_name, {"quantity": {"$gt": 0}})
             )
             entries.sort(key=lambda e: e.get("purchase_date") or "")
-
+# jhdbfhb
             remaining = quantity
             for entry in entries:
                 if remaining <= 0:
@@ -880,8 +880,9 @@ class inventory_manager(mongodbclient):
         Returns {"mode": "merged" | "created", "product_id": ..., "quantity_added": ...}
         """
         try:
-            if not product_name or not product_id:
-                raise Exception("assembled product must have a product name and product id")
+            if not product_name:
+                raise Exception("assembled product must have a product name")
+            product_id = product_id if product_id else " "
             if not quantity or quantity <= 0:
                 raise Exception("assembled quantity must be greater than 0")
 
