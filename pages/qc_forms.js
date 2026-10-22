@@ -142,14 +142,22 @@ table.reg th{background:#e8eefc}`;
       <div class="line"><b>Approved By:</b> <span class="u" style="min-width:200px">${esc(v.approved_by) || '&nbsp;'}</span> &nbsp; <b>Date:</b> <span class="u" style="min-width:120px">${esc(showDate(v.approved_date)) || '&nbsp;'}</span></div></div>`;
   }
 
+  // Prints through a hidden iframe instead of window.open(): works inside webviewers
+  // (no "You'll need a new app to open this about link" dialog, no pop-up blocker).
   function printWindow(html, title, landscape) {
-    const w = window.open('', '_blank');
-    if (!w) { alert('Allow pop-ups for this site to print.'); return; }
     const extra = landscape ? '@page{size:A4 landscape;margin:12mm}' : '';
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}${extra}</style></head><body>${html}</body></html>`);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 400);
+    const f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+    document.body.appendChild(f);
+    const d = f.contentWindow.document;
+    d.open();
+    d.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}${extra}</style></head><body>${html}</body></html>`);
+    d.close();
+    setTimeout(() => {
+      try { f.contentWindow.focus(); f.contentWindow.print(); }
+      catch (e) { alert('Print could not be started.'); }
+      setTimeout(() => f.remove(), 60000);
+    }, 400);
   }
   window.qcPrintWindow = printWindow;
 
