@@ -76,7 +76,7 @@
   function blankRow() { return { year: '', name: '', cls: '', units: '', calls: '', dates: '', inst: '', warr: '', capa: '', adv: '', rec: '', notif: '' }; }
   function padRows(rows) { while (rows.length < MIN_ROWS) rows.push(blankRow()); return rows; }
   function defaultHdr() {
-    return { country: 'India', date: fmtDate(new Date()), formno: 'ABM', issue: '', rev: '00', d1: '21/03/2023', d2: '21/03/2023', page: '1 of 1', rev_by: 'HOD', app_by: 'Director' };
+    return { country: 'India', date: fmtDate(new Date()), formno: 'ABM', issue: '', rev: '00', d1: '', d2: '', page: '1 of 1', rev_by: 'HOD', app_by: 'Director' };
   }
 
   // ---------------------------------------------------------------- sheet html
