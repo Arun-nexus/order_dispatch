@@ -404,6 +404,7 @@ class InventoryRequest(BaseModel):
     tax_rate: int
     model_no: str = ""
     supplier_address: str = ""
+    invoice_no: str = ""
     serial_numbers: list[str] = []
     product_type: str = "product"  # "product" | "spare_parts" | "service_parts" | "damaged" | "accessories"
     parent_product_name: str = ""     # spare_parts / service_parts: which product the part belongs to
@@ -449,6 +450,7 @@ class ShipmentProduct(BaseModel):
 class CreateShipmentRequest(BaseModel):
     company_name: str
     company_address: str = ""
+    invoice_no: str = ""
     dispatch_date: str
     received_date: str = ""       # optional - can be added later via mark_received
     products: list[ShipmentProduct]
@@ -1721,6 +1723,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
             supplier=shipment.get("company_name", ""),
             supplier_address=shipment.get("company_address", ""),
             purchase_date=received_date,
+            invoice_no=shipment.get("invoice_no", "") or "",
         )
     if purchase_parts_needed:
         sync_results += inv_db.add_from_shipment_parts(
@@ -1731,6 +1734,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
             supplier=shipment.get("company_name", ""),
             supplier_address=shipment.get("company_address", ""),
             purchase_date=received_date,
+            invoice_no=shipment.get("invoice_no", "") or "",
         )
     if warranty_parts_needed:
         sync_results += inv_db.add_from_shipment_parts(
@@ -1742,6 +1746,7 @@ def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
             supplier=shipment.get("company_name", ""),
             supplier_address=shipment.get("company_address", ""),
             purchase_date=received_date,
+            invoice_no=shipment.get("invoice_no", "") or "",
         )
     return sync_results
 
@@ -1853,6 +1858,26 @@ def shipment_fx_rate(currency: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=502, detail="live exchange rate unavailable, enter the rate manually")
 
 
+@app.get("/invoice/lookup")
+def invoice_lookup(invoice_no: str, user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
+    inv = (invoice_no or "").strip()
+    if not inv:
+        return {"found": False}
+    pattern = {"$regex": "^" + re.escape(inv) + "$", "$options": "i"}
+    try:
+        for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"invoice_no": pattern}):
+            if entry.get("supplier"):
+                return {"found": True, "source": "inventory", "company_name": entry["supplier"],
+                        "company_address": entry.get("supplier_address", "") or ""}
+        for ship in shipment_manager().get_data(collection_name=SHIPMENT_COLLECTION, query={"invoice_no": pattern}):
+            if ship.get("company_name"):
+                return {"found": True, "source": "shipment", "company_name": ship["company_name"],
+                        "company_address": ship.get("company_address", "") or ""}
+    except Exception as e:
+        logging.error(f"invoice lookup failed: {e}")
+    return {"found": False}
+
+
 @app.get("/shipment/")
 def shipment(user: dict = Depends(require_role("inventory_manager", "admin", "accounts"))):
     try:
@@ -1886,11 +1911,13 @@ def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require
         shipment_dict = {
             "company_name": request.company_name,
             "company_address": request.company_address,
+            "invoice_no": (request.invoice_no or "").strip(),
             "products": [product.dict() for product in request.products],
         }
         shipment_item = shipment_manager(
             company_name=request.company_name,
             company_address=request.company_address,
+            invoice_no=request.invoice_no,
             dispatch_date=request.dispatch_date,
             received_date=request.received_date or None,
             products=shipment_dict["products"],
@@ -2217,12 +2244,14 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
 
         # stock confirmed for every part — now actually deduct
         hologram_numbers: list[str] = []
+        part_lots: dict = {}
         for (part_name, belongs), qty in consume_amounts.items():
+            part_lots[(part_name, belongs)] = []
             if (part_name, belongs) == hologram_key:
                 hologram_numbers = inv_db.allocate_hologram_numbers_by_name(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
                     product_type="spare_parts", quantity=request.quantity,
-                    parent_product_name=belongs or None,
+                    parent_product_name=belongs or None, collect=part_lots[(part_name, belongs)],
                 )
                 # any quantity beyond one-per-unit is left untouched in
                 # inventory — we only take what's needed
@@ -2230,7 +2259,7 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                 inv_db.consume_quantity(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
                     product_type="spare_parts", quantity=qty,
-                    parent_product_name=belongs or None,
+                    parent_product_name=belongs or None, collect=part_lots[(part_name, belongs)],
                 )
 
         if len(hologram_numbers) != request.quantity:
@@ -2253,6 +2282,12 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             hologram_part_belongs_to=hologram_key[1],
         )
         _, assembly_id = assembly_item.add(collection_name=ASSEMBLY_COLLECTION)
+        try:
+            assembly_manager().update(
+                collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id},
+                update_values={"part_sources": [{"part_name": k[0], "belongs_to": k[1], "lots": v} for k, v in part_lots.items()]})
+        except Exception as src_err:
+            logging.error(f"assembly {assembly_id} created but part sources could not be saved: {src_err}")
         logging.info("assembly created successfully")
         return {"message": "assembly created successfully", "assembly_id": assembly_id}
 
@@ -2475,6 +2510,7 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
                     )
 
         applied = []      # (name, diff) already pushed to inventory, for rollback
+        extra_lots: dict = {}
 
         def _rollback():
             for r_name, r_diff in reversed(applied):
@@ -2493,9 +2529,10 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
         try:
             for name, diff in deltas.items():
                 if diff > 0:
+                    extra_lots[name] = []
                     inv_db.consume_quantity(collection_name=INVENTORY_COLLECTION, product_name=name[0],
                                             product_type="spare_parts", quantity=diff,
-                                            parent_product_name=name[1] or None)
+                                            parent_product_name=name[1] or None, collect=extra_lots[name])
                     applied.append((name, diff))
             for name, diff in deltas.items():
                 if diff < 0:
@@ -2522,6 +2559,15 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
                     "inventory_changes": inventory_changes,
                 }],
             }
+            if extra_lots:
+                sources = [dict(s, lots=list(s.get("lots") or [])) for s in (assembly.get("part_sources") or [])]
+                for key, lots in extra_lots.items():
+                    hit = next((s for s in sources if s.get("part_name") == key[0] and (s.get("belongs_to") or "") == (key[1] or "")), None)
+                    if hit is None:
+                        hit = {"part_name": key[0], "belongs_to": key[1], "lots": []}
+                        sources.append(hit)
+                    hit["lots"].extend(lots)
+                update_values["part_sources"] = sources
             for field, value in (("product_name", request.product_name),
                                  ("product_id", request.product_id),
                                  ("model_number", request.model_number)):
@@ -4502,6 +4548,11 @@ def _create_inventory_impl(request: InventoryRequest, user: dict):
                           request.paid_amount, request.credit_days)
         # serial numbers are optional for accessories / spare_parts / service_parts —
         # only enforce the quantity match when at least one serial number was actually given
+        if request.product_type in ("spare_parts", "service_parts", "accessories"):
+            if not (request.supplier or "").strip():
+                raise HTTPException(status_code=400, detail="company name is required")
+            if not (request.invoice_no or "").strip():
+                raise HTTPException(status_code=400, detail="invoice number is required")
         serial_optional_types = ("accessories", "spare_parts", "service_parts")
         serials_required = request.product_type not in serial_optional_types or len(request.serial_numbers) > 0
         if serials_required and len(request.serial_numbers) != request.quantity:
@@ -4539,6 +4590,7 @@ def _create_inventory_impl(request: InventoryRequest, user: dict):
                 lot_no=request.lot_no,
                 supplier=request.supplier,
                 supplier_address=request.supplier_address,
+                invoice_no=request.invoice_no,
                 price=request.price or 0,
                 tax_rate=request.tax_rate,
                 product_type=request.product_type,
@@ -4566,6 +4618,7 @@ def _create_inventory_impl(request: InventoryRequest, user: dict):
             tax_rate=request.tax_rate,
             model_no=request.model_no,
             supplier_address=request.supplier_address,
+            invoice_no=request.invoice_no,
             serial_numbers=request.serial_numbers,
             product_type=request.product_type,
             warranty_until=(request.warranty_until or None) if request.product_type == "damaged" else None,

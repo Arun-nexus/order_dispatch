@@ -554,7 +554,7 @@ function wireCategoryFilter() {
   });
 }
 
-const SEARCH_FIELDS = ['product_name', 'product_id', 'model_no', 'supplier', 'lot_no', 'parent_product_name', 'part_category'];
+const SEARCH_FIELDS = ['product_name', 'product_id', 'model_no', 'supplier', 'invoice_no', 'lot_no', 'parent_product_name', 'part_category'];
 
 function normSearch(s) {
   return String(s ?? '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]+/g, ' ').trim();
@@ -1465,6 +1465,7 @@ function openViewModal(p) {
       ${cell('Lot No.', e(p.lot_no || ''))}
       ${cell(part ? 'Shipment Received Date' : 'Purchase / Receiving Date', e(dateTxt(p.purchase_date)))}
       ${cell('Supplier', e(p.supplier || ''))}
+      ${p.invoice_no ? cell('Invoice No.', e(p.invoice_no)) : ''}
       ${p.supplier_address ? cell('Supplier Address', e(p.supplier_address)) : ''}
       ${cell('Price (per unit)', ivMoney(p.price))}
       ${cell('Tax', `${p.tax_rate ?? 0}%`)}
@@ -1506,6 +1507,7 @@ function openEditModal(p) {
   form.elements['parent_product_name'].value = p.parent_product_name ?? '';
   form.elements['lot_no'].value = p.lot_no ?? '';
   form.elements['supplier'].value = p.supplier ?? '';
+  form.elements['invoice_no'].value = p.invoice_no ?? '';
   form.elements['purchase_date'].value = p.purchase_date ?? '';
   form.elements['quantity'].value = p.quantity ?? '';
   form.elements['price'].value = p.price ?? '';
@@ -2087,6 +2089,7 @@ function initSupplierPicker(form, optional) {
     }
     form.dispatchEvent(new Event('supplierchange'));
   };
+  form._supplierRefresh = () => { fillOptions(); sync(); };
   pick.addEventListener('change', sync);
   fillOptions();
   sync();
@@ -2114,6 +2117,44 @@ function readSupplier(form) {
     };
   }
   return { supplier: '', supplier_address: '', supplier_gst: '', supplier_contact_person: '', supplier_contact_number: '', supplier_contact_email: '' };
+}
+
+function invoiceInputHTML(required) {
+  return `
+      <label style="font-size:12px;color:var(--text-muted);margin-bottom:-6px;">Invoice No.${required ? '' : ' (optional)'}</label>
+      <input name="invoice_no" placeholder="Invoice No." ${required ? 'required' : ''}>
+      <div id="invoiceNote" style="display:none;font-size:12px;color:var(--success-dark);"></div>`;
+}
+
+function wireInvoiceAutofill(form) {
+  const inp = form.querySelector('[name="invoice_no"]');
+  const note = form.querySelector('#invoiceNote');
+  if (!inp || !note) return;
+  inp.addEventListener('change', async () => {
+    const v = inp.value.trim();
+    note.style.display = 'none';
+    if (!v) return;
+    try {
+      const res = await apiFetch('/invoice/lookup?invoice_no=' + encodeURIComponent(v));
+      if (!res.ok) return;
+      const d = await res.json();
+      if (!d.found) return;
+      await loadSupplierCompanies();
+      if (form._supplierRefresh) form._supplierRefresh();
+      const pick = form.querySelector('#supplierPick');
+      const c = supplierState.companies.find(x => (x.company_name || '').trim().toLowerCase() === String(d.company_name).trim().toLowerCase());
+      if (c) {
+        pick.value = c.customer_id;
+      } else {
+        pick.value = '__manual__';
+        form.querySelector('[name="supplier_name"]').value = d.company_name;
+        form.querySelector('[name="supplier_address"]').value = d.company_address || '';
+      }
+      pick.dispatchEvent(new Event('change'));
+      note.textContent = 'Company autofilled from this invoice: ' + d.company_name;
+      note.style.display = 'block';
+    } catch (err) { }
+  });
 }
 
 // Step 1: pick the category first — the next form asks for exactly the details
@@ -2167,6 +2208,7 @@ function renderPartDetailsStep() {
       <input name="quantity" type="number" min="1" placeholder="Quantity" required>
       <textarea name="hologram_numbers" rows="2" placeholder="Hologram numbers (optional, one per unit — comma or new line separated)"></textarea>
       <input name="lot_no" placeholder="Lot No. (optional)">
+      ${invoiceInputHTML(true)}
       ${supplierBlockHTML(false)}
       <input name="price" type="number" min="0" step="any" placeholder="Price (per unit)" required>
       <input name="tax_rate" type="number" min="0" step="any" placeholder="Tax Rate (%)" required>
@@ -2180,6 +2222,7 @@ function renderPartDetailsStep() {
   document.getElementById('backPart').addEventListener('click', renderAddTypeStep);
   const partFormEl = document.getElementById('partForm');
   initSupplierPicker(partFormEl, false);
+  wireInvoiceAutofill(partFormEl);
   wirePaymentBlock(partFormEl, 'partPaymentMode', 'partPaymentHint');
 
   document.getElementById('partForm').addEventListener('submit', lockOnce(async e => {
@@ -2205,6 +2248,7 @@ function renderPartDetailsStep() {
       quantity,
       serial_numbers: [],
       lot_no: fd.get('lot_no') || '',
+      invoice_no: (fd.get('invoice_no') || '').trim(),
       ...readSupplier(e.target),
       purchase_date: fd.get('purchase_date'),
       price: String(fd.get('price') || '0'),
@@ -2212,6 +2256,7 @@ function renderPartDetailsStep() {
       ...readPaymentFields(e.target)
     };
     if (!payload.supplier) { alert('Please select or enter the company this part was purchased from.'); return; }
+    if (!payload.invoice_no) { alert('Invoice No. is required.'); return; }
     const payErr = validatePaymentFields(e.target);
     if (payErr) { alert(payErr); return; }
     try {
@@ -2259,6 +2304,7 @@ function renderLotDetailsStep() {
         <div id="manualSerialsBox" style="display:none;max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
         <div id="autoPreviewBox" style="font-size:12px;color:var(--text-muted);"></div>
       </div>
+      ${isFaulty ? '' : invoiceInputHTML(addWiz.productType === 'accessories')}
       ${supplierBlockHTML(isFaulty)}
       ${lbl(isFaulty ? 'Received Date' : 'Receiving Date')}
       <input name="purchase_date" type="date" required>
@@ -2279,6 +2325,7 @@ function renderLotDetailsStep() {
 
   const form = document.getElementById('lotForm');
   initSupplierPicker(form, isFaulty);
+  wireInvoiceAutofill(form);
 
   // live hint: total amount, and what Credit / Partial does on the company ledger
   wirePaymentBlock(form, 'lotPaymentMode', 'paymentHint');
@@ -2459,6 +2506,7 @@ function renderLotDetailsStep() {
       warranty_until: fd.get('warranty_until') || '',
       reason: (fd.get('reason') || '').trim(),
       lot_no: fd.get('lot_no'),
+      invoice_no: (fd.get('invoice_no') || '').trim(),
       quantity,
       serial_numbers: serials,
       ...readSupplier(form),
@@ -2468,6 +2516,8 @@ function renderLotDetailsStep() {
       ...readPaymentFields(form)
     };
     if (payload.payment_mode && !payload.supplier) { alert('Select the company this purchase was made from.'); return; }
+    if (payload.product_type === 'accessories' && !payload.supplier) { alert('Company name is required.'); return; }
+    if (payload.product_type === 'accessories' && !payload.invoice_no) { alert('Invoice No. is required.'); return; }
     const payErr = validatePaymentFields(form);
     if (payErr) { alert(payErr); return; }
 
@@ -2550,6 +2600,7 @@ function wireModals() {
         : { product_id: DEFAULT_PRODUCT_ID, model_no: form.elements['model_no'].value }),
       lot_no: form.elements['lot_no'].value,
       supplier: form.elements['supplier'].value,
+      invoice_no: form.elements['invoice_no'].value.trim(),
       purchase_date: form.elements['purchase_date'].value,
       quantity: targetQuantity,
       price: form.elements['price'].value,

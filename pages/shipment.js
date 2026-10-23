@@ -98,6 +98,7 @@ function fromServerShape(s) {
     id: s.shipment_id || s.id,
     companyName: s.company_name,
     companyAddress: s.company_address,
+    invoiceNo: s.invoice_no || '',
     customerId: s.customer_id || '',
     paymentMode: s.payment_mode || 'paid',
     paidAmount: Number(s.paid_amount) || 0,
@@ -123,6 +124,7 @@ function toServerShape(s) {
   return {
     company_name: s.companyName,
     company_address: s.companyAddress,
+    invoice_no: s.invoiceNo || '',
     customer_id: s.customerId || '',
     gst_number: s.gstNumber || '',
     contractor_person: s.contactPerson || '',
@@ -491,6 +493,7 @@ function openViewModal(id) {
     <div class="detail"><small>Shipment ID</small><p>${s.id}</p></div>
     <div class="detail"><small>Company Name</small><p>${s.companyName}</p></div>
     <div class="detail"><small>Company Address</small><p>${s.companyAddress || '—'}</p></div>
+    <div class="detail"><small>Invoice No.</small><p>${s.invoiceNo || '—'}</p></div>
     ${paymentSummaryHtml(s)}
     <div class="detail"><small>Total</small><p>${curMoney(draftTotal(s), s.currency)}${s.currency !== 'INR' ? ` ≈ ${money(s.totalInr)} (₹${s.exchangeRate}/${s.currency})` : ''}</p></div>
     <div class="detail"><small>Dispatch Date</small><p>${s.dispatchDate || '—'}</p></div>
@@ -626,6 +629,8 @@ async function openAddShipmentModal() {
     id: newId(),
     companyName: '',
     companyAddress: '',
+    invoiceNo: '',
+    invoiceNote: '',
     customerId: '',
     gstNumber: '',
     contactPerson: '',
@@ -672,6 +677,7 @@ function renderShipmentStep() {
 function readStep1() {
   const g = id => document.getElementById(id);
   const d = shipmentDraft;
+  if (g('s1Invoice')) d.invoiceNo = g('s1Invoice').value.trim();
   if (g('s1Dispatch')) d.dispatchDate = g('s1Dispatch').value;
   if (g('s1ReceivedDate')) d.receivedDate = g('s1ReceivedDate').value;
   if (g('s1Payment')) d.paymentMode = g('s1Payment').value;
@@ -716,6 +722,9 @@ function renderStep1() {
     </div>
     ${stepDots(1)}
     <form id="shipStep1Form" style="display:flex;flex-direction:column;gap:10px;">
+      <label style="font-size:13px;color:#64748b;">Invoice No.</label>
+      <input id="s1Invoice" placeholder="Invoice No. (company details autofill from it)" value="${esc(d.invoiceNo)}" ${d.isEdit ? '' : 'required'}>
+      ${d.invoiceNote ? `<small style="color:#16a34a;">${esc(d.invoiceNote)}</small>` : ''}
       <label style="font-size:13px;color:#64748b;">Company</label>
       <select id="s1Company">
         <option value="">➕ Create new company manually</option>
@@ -776,6 +785,27 @@ function renderStep1() {
   `;
   box.querySelector('.close').addEventListener('click', () => closeModal('shipmentModal'));
   box.querySelector('#shipCancelBtn').addEventListener('click', () => closeModal('shipmentModal'));
+  box.querySelector('#s1Invoice').addEventListener('change', async () => {
+    readStep1();
+    d.invoiceNote = '';
+    if (!d.invoiceNo) return;
+    try {
+      const r = await apiFetch('/invoice/lookup?invoice_no=' + encodeURIComponent(d.invoiceNo));
+      if (!r.ok) return;
+      const f = await r.json();
+      if (!f.found) return;
+      const c = companyList.find(x => (x.company_name || '').trim().toLowerCase() === String(f.company_name).trim().toLowerCase());
+      d.customerId = c ? c.customer_id : '';
+      d.companyName = c ? c.company_name : f.company_name;
+      d.companyAddress = c ? (c.company_address || '') : (f.company_address || '');
+      d.gstNumber = c ? (c.gst_number || '') : '';
+      d.contactPerson = c ? (c.contractor_person || '') : '';
+      d.contactNumber = c ? (c.contractor_number || '') : '';
+      d.contactEmail = c ? (c.contractor_email || '') : '';
+      d.invoiceNote = 'Company autofilled from this invoice: ' + d.companyName;
+      renderStep1();
+    } catch (err) { }
+  });
   box.querySelector('#s1Company').addEventListener('change', (e) => {
     readStep1();
     const c = companyList.find(x => x.customer_id === e.target.value);
@@ -812,6 +842,7 @@ function renderStep1() {
   box.querySelector('#shipStep1Form').addEventListener('submit', (e) => {
     e.preventDefault();
     readStep1();
+    if (!d.invoiceNo && !d.isEdit) return showResponseModal('Invoice required', 'Enter the invoice number.', false);
     if (!d.companyName) return showResponseModal('Company required', 'Select a company or enter its name.', false);
     if (d.currency !== 'INR' && !(d.exchangeRate > 0)) return showResponseModal('Rate required', 'Enter a valid exchange rate.', false);
     if (d.paymentMode !== 'paid') {

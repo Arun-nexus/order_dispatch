@@ -11,7 +11,7 @@ class inventory_manager(mongodbclient):
                  model_no=None, supplier_address=None, serial_numbers=None, product_type=None,
                  warranty_until=None, reason="",
                  parent_product_name="", part_category=None, hologram_numbers=None,
-                 created_by=None):
+                 created_by=None, invoice_no=""):
 
         super().__init__()
 
@@ -25,6 +25,7 @@ class inventory_manager(mongodbclient):
         self.quantity = quantity
         self.model_no = model_no
         self.supplier_address = supplier_address
+        self.invoice_no = (invoice_no or "").strip()
         self.serial_numbers = serial_numbers or []
         # "product" | "spare_parts" | "damaged" | "accessories"
         self.product_type = product_type or "product"
@@ -51,6 +52,7 @@ class inventory_manager(mongodbclient):
                 "lot_no": self.lot_no,
                 "supplier": self.supplier,
                 "supplier_address": self.supplier_address,
+                "invoice_no": self.invoice_no,
                 "price": self.price,
                 "tax_rate": self.tax_rate,
                 "purchase_date": self.purchase_date,
@@ -156,6 +158,7 @@ class inventory_manager(mongodbclient):
                     "lot_no": self.lot_no,
                     "supplier": self.supplier,
                     "supplier_address": self.supplier_address,
+                    "invoice_no": self.invoice_no,
                     "price": self.price,
                     "tax_rate": self.tax_rate,
                     "purchase_date": self.purchase_date,
@@ -193,6 +196,8 @@ class inventory_manager(mongodbclient):
             }
             if self.part_category:
                 match_query["part_category"] = self.part_category
+            if self.invoice_no:
+                match_query["invoice_no"] = self.invoice_no
 
             existing = self.get_data(collection_name=collection_name, query=match_query)
             if existing:
@@ -433,7 +438,18 @@ class inventory_manager(mongodbclient):
             logging.error("checking available hologram numbers by name failed!")
             raise Exception(e)
 
-    def consume_quantity(self, collection_name, product_name, product_type, quantity, parent_product_name=None):
+    @staticmethod
+    def _lot_snapshot(entry, take):
+        return {
+            "supplier": entry.get("supplier") or "",
+            "supplier_address": entry.get("supplier_address") or "",
+            "invoice_no": entry.get("invoice_no") or "",
+            "purchase_date": entry.get("purchase_date") or "",
+            "lot_no": entry.get("lot_no") or "",
+            "quantity": take,
+        }
+
+    def consume_quantity(self, collection_name, product_name, product_type, quantity, parent_product_name=None, collect=None):
         """
         Deducts `quantity` units of a non-serialized product (e.g. a
         spare_parts entry) identified by product_name + product_type,
@@ -454,6 +470,8 @@ class inventory_manager(mongodbclient):
                 take = min(remaining, available)
                 if take <= 0:
                     continue
+                if collect is not None:
+                    collect.append(self._lot_snapshot(entry, take))
                 self._decrement_or_delete(collection_name, entry["_id"], available - take)
                 remaining -= take
 
@@ -526,7 +544,7 @@ class inventory_manager(mongodbclient):
             logging.error("restocking quantity into inventory failed!")
             raise Exception(e)
 
-    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity, parent_product_name=None):
+    def allocate_hologram_numbers_by_name(self, collection_name, product_name, product_type, quantity, parent_product_name=None, collect=None):
         """
         Deducts `quantity` units of a spare_parts/service_parts entry (matched by
         product_name + product_type) AND pulls that many hologram numbers along with
@@ -563,6 +581,8 @@ class inventory_manager(mongodbclient):
                 taken = available_hologram[:take]
                 leftover_hologram = available_hologram[take:]
                 new_quantity = available_qty - take
+                if collect is not None:
+                    collect.append(self._lot_snapshot(entry, take))
                 self._decrement_or_delete(collection_name, entry["_id"], new_quantity,
                                            {"hologram_numbers": leftover_hologram})
                 allocated.extend(taken)
@@ -938,7 +958,7 @@ class inventory_manager(mongodbclient):
             raise Exception(e)
 
     def add_from_shipment_parts(self, collection_name, parts, product_type,
-                                 supplier="", supplier_address="", purchase_date=None, lot_no=""):
+                                 supplier="", supplier_address="", purchase_date=None, lot_no="", invoice_no=""):
         """
         Called right after a Shipment is marked received, to push its parts
         into inventory — grouped here by product_type so the caller decides
@@ -997,6 +1017,8 @@ class inventory_manager(mongodbclient):
                 }
                 if part_category:
                     match_query["part_category"] = part_category
+                if invoice_no:
+                    match_query["invoice_no"] = invoice_no
 
                 existing = self.get_data(collection_name=collection_name, query=match_query)
 
@@ -1023,6 +1045,7 @@ class inventory_manager(mongodbclient):
                         "lot_no": lot_no,
                         "supplier": supplier,
                         "supplier_address": supplier_address,
+                        "invoice_no": invoice_no or "",
                         "price": 0,
                         "tax_rate": 0,
                         "purchase_date": purchase_date,
