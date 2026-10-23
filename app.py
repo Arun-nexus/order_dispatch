@@ -5624,8 +5624,21 @@ def raise_demo_unit_request(request: DemoUnitRequestModel, user: dict = Depends(
         raise HTTPException(status_code=500, detail="request could not be raised")
 
 
+def _can_act_on_demo(alloc: dict, user: dict) -> bool:
+    owner = alloc.get("allocated_by")
+    if owner == user["username"]:
+        return True
+    try:
+        team = mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION,
+                                        query={"role": "distributor", "manager": user["username"]})
+        return owner in {t.get("username") for t in team}
+    except Exception:
+        logging.error("team lookup failed while checking demo unit ownership")
+        return False
+
+
 @app.post("/allocation/convert_to_order/{allocation_id}")
-def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, user: dict = Depends(require_role("distributor"))):
+def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, user: dict = Depends(require_role("distributor", "inventory_manager"))):
     """Distributor asks to turn a dispatched demo unit into an order. Raises an approval request."""
     try:
         if not request.company_name.strip() or not request.company_address.strip():
@@ -5638,7 +5651,7 @@ def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, us
         if not matches:
             raise HTTPException(status_code=404, detail="demo unit not found")
         alloc = matches[0]
-        if alloc.get("allocation_type") != "demo_unit" or alloc.get("allocated_by") != user["username"]:
+        if alloc.get("allocation_type") != "demo_unit" or not _can_act_on_demo(alloc, user):
             raise HTTPException(status_code=403, detail="this is not your demo unit")
         if not alloc.get("dispatch"):
             raise HTTPException(status_code=400, detail="only dispatched demo units can be converted to an order")
@@ -5680,7 +5693,7 @@ def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, us
 
 
 @app.post("/allocation/return_request/{allocation_id}")
-def raise_demo_return_request(allocation_id: str, request: ReturnRequestModel, user: dict = Depends(require_role("distributor"))):
+def raise_demo_return_request(allocation_id: str, request: ReturnRequestModel, user: dict = Depends(require_role("distributor", "inventory_manager"))):
     """Distributor reports a dispatched demo unit as returned; it is marked returned once approved."""
     try:
         through = request.returned_through.strip()
@@ -5701,7 +5714,7 @@ def raise_demo_return_request(allocation_id: str, request: ReturnRequestModel, u
         if not matches:
             raise HTTPException(status_code=404, detail="demo unit not found")
         alloc = matches[0]
-        if alloc.get("allocation_type") != "demo_unit" or alloc.get("allocated_by") != user["username"]:
+        if alloc.get("allocation_type") != "demo_unit" or not _can_act_on_demo(alloc, user):
             raise HTTPException(status_code=403, detail="this is not your demo unit")
         if alloc.get("return_status") == "returned":
             raise HTTPException(status_code=400, detail="this demo unit was already returned")

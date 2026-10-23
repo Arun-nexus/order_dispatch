@@ -203,7 +203,12 @@ async function apiFetch(url, options = {}) {
     throw new Error('unauthorized');
   }
   if (res.status === 403) {
-    alert('Your role doesnt have access to do that action');
+    let msg = 'Your role doesnt have access to do that action';
+    try {
+      const d = await res.clone().json();
+      if (d && typeof d.detail === 'string' && d.detail !== 'you do not have permission for this action') msg = d.detail;
+    } catch (e) { }
+    alert(msg);
     throw new Error('forbidden');
   }
   return res;
