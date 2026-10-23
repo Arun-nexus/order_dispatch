@@ -1464,11 +1464,9 @@ async function openNewInstallS() {
 }
 
 function openInstallReview(i) {
-  const img = i.completion_image || i.completion_proof || i.proof_image || i.image || '';
   const m = svcModal('Review Installation Completion', `
     <p style="font-size:13px;color:var(--text-light);">${esc(i.product_name)} · ${esc(i.company_name)} — by ${esc(i.technician_id || '-')}</p>
-    ${img ? `<img src="${esc(img)}" alt="Installation photo" style="max-width:100%;border-radius:10px;margin:10px 0;">` : '<p style="color:#94a3b8;font-size:13px;margin:10px 0;">Photo not available in the list response.</p>'}
-    ${i.completion_note || i.note_by_technician ? dRowS('Technician note', esc(i.completion_note || i.note_by_technician)) : ''}
+    <div id="rvMedia"><p style="color:#94a3b8;font-size:13px;margin:10px 0;">Loading photo...</p></div>
     <label style="font-size:13px;">Reason (needed only to reject)</label><textarea id="rvReason" rows="2" style="${IN_S}"></textarea>
     <p class="m-err" style="color:#dc2626;font-size:13px;min-height:16px;"></p>
     <div style="display:flex;justify-content:flex-end;gap:10px;">
@@ -1476,6 +1474,18 @@ function openInstallReview(i) {
       <button type="button" id="rvApprove" style="${B_GRN}">Approve &amp; complete</button>
     </div>`, 520);
   const err = m.querySelector('.m-err');
+  (async () => {
+    const box = m.querySelector('#rvMedia');
+    try {
+      const res = await apiFetch(`/installation/media/${encodeURIComponent(i.installation_id)}`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error('Could not load photo.');
+      box.innerHTML = (d.completion_image && d.completion_image.startsWith('data:image/')
+        ? `<img src="${esc(d.completion_image)}" alt="Installation photo" style="max-width:100%;border-radius:10px;margin:10px 0;">`
+        : '<p style="color:#94a3b8;font-size:13px;margin:10px 0;">No photo uploaded.</p>')
+        + (d.completion_note ? dRowS('Technician note', esc(d.completion_note)) : '');
+    } catch (e) { box.innerHTML = `<p style="color:#dc2626;font-size:13px;">${esc(e.message)}</p>`; }
+  })();
   const run = async (status, note) => {
     try {
       await svcPost(`/installation/status/${encodeURIComponent(i.installation_id)}`, { status, note });

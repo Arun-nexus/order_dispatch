@@ -149,6 +149,7 @@ class UpdateAccountRequest(BaseModel):
 
 class ServiceRequest(BaseModel):
     product_id: str
+    company_name: str = ""
     product_name: str = ""
     model_no: str = ""
     serial_no: str
@@ -385,6 +386,7 @@ class InstallationScheduleRequest(BaseModel):
 class InstallationStatusRequest(BaseModel):
     status: str
     note: str = ""
+    image: Optional[str] = None
 
 
 class OrderUpdatedValue(BaseModel):
@@ -3179,7 +3181,8 @@ def create_service(request: ServiceRequest, user: dict = Depends(require_role("s
             spare_parts=request.spare_parts,
             created_by=user["username"],
             product_name=request.product_name,
-            model_no=request.model_no
+            model_no=request.model_no,
+            company_name=request.company_name
         )
         _save_service_address(service.service_id, address)
         logging.info(f"service creation was successful with service_id {service.service_id}!")
@@ -3668,12 +3671,19 @@ def technician_allocations(user: dict = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # Installations: product installation requests that a technician can schedule
 # ---------------------------------------------------------------------------
-INSTALLATION_STATUSES = ("requested", "scheduled", "in_progress", "completed")
+INSTALLATION_STATUSES = ("requested", "scheduled", "in_progress", "pending_approval", "completed")
 INSTALLATION_MANAGERS = ("service_manager", "admin", "accounts")
 
 
 def _clean(row: dict) -> dict:
     row.pop("_id", None)
+    return row
+
+
+def _clean_list(row: dict) -> dict:
+    """List responses never carry the heavy base64 photo; fetch it via /installation/media/{id}."""
+    row = _clean(row)
+    row["has_completion_image"] = bool(row.pop("completion_image", None))
     return row
 
 
@@ -3735,7 +3745,7 @@ def create_installation(request: InstallationCreateRequest,
 def list_installations(user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
     try:
         rows = mongodbclient().get_data(collection_name=INSTALLATION_COLLECTION, query={})
-        rows = sorted((_clean(r) for r in rows), key=lambda r: r.get("created_at") or "", reverse=True)
+        rows = sorted((_clean_list(r) for r in rows), key=lambda r: r.get("created_at") or "", reverse=True)
         return {"message": "installations", "dataset": rows}
     except Exception:
         logging.error("installations cannot be fetched")
@@ -3748,11 +3758,25 @@ def my_installations(user: dict = Depends(get_current_user)):
     try:
         rows = mongodbclient().get_data(collection_name=INSTALLATION_COLLECTION, query={
             "$or": [{"technician_id": user["username"]}, {"technician_id": None}, {"technician_id": ""}]})
-        rows = sorted((_clean(r) for r in rows), key=lambda r: r.get("created_at") or "", reverse=True)
+        rows = sorted((_clean_list(r) for r in rows), key=lambda r: r.get("created_at") or "", reverse=True)
         return {"message": "my installations", "dataset": rows}
     except Exception:
         logging.error("my installations cannot be fetched")
         raise HTTPException(status_code=500, detail="installations cannot be fetched")
+
+
+@app.get("/installation/media/{installation_id}")
+def installation_media(installation_id: str, user: dict = Depends(get_current_user)):
+    try:
+        inst = _get_installation(installation_id)
+        _check_install_access(inst, user)
+        return {"installation_id": installation_id, "completion_image": inst.get("completion_image") or "",
+                "completion_note": inst.get("completion_note") or ""}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("installation media cannot be fetched")
+        raise HTTPException(status_code=500, detail="installation media cannot be fetched")
 
 
 @app.post("/installation/assign/{installation_id}")
@@ -3816,12 +3840,17 @@ def installation_status(installation_id: str, request: InstallationStatusRequest
             raise HTTPException(status_code=400, detail="invalid status")
         inst = _get_installation(installation_id)
         _check_install_access(inst, user)
-        if request.status in ("in_progress", "completed") and not inst.get("technician_id"):
+        if request.status in ("in_progress", "pending_approval", "completed") and not inst.get("technician_id"):
             raise HTTPException(status_code=409, detail="assign a technician first")
         now = datetime.now(timezone.utc).isoformat()
         history = list(inst.get("history") or []) + [
             {"status": request.status, "note": request.note.strip(), "by": user["username"], "at": now}]
         update = {"status": request.status, "history": history}
+        if request.status == "pending_approval":
+            if not request.image or not request.image.startswith("data:image/"):
+                raise HTTPException(status_code=400, detail="completion photo is required")
+            update["completion_image"] = request.image
+            update["completion_note"] = request.note.strip()
         if request.status == "completed":
             update["completed_at"] = now
         mongodbclient().update_data(collection_name=INSTALLATION_COLLECTION, query={"installation_id": installation_id},
@@ -5467,6 +5496,7 @@ class DemoUnitRequestModel(BaseModel):
 
 class ServiceRequestModel(BaseModel):
     product_id: str
+    company_name: str = ""
     product_name: str = ""
     model_no: str = ""
     serial_no: str
@@ -5817,6 +5847,7 @@ def raise_service_request(request: ServiceRequestModel, user: dict = Depends(req
             raised_by=user["username"],
             details={
                 "product_id": request.product_id,
+                "company_name": request.company_name,
                 "product_name": request.product_name,
                 "model_no": request.model_no,
                 "serial_no": request.serial_no,
@@ -5968,7 +5999,8 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                 spare_parts=details.get("spare_parts", ""),
                 created_by=req["raised_by"],
                 product_name=details.get("product_name", ""),
-                model_no=details.get("model_no", "")
+                model_no=details.get("model_no", ""),
+                company_name=details.get("company_name", "")
             )
             _save_service_address(service.service_id, details.get("address", ""))
             if details.get("video"):
