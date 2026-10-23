@@ -19,7 +19,7 @@ from allocation.allocation import allocation_manager
 from request.request_manager import request_manager
 from shipment.manage_shipment import shipment_manager, compute_payment
 from assembly.manage_assembly import assembly_manager
-from auth import create_access_token, get_current_user, require_role, invalidate_access_cache
+from auth import create_access_token, get_current_user, require_role, invalidate_access_cache, _borrowed_roles
 from fastapi.responses import FileResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -4135,6 +4135,21 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _record_for_view(doc):
+    """JSON-safe copy of a stored record for the Record page's detail view: drops Mongo _id,
+    turns ObjectId / datetime etc. into strings and replaces huge strings (e.g. embedded
+    images) with a short placeholder so the response stays small."""
+    if isinstance(doc, dict):
+        return {str(k): _record_for_view(v) for k, v in doc.items() if k != "_id"}
+    if isinstance(doc, (list, tuple, set)):
+        return [_record_for_view(v) for v in doc]
+    if isinstance(doc, str):
+        return doc if len(doc) <= 1000 else "[long value omitted]"
+    if doc is None or isinstance(doc, (bool, int, float)):
+        return doc
+    return str(doc)
+
+
 @app.get("/inventory/serial_history/{serial_number}")
 def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
     """
@@ -4171,6 +4186,16 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
 
         events = []
 
+        # Every event also carries "full" = the whole underlying record (order, allocation, service ...)
+        # so the Record page can open it when an event is clicked. Full records hold prices and customer
+        # data, so they are only sent to roles that already manage those pages; everyone else keeps
+        # getting just the short "details" summary.
+        _can_see_full = user.get("role") in ("admin", "accounts", "inventory_manager") or bool(
+            _borrowed_roles(user["username"]) & {"accounts", "inventory_manager"})
+
+        def _full(doc):
+            return _record_for_view(doc) if _can_see_full else None
+
         # ---- Currently in inventory (and under which category) ----
         inv_db = inventory_manager()
         inv_entries = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"serial_numbers": rx})
@@ -4187,7 +4212,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                     "lot_no": entry.get("lot_no"),
                     "product_type": entry.get("product_type"),
                     "reason": entry.get("reason") or None,
-                }
+                },
+                "full": _full(entry),
             })
 
         # ---- Assembly (when/how this unit was built, if it was assembled in-house) ----
@@ -4204,7 +4230,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                     "product_name": asm.get("product_name"),
                     "hologram_number": serial_entry.get("hologram_number"),
                     "status": asm.get("status"),
-                }
+                },
+                "full": _full(asm),
             })
 
         # ---- Orders (sale + any return) ----
@@ -4221,7 +4248,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                     "product_name": item.get("product_name"),
                     "company_name": (o.get("customer") or {}).get("company_name"),
                     "status": o.get("status"),
-                }
+                },
+                "full": _full(o),
             })
             if o.get("status") == "returned":
                 ret_item = next((r for r in (o.get("returned_items") or []) if _has(r.get("serial_numbers"))), None)
@@ -4233,7 +4261,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                         "order_id": o.get("order_id"),
                         "reason": o.get("return_reason"),
                         "condition": ret_item.get("condition") if ret_item else None,
-                    }
+                    },
+                    "full": _full(o),
                 })
 
         # ---- Allocations (demo unit or sales-person product allocation + return/damage) ----
@@ -4252,7 +4281,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                     "to": (a.get("customer") or {}).get("company_name") if is_demo else (a.get("sales_person") or {}).get("name"),
                     "allocated_by": a.get("allocated_by"),
                     "return_status": a.get("return_status"),
-                }
+                },
+                "full": _full(a),
             })
             if a.get("return_status") == "returned":
                 damage = a.get("damage_report") or {}
@@ -4265,7 +4295,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                         "returned_by": a.get("returned_by"),
                         "faulty": bool(damage.get("reported")),
                         "issue": damage.get("issue"),
-                    }
+                    },
+                    "full": _full(a),
                 })
 
         # ---- Service records raised against this serial ----
@@ -4284,7 +4315,8 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                     "issue": s.get("issue"),
                     "status": s.get("service_status"),
                     "technician_id": s.get("technician_id"),
-                }
+                },
+                "full": _full(s),
             })
 
         # dates can come back as plain "YYYY-MM-DD" strings from some

@@ -84,6 +84,32 @@ function wireSerialRecordModal() {
 
   btn.addEventListener('click', () => openSerialRecordModal());
 
+  // last search result, so an event can be opened in full and "Back" needs no new request
+  const current = { events: [], serial: '' };
+
+  // one delegated listener for: open event details / back to timeline / jump to another serial
+  modal.addEventListener('click', e => {
+    const box = modal.querySelector('#serialRecordResults');
+    if (!box) return;
+    const chip = e.target.closest('.sr-serial');
+    if (chip && box.contains(chip)) {
+      const sn = chip.dataset.serial || '';
+      const input = modal.querySelector('#serialRecordInput');
+      if (input) input.value = sn;
+      runSerialSearch(sn);
+      return;
+    }
+    if (e.target.closest('.sr-back')) {
+      box.innerHTML = renderSerialTimeline(current.events, current.serial);
+      return;
+    }
+    const evEl = e.target.closest('.sr-ev');
+    if (evEl && box.contains(evEl)) {
+      const ev = current.events[Number(evEl.dataset.evIdx)];
+      if (ev) { box.innerHTML = renderSerialEventDetail(ev, current.serial); box.scrollIntoView({ block: 'nearest' }); }
+    }
+  });
+
   function renderSearchForm(prefill) {
     const content = modal.querySelector('.modal-content');
     content.innerHTML = `
@@ -119,7 +145,9 @@ function wireSerialRecordModal() {
       const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(normalizedSerial)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'search failed');
-      resultsBox.innerHTML = renderSerialTimeline(data.events || [], serial);
+      current.events = data.events || [];
+      current.serial = serial;
+      resultsBox.innerHTML = renderSerialTimeline(current.events, serial);
     } catch (err) {
       if (err.message === 'unauthorized' || err.message === 'forbidden') return;
       resultsBox.innerHTML = `<p style="color:var(--danger);font-size:13px;">${escapeHtmlInv(err.message)}</p>`;
@@ -181,15 +209,79 @@ function renderSerialTimeline(events, serial) {
   return `
     <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">Lifetime record for <strong>${escapeHtmlInv(serial)}</strong> (${events.length} event${events.length > 1 ? 's' : ''})</div>
     <div style="display:flex;flex-direction:column;gap:12px;">
-      ${events.map(ev => `
-        <div style="border-left:3px solid var(--primary);padding-left:12px;">
+      ${events.map((ev, idx) => `
+        <div class="sr-ev" data-ev-idx="${idx}" title="Click to see everything about this event" style="border-left:3px solid var(--primary);padding:6px 10px 6px 12px;cursor:pointer;border-radius:0 8px 8px 0;" onmouseover="this.style.background='var(--bg-light)'" onmouseout="this.style.background=''">
           <div style="display:flex;justify-content:space-between;align-items:baseline;">
             <strong style="font-size:13px;"><i class="fa-solid ${SERIAL_EVENT_ICONS[ev.type] || 'fa-circle-dot'}" style="margin-right:6px;color:var(--primary);"></i>${escapeHtmlInv(ev.label)}</strong>
             <small style="color:var(--text-light);">${ev.date ? new Date(ev.date).toLocaleDateString('en-GB') : '-'}</small>
           </div>
           <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtmlInv(serialEventDetailLine(ev))}</p>
+          <small style="color:var(--primary);font-size:11px;">View full details ›</small>
         </div>`).join('')}
     </div>`;
+}
+
+// ---------- full details of one timeline event ----------
+const srIsEmpty = v => v === null || v === undefined || v === ''
+  || (Array.isArray(v) && !v.length)
+  || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
+const srLabel = k => String(k).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+function srSerialChip(sn, hl) {
+  const on = hl && String(sn).trim().toLowerCase() === String(hl).trim().toLowerCase();
+  return `<span class="iv-chip sr-serial" data-serial="${escapeHtmlInv(sn)}" title="Open this serial's history" style="cursor:pointer;${on ? 'background:var(--primary);color:#fff;' : ''}">${escapeHtmlInv(sn)}</span>`;
+}
+
+function srScalar(key, v, hl) {
+  if (srIsEmpty(v)) return '—';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  if (/serial/i.test(key) && typeof v !== 'object') return srSerialChip(v, hl);   // serial_no etc. is clickable too
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
+    const d = new Date(v);
+    if (!isNaN(d)) return escapeHtmlInv(d.toLocaleString('en-GB'));
+  }
+  return escapeHtmlInv(v);
+}
+
+function srRenderObject(obj, hl) {
+  const scalars = [], blocks = [];
+  Object.entries(obj || {}).forEach(([k, v]) => {
+    if (k === '_id') return;
+    (srIsEmpty(v) || typeof v !== 'object' ? scalars : blocks).push([k, v]);
+  });
+  let html = '';
+  if (scalars.length) {
+    html += `<div class="iv-grid">${scalars.map(([k, v]) => `
+      <div class="iv-cell"><small>${escapeHtmlInv(srLabel(k))}</small><p>${srScalar(k, v, hl)}</p></div>`).join('')}</div>`;
+  }
+  blocks.forEach(([k, v]) => {
+    html += `<div class="iv-title">${escapeHtmlInv(srLabel(k))}${Array.isArray(v) ? ` (${v.length})` : ''}</div>`;
+    if (Array.isArray(v)) {
+      if (v.every(x => x === null || typeof x !== 'object')) {
+        html += `<div class="iv-chips">${v.map(x => /serial/i.test(k) ? srSerialChip(x, hl) : `<span class="iv-chip">${escapeHtmlInv(x)}</span>`).join('')}</div>`;
+      } else {
+        html += v.map(x => (x !== null && typeof x === 'object')
+          ? `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">${srRenderObject(x, hl)}</div>`
+          : `<div class="iv-chip" style="margin-bottom:6px;">${escapeHtmlInv(x)}</div>`).join('');
+      }
+    } else {
+      html += `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px;">${srRenderObject(v, hl)}</div>`;
+    }
+  });
+  return html || '<p style="color:var(--text-light);font-size:13px;">Nothing recorded.</p>';
+}
+
+function renderSerialEventDetail(ev, serial) {
+  ensureInvStyles();
+  const full = ev.full || ev.details || {};
+  return `
+    <button type="button" class="sr-back" style="border:none;background:none;color:var(--primary);cursor:pointer;font-size:13px;margin-bottom:10px;padding:0;">← Back to timeline</button>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
+      <strong style="font-size:15px;"><i class="fa-solid ${SERIAL_EVENT_ICONS[ev.type] || 'fa-circle-dot'}" style="margin-right:6px;color:var(--primary);"></i>${escapeHtmlInv(ev.label)}</strong>
+      <small style="color:var(--text-light);">${ev.date ? new Date(ev.date).toLocaleDateString('en-GB') : '-'}</small>
+    </div>
+    <p class="iv-hint">${ev.full ? 'Complete record' : 'Summary'} for <strong>${escapeHtmlInv(serial)}</strong>${ev.full ? ' — click any serial number to open its own history.' : '.'}</p>
+    <div style="max-height:60vh;overflow-y:auto;padding-right:4px;">${srRenderObject(full, serial)}</div>`;
 }
 
 function exportLowStockToExcel(lowItems) {
