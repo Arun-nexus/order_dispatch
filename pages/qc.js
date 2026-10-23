@@ -169,11 +169,12 @@ function renderTable() {
       <td>${qEsc(r.party)}</td>
       <td>${qDate(r.date)}</td>
       <td>${qEsc(r.status)}</td>
-      <td style="white-space:nowrap;"><button class="icon-btn" data-i="${start + i}" title="View"><i class="fa-solid fa-eye"></i></button>${r.type === 'dispatch' ? ` <button class="icon-btn" data-ch="${start + i}" title="Store Challan"><i class="fa-solid fa-file-lines"></i></button>` : ''}</td>
+      <td style="white-space:nowrap;"><button class="icon-btn" data-i="${start + i}" title="View"><i class="fa-solid fa-eye"></i></button>${r.type === 'dispatch' ? ` <button class="icon-btn" data-ch="${start + i}" title="Store Challan"><i class="fa-solid fa-file-lines"></i></button> <button class="icon-btn" data-lb="${start + i}" title="Label Issuance"><i class="fa-solid fa-tags"></i></button>` : ''}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:24px;">No records found.</td></tr>';
   document.querySelectorAll('#qcBody [data-i]').forEach(b => b.addEventListener('click', () => openView(QC.filtered[Number(b.dataset.i)])));
   document.querySelectorAll('#qcBody [data-ch]').forEach(b => b.addEventListener('click', () => window.openStoreChallan && window.openStoreChallan(QC.filtered[Number(b.dataset.ch)])));
+  document.querySelectorAll('#qcBody [data-lb]').forEach(b => b.addEventListener('click', () => window.openLabelIssuance && window.openLabelIssuance(QC.filtered[Number(b.dataset.lb)])));
   const pages = Math.max(1, Math.ceil(QC.filtered.length / QC.size));
   document.getElementById('qcPager').innerHTML = `<button class="page-btn" data-p="prev"><i class="fa-solid fa-angle-left"></i></button><button class="page active-page" style="min-width:90px;">${QC.page} / ${pages}</button><button class="page-btn" data-p="next"><i class="fa-solid fa-angle-right"></i></button>`;
   document.querySelectorAll('#qcPager [data-p]').forEach(b => b.addEventListener('click', () => {
