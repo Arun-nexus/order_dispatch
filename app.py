@@ -4989,7 +4989,7 @@ def search_customer(term: str = "", user: dict = Depends(get_current_user)):
 
 
 @app.post("/customer/create")
-def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor"))):
+def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor", "inventory_manager"))):
     try:
         new_customer = customer_manager(
             company_name=request.company_name,
@@ -5594,8 +5594,9 @@ class ReturnRequestModel(BaseModel):
 
 
 class ConvertToOrderRequest(BaseModel):
-    company_name: str
-    company_address: str
+    customer_id: str = ""          # set when an already-registered company is picked
+    company_name: str = ""         # used only when no customer_id is given
+    company_address: str = ""
     gst_number: str = ""
     price: float
     tax_rate: float = 0
@@ -5641,8 +5642,6 @@ def _can_act_on_demo(alloc: dict, user: dict) -> bool:
 def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, user: dict = Depends(require_role("distributor", "inventory_manager"))):
     """Distributor asks to turn a dispatched demo unit into an order. Raises an approval request."""
     try:
-        if not request.company_name.strip() or not request.company_address.strip():
-            raise HTTPException(status_code=400, detail="company name and address are required")
         if request.price <= 0:
             raise HTTPException(status_code=400, detail="enter a valid price")
 
@@ -5651,7 +5650,8 @@ def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, us
         if not matches:
             raise HTTPException(status_code=404, detail="demo unit not found")
         alloc = matches[0]
-        if alloc.get("allocation_type") != "demo_unit" or not _can_act_on_demo(alloc, user):
+        # same allocation types the My Demo Units table lists (/allocation/mine)
+        if alloc.get("allocation_type") not in ("demo_unit", "product") or not _can_act_on_demo(alloc, user):
             raise HTTPException(status_code=403, detail="this is not your demo unit")
         if not alloc.get("dispatch"):
             raise HTTPException(status_code=400, detail="only dispatched demo units can be converted to an order")
@@ -5662,11 +5662,29 @@ def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, us
         if (alloc.get("return_request") or {}).get("status") == "pending":
             raise HTTPException(status_code=400, detail="a return request is pending for this demo unit")
 
-        customer = {
-            "company_name": request.company_name.strip(),
-            "company_address": request.company_address.strip(),
-            "gst_number": request.gst_number.strip(),
-        }
+        if request.customer_id.strip():
+            # an already-registered company was picked: reuse it (no duplicate gets created on approval)
+            rows = customer_manager().get_data(collection_name=CUSTOMER_COLLECTION,
+                                               query={"customer_id": request.customer_id.strip()})
+            if not rows:
+                raise HTTPException(status_code=404, detail="selected company not found")
+            picked = rows[0]
+            if picked.get("created_by") not in (user["username"], alloc.get("allocated_by")):
+                raise HTTPException(status_code=403, detail="this company does not belong to you")
+            customer = {
+                "customer_id": picked["customer_id"],
+                "company_name": picked.get("company_name", ""),
+                "company_address": picked.get("company_address", ""),
+                "gst_number": picked.get("gst_number", ""),
+            }
+        else:
+            if not request.company_name.strip() or not request.company_address.strip():
+                raise HTTPException(status_code=400, detail="company name and address are required")
+            customer = {
+                "company_name": request.company_name.strip(),
+                "company_address": request.company_address.strip(),
+                "gst_number": request.gst_number.strip(),
+            }
         items = [{
             "product_id": i.get("product_id"), "product_name": i.get("product_name"),
             "model_no": i.get("model_no", ""), "serial_numbers": i.get("serial_numbers", []),

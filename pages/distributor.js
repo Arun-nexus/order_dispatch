@@ -277,35 +277,79 @@ function openReturnModal(row) {
 }
 
 // ---------- Convert a dispatched demo unit into an order (needs admin approval) ----------
-function openConvertModal(row) {
+async function openConvertModal(row) {
   if (!row || row.kind !== 'alloc') return;
   const a = row.data;
   const modal = document.getElementById('allotModal');
   const body = wizBody();
   wizTitle('Convert to Order');
+
+  // companies of this person (backend already limits /customer/search for distributors)
+  let companies = [];
+  try {
+    const r = await apiFetch('/customer/search');
+    if (r.ok) companies = (await r.json()).dataset || [];
+  } catch (e) {
+    if (e.message === 'unauthorized') return;
+  }
+
+  const inp = 'padding:9px;border:1px solid #d1d5db;border-radius:8px;';
+  const opts = companies.map(c =>
+    `<option value="${esc(c.customer_id)}">${esc(c.company_name)}${c.company_address ? ' — ' + esc(c.company_address) : ''}</option>`).join('');
+
   body.innerHTML = `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">${itemsLabel(a.items)}</div>
     <form id="convertForm" style="display:flex;flex-direction:column;gap:10px;">
-      <input name="company_name" placeholder="Company Name" required>
-      <input name="company_address" placeholder="Company Address" required>
-      <input name="gst_number" placeholder="GST Number (optional)">
-      <input name="price" type="number" min="1" step="0.01" placeholder="Price per unit (₹)" required>
-      <input name="tax_rate" type="number" min="0" step="0.01" placeholder="Tax rate % (optional)">
+      <select id="companySelect" style="${inp}">
+        ${companies.length ? '<option value="">Select company</option>' : ''}
+        ${opts}
+        <option value="__new__">+ Add new company</option>
+      </select>
+      <div id="newCompanyBox" style="display:none;flex-direction:column;gap:10px;">
+        <input name="company_name" placeholder="Company Name" style="${inp}">
+        <input name="company_address" placeholder="Company Address" style="${inp}">
+        <input name="gst_number" placeholder="GST Number (optional)" style="${inp}">
+      </div>
+      <input name="price" type="number" min="1" step="0.01" placeholder="Price per unit (₹)" required style="${inp}">
+      <input name="tax_rate" type="number" min="0" step="0.01" placeholder="Tax rate % (optional)" style="${inp}">
       <p style="font-size:12px;color:#94a3b8;">Sent to admin for approval. Once approved this unit moves to My Orders.</p>
       <div style="display:flex;justify-content:space-between;margin-top:6px;">
         <button type="button" id="convertCancel" style="padding:10px 16px;border-radius:8px;border:none;background:#e5e7eb;cursor:pointer;">Cancel</button>
-        <button type="submit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
+        <button type="submit" id="convertSubmit" style="padding:10px 16px;border-radius:8px;border:none;background:#16a34a;color:#fff;cursor:pointer;">Send Request</button>
       </div>
     </form>`;
+
+  const sel = document.getElementById('companySelect');
+  const box = document.getElementById('newCompanyBox');
+  const syncBox = () => { box.style.display = sel.value === '__new__' ? 'flex' : 'none'; };
+  sel.addEventListener('change', syncBox);
+  if (!companies.length) sel.value = '__new__';   // no companies yet -> go straight to creating one
+  syncBox();
+
   document.getElementById('convertCancel').addEventListener('click', () => modal.style.display = 'none');
   document.getElementById('convertForm').addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const payload = {
-      company_name: fd.get('company_name'), company_address: fd.get('company_address'),
-      gst_number: fd.get('gst_number') || '', price: Number(fd.get('price')), tax_rate: Number(fd.get('tax_rate')) || 0
-    };
+    const btn = document.getElementById('convertSubmit');
+    let customerId = sel.value;
+    if (!customerId) { alert('Select a company or add a new one'); return; }
+
+    btn.disabled = true;
     try {
+      if (customerId === '__new__') {
+        const name = (fd.get('company_name') || '').trim();
+        const addr = (fd.get('company_address') || '').trim();
+        if (!name || !addr) throw new Error('company name and address are required');
+        const cr = await apiFetch('/customer/create', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_name: name, company_address: addr, gst_number: (fd.get('gst_number') || '').trim() })
+        });
+        const cd = await cr.json();
+        if (!cr.ok) throw new Error(cd.detail || 'company could not be created');
+        customerId = cd.customer_id;
+      }
+
+      const payload = { customer_id: customerId, price: Number(fd.get('price')), tax_rate: Number(fd.get('tax_rate')) || 0 };
       const res = await apiFetch(`/allocation/convert_to_order/${a.allocation_id}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
@@ -316,6 +360,8 @@ function openConvertModal(row) {
       await loadMyAllocations();
     } catch (err) {
       if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+    } finally {
+      btn.disabled = false;
     }
   });
   modal.style.display = 'flex';
