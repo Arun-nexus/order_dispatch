@@ -1020,6 +1020,58 @@ def _swap_faulty_part(service_id: str, parts_used: list):
     return mismatch
 
 
+# ---- never hand out a serial number that is already sold ----
+# Inventory lots can still list a serial that a live order / demo allocation already holds
+# (stale lot data, a restock that was never cleaned up, the same serial in two lots ...).
+# These helpers cross-check inventory serials against orders + allocations before auto-picking.
+_ORDER_STATUSES_NOT_HOLDING_STOCK = ["cancelled", "returned"]
+
+
+def _unsold_serials(serials):
+    """Returns the serials (original order kept) that are NOT held by a live order or a live
+    (not returned) allocation. Serials of returned orders that were restocked count as free."""
+    serials = [s for s in (serials or []) if s]
+    if not serials:
+        return []
+    db = mongodbclient()
+    taken = set()
+    for o in db.get_data(collection_name=ORDERS_COLLECTION,
+                         query={"items.serial_numbers": {"$in": serials},
+                                "status": {"$nin": _ORDER_STATUSES_NOT_HOLDING_STOCK}}):
+        back_in_stock = set(o.get("returned_serials_processed") or [])
+        for it in (o.get("items") or []):
+            for sn in (it.get("serial_numbers") or []):
+                if sn not in back_in_stock:
+                    taken.add(sn)
+    for a in db.get_data(collection_name=ALLOCATION_COLLECTION,
+                         query={"items.serial_numbers": {"$in": serials},
+                                "return_status": {"$ne": "returned"}}):
+        for it in (a.get("items") or []):
+            for sn in (it.get("serial_numbers") or []):
+                taken.add(sn)
+    return [sn for sn in serials if sn not in taken]
+
+
+def _auto_pick_units(inventory_db, product_id: str, quantity: int, model_no=None):
+    """Auto-allocation that skips already-sold serials. Serialised stock: the oldest UNSOLD serials
+    are picked. Un-serialised stock (accessories / spare parts with no serial on file) keeps using
+    the plain quantity allocator, since there is nothing to cross-check."""
+    model_no = model_no or None
+    candidates = inventory_db.list_available_serials(INVENTORY_COLLECTION, product_id, model_no=model_no)
+    if not candidates:
+        return inventory_db.allocate_units(collection_name=INVENTORY_COLLECTION, product_id=product_id,
+                                           quantity=quantity, model_no=model_no)
+    clean = _unsold_serials(candidates)
+    if len(clean) < quantity:
+        skipped = len(candidates) - len(clean)
+        raise HTTPException(
+            status_code=400,
+            detail=f"only {len(clean)} unsold serial number(s) available for {product_id}"
+                   f"{f' ({skipped} serial(s) on file are already sold - fix them in Inventory)' if skipped else ''}")
+    return inventory_db.allocate_specific_serials(collection_name=INVENTORY_COLLECTION, product_id=product_id,
+                                                  serial_numbers=clean[:quantity], model_no=model_no)
+
+
 def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None, warranty_years: int = 1, warranty_charge: float = 0):
     """Validates payment details, resolves/creates the customer, deducts stock + serials,
     and creates the order record. Shared by the direct /order/create_order/ endpoint and by
@@ -1101,12 +1153,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
             except Exception as e:
                 raise HTTPException(status_code=400, detail=str(e))
         else:
-            allocated_serials = inventory_db.allocate_units(
-                collection_name=INVENTORY_COLLECTION,
-                product_id=item["product_id"],
-                quantity=item["quantity"],
-                model_no=item.get("model_no") or None
-            )
+            allocated_serials = _auto_pick_units(inventory_db, item["product_id"], item["quantity"], item.get("model_no") or None)
         order_item = dict(item)
         order_item["serial_numbers"] = allocated_serials
         order_items.append(order_item)
@@ -4277,7 +4324,7 @@ def available_serials(product_id: str, model_no: str = "", user: dict = Depends(
     """
     try:
         db = inventory_manager()
-        serials = db.list_available_serials(INVENTORY_COLLECTION, product_id, model_no=model_no or None)
+        serials = _unsold_serials(db.list_available_serials(INVENTORY_COLLECTION, product_id, model_no=model_no or None))
         return {"message": "available serial numbers", "serial_numbers": serials}
     except Exception as e:
         logging.error("fetching available serial numbers failed!")
@@ -5410,9 +5457,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
 
     demo_items = []
     for item in items:
-        allocated_serials = inventory_db.allocate_units(
-            collection_name=INVENTORY_COLLECTION, product_id=item["product_id"], quantity=item["quantity"]
-        )
+        allocated_serials = _auto_pick_units(inventory_db, item["product_id"], item["quantity"])
         demo_items.append({
             "product_id": item["product_id"],
             "product_name": item["product_name"],
@@ -5464,9 +5509,7 @@ def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id:
 
     ids = []
     for item in items:
-        serials = inventory_db.allocate_units(
-            collection_name=INVENTORY_COLLECTION, product_id=item["product_id"],
-            quantity=item["quantity"], model_no=item.get("model_no") or None)
+        serials = _auto_pick_units(inventory_db, item["product_id"], item["quantity"], item.get("model_no") or None)
         for i in range(item["quantity"]):
             serial = serials[i] if i < len(serials) else None
             alloc = allocation_manager(
@@ -6340,12 +6383,7 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
                     model_no=item.model_no or None
                 )
             else:
-                allocated_serials = inventory_db.allocate_units(
-                    collection_name=INVENTORY_COLLECTION,
-                    product_id=item.product_id,
-                    quantity=item.quantity,
-                    model_no=item.model_no or None
-                )
+                allocated_serials = _auto_pick_units(inventory_db, item.product_id, item.quantity, item.model_no or None)
             for i in range(item.quantity):
                 serial = allocated_serials[i] if i < len(allocated_serials) else None
                 unit_allocation = allocation_manager(

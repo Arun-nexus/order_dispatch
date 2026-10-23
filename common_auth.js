@@ -145,15 +145,26 @@ function checkPageAccess() {
   }
 }
 
+// "pages/orders.html?tab=x#y" -> "orders.html"
+function pageFileOf(href) {
+  return String(href || '').split('#')[0].split('?')[0].split('/').pop();
+}
+
+// Removes every sidebar entry the user has no access to. The <li> is REMOVED (not just
+// display:none), so a stylesheet rule such as `.sidebar li { display:flex !important }`
+// can never bring a forbidden link back. Safe to call more than once.
 function filterSidebarByRole() {
   const role = getRole();
+  if (!role) return;
   const allowed = allowedPages(role);
   document.querySelectorAll('.sidebar ul li a').forEach(a => {
+    if (a.hasAttribute('data-work-link')) return;            // Work / Work Report link is decided by initWorkPopup
     const href = a.getAttribute('href');
-    if (!href || href.startsWith('#')) return;
-    const file = href.split('/').pop();
+    if (!href || href.startsWith('#') || /^(javascript:|https?:|mailto:)/i.test(href)) return;
+    const file = pageFileOf(href);
     if (file && !allowed.includes(file)) {
-      a.closest('li').style.display = 'none';
+      const li = a.closest('li');
+      if (li) li.remove();
     }
   });
 }
@@ -247,6 +258,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 });
+
+// Run once immediately too: on most pages common_auth.js loads after the sidebar markup,
+// so forbidden links disappear before the first paint instead of after DOMContentLoaded.
+try { if (getToken() && getRole() && document.querySelector('.sidebar ul')) filterSidebarByRole(); } catch (e) { }
 
 // =========================================================
 // Shared response popup ("wizard box") — replaces plain

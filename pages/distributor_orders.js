@@ -741,12 +741,12 @@ function renderProductsStep() {
     const priceInCart = cartLine?.price ?? '';
     return `
       <tr>
-        <td>${p.product_name ?? ''}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + (p.parent_product_name || '—') : p.product_id + (p.model_no ? ' — ' + p.model_no : '')}</small></td>
+        <td>${esc(p.product_name ?? '')}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + esc(p.parent_product_name || '—') : esc(p.product_id) + (p.model_no ? ' — ' + esc(p.model_no) : '')}</small></td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
-              placeholder="0" data-row-key="${key}" class="qtyInput"
+              placeholder="0" data-row-key="${esc(key)}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
         <td><input type="number" min="0" inputmode="decimal" value="${priceInCart}"
-              placeholder="₹0" data-row-key="${key}" class="priceInput"
+              placeholder="₹0" data-row-key="${esc(key)}" class="priceInput"
               style="width:85px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
       </tr>`;
   }
@@ -770,9 +770,16 @@ function renderProductsStep() {
   // Price is entered manually here instead of being pulled from the catalog
   // — the cart line is only ever built (or updated) from whatever is
   // currently in the row's Qty and Price fields, not from p.price.
+  // (inputs are matched by comparing dataset.rowKey, NOT with a CSS attribute selector: product
+  // names containing quotes / brackets / backslashes make such a selector throw or match nothing,
+  // which silently dropped the typed quantity and gave "add quantity for at least one product")
+  function findRowInput(cls, key) {
+    return [...rowsBox.querySelectorAll('.' + cls)].find(i => i.dataset.rowKey === key) || null;
+  }
+
   function syncRowToCart(key, p) {
-    const qtyInp = rowsBox.querySelector(`.qtyInput[data-row-key="${key}"]`);
-    const priceInp = rowsBox.querySelector(`.priceInput[data-row-key="${key}"]`);
+    const qtyInp = findRowInput('qtyInput', key);
+    const priceInp = findRowInput('priceInput', key);
     const qty = computeTypedQty(qtyInp);
 
     if (qty === null || qty <= 0) { delete orderWiz.cart[key]; return; }
@@ -824,6 +831,12 @@ function renderProductsStep() {
   document.getElementById('prodFilter').addEventListener('input', applyFilters);
 
   document.getElementById('toPaymentBtn').addEventListener('click', () => {
+    // re-sync every row currently on screen (covers autofill / paste / missed input events)
+    rowsBox.querySelectorAll('.qtyInput').forEach(inp => {
+      const key = inp.dataset.rowKey;
+      const p = products.find(x => rowKeyFor(x) === key);
+      if (p) syncRowToCart(key, p);
+    });
     const cartItems = Object.values(orderWiz.cart);
     if (!cartItems.length) { alert('Add quantity for at least one product.'); return; }
     if (cartItems.some(i => !i.price || i.price <= 0)) { alert('Enter a price for every product you added.'); return; }
