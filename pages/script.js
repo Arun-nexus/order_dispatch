@@ -244,6 +244,77 @@ function openRescheduleModal(s) {
 
 
 
+// ---------- Edit service (admin / employee): change the details and reassign the technician ----------
+async function openEditServiceModal(s) {
+  if (!s) return;
+  await loadAssignees();
+  const inp = (name, label, val, type) => `<label style="font-size:13px;">${label}</label><input name="${name}" type="${type || 'text'}" value="${esc(val ?? '')}" style="${IN_S}">`;
+
+  // technician dropdown. Older rows may hold the technician's user id instead of the username,
+  // so match on either; anything unmatched is kept as a selectable "(current)" option.
+  const cur = String(s.technician_alloted || '');
+  const match = svcState.assignees.find(u => u.username === cur || (u.user_id && u.user_id === cur));
+  const selected = match ? match.username : cur;
+  const techOpts = `<option value="">Select technician</option>`
+    + (!match && cur ? `<option value="${esc(cur)}" selected>${esc(cur)} (current)</option>` : '')
+    + svcState.assignees.map(u => `<option value="${esc(u.username)}"${u.username === selected ? ' selected' : ''}>${esc(u.username)}${u.name && u.name !== u.username ? ' — ' + esc(u.name) : ''}</option>`).join('');
+
+  const info = serviceProductInfo(s);
+  const m = svcModal('Edit Service', `
+    <p style="font-size:12px;color:var(--text-muted);margin:-6px 0 10px;">Service #${esc(String(s.service_id || '').slice(0, 8))} · only the fields you change are saved</p>
+    ${inp('company_name', 'Company', s.company_name)}
+    ${inp('product_name', 'Product name', s.product_name || (info.name !== '-' ? info.name : ''))}
+    ${inp('model_no', 'Model No.', s.model_no || (info.model !== '-' ? info.model : ''))}
+    ${inp('serial_no', 'Serial No.', s.serial_no)}
+    <label style="font-size:13px;">Technician</label><select name="technician_alloted" style="${IN_S}">${techOpts}</select>
+    ${inp('purchase_date', 'Purchase date', s.purchase_date, 'date')}
+    <label style="font-size:13px;">Location</label>
+    <select name="location" style="${IN_S}"><option value="indoor"${(s.location || 'indoor') !== 'outdoor' ? ' selected' : ''}>Inhouse</option><option value="outdoor"${s.location === 'outdoor' ? ' selected' : ''}>Field</option></select>
+    <div id="edAddrBox" style="display:${s.location === 'outdoor' ? 'block' : 'none'};"><label style="font-size:13px;">Field service address</label><textarea name="address" rows="2" style="${IN_S}">${esc(s.address || '')}</textarea></div>
+    <label style="font-size:13px;">Issue</label><textarea name="issue" rows="3" style="${IN_S}">${esc(s.issue || '')}</textarea>
+    <label style="font-size:13px;">Spare parts</label><textarea name="spare_parts" rows="2" style="${IN_S}">${esc(s.spare_parts || '')}</textarea>
+    ${inp('service_charges', 'Service charges (₹)', s.service_charges, 'number')}
+    ${formFooter('Save changes')}`, 520);
+
+  const loc = m.querySelector('select[name="location"]');
+  loc.addEventListener('change', () => { m.querySelector('#edAddrBox').style.display = loc.value === 'outdoor' ? 'block' : 'none'; });
+
+  bindForm(m, async (mm, err) => {
+    const val = n => (mm.querySelector(`[name="${n}"]`) || { value: '' }).value.trim();
+    const next = {
+      company_name: val('company_name'), product_name: val('product_name'), model_no: val('model_no'),
+      serial_no: val('serial_no').toLowerCase(), technician_alloted: val('technician_alloted'),
+      purchase_date: val('purchase_date'), location: val('location'),
+      address: val('location') === 'outdoor' ? val('address') : '',
+      issue: val('issue'), spare_parts: val('spare_parts'),
+      service_charges: val('service_charges') === '' ? null : Number(val('service_charges'))
+    };
+    if (!next.technician_alloted) { err.textContent = 'Select a technician.'; return; }
+    if (!next.issue) { err.textContent = 'The issue cannot be empty.'; return; }
+    if (next.location === 'outdoor' && !next.address) { err.textContent = 'Enter the address for a field service.'; return; }
+    if (next.service_charges !== null && (!isFinite(next.service_charges) || next.service_charges < 0)) { err.textContent = 'Service charges must be a valid amount.'; return; }
+
+    // send only what actually changed
+    const before = {
+      company_name: s.company_name || '', product_name: s.product_name || (info.name !== '-' ? info.name : ''), model_no: s.model_no || (info.model !== '-' ? info.model : ''),
+      serial_no: String(s.serial_no || '').toLowerCase(), technician_alloted: selected, purchase_date: s.purchase_date || '',
+      location: s.location || 'indoor', address: s.address || '', issue: s.issue || '', spare_parts: s.spare_parts || '',
+      service_charges: s.service_charges ?? null
+    };
+    const changes = {};
+    Object.keys(next).forEach(k => { if (next[k] !== before[k]) changes[k] = next[k]; });
+    if (!Object.keys(changes).length) { err.textContent = 'Nothing was changed.'; return; }
+
+    const res = await apiFetch(`/service/edit/${encodeURIComponent(s.service_id)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Could not save the changes.');
+    mm.remove();
+    await Promise.all([loadServices(), loadPartAllocs()]);
+  });
+}
+
 function statusBadge(status) {
   const map = { active: 'pending', in_progress: 'progress', pending_approval: 'progress', completed: 'completed', rejected: 'rejected' };
   return map[status] || 'pending';
@@ -367,6 +438,8 @@ function openActionMenu(s, evt) {
     items.push({ label: 'Manager Confirm Return', action: () => managerConfirmReturn(s.service_id) });
     items.push({ label: 'Extend Warranty', action: () => extendWarranty(s.service_id) });
   }
+
+  if (['admin', 'accounts', 'service_manager', 'employee'].includes(role)) items.splice(s.status === 'pending_approval' ? 2 : 1, 0, { label: 'Edit Service', action: () => openEditServiceModal(s) });
 
   items.forEach(item => {
     const btn = document.createElement('button');

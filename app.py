@@ -347,6 +347,21 @@ class ServiceSendBackRequest(BaseModel):
     reason: str
 
 
+class ServiceEditRequest(BaseModel):
+    # every field optional: only the fields the admin actually changed are sent
+    company_name: Optional[str] = None
+    product_name: Optional[str] = None
+    model_no: Optional[str] = None
+    serial_no: Optional[str] = None
+    technician_alloted: Optional[str] = None
+    purchase_date: Optional[str] = None
+    issue: Optional[str] = None
+    location: Optional[str] = None
+    address: Optional[str] = None
+    spare_parts: Optional[str] = None
+    service_charges: Optional[float] = None
+
+
 class ServiceRescheduleRequest(BaseModel):
     scheduled_date: str
     reason: str = ""
@@ -3348,6 +3363,87 @@ def update_service(service_id: str, request: ServiceUpdateRequest, user: dict = 
     except Exception as e:
         logging.error("service updation was unsuccessful!")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/service/edit/{service_id}")
+def edit_service(service_id: str, request: ServiceEditRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    """Edit the details of a service and/or reassign it to another technician."""
+    try:
+        db = service_detail(product_id="", serial_no="")
+        existing = db.get_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="service not found")
+        svc = existing[0]
+        changes = request.dict(exclude_unset=True)
+        if not changes:
+            raise HTTPException(status_code=400, detail="nothing to update")
+
+        update = {}
+        for key in ("company_name", "product_name", "model_no", "purchase_date", "spare_parts"):
+            if key in changes:
+                update[key] = (changes[key] or "").strip()
+        if "serial_no" in changes:
+            serial = (changes["serial_no"] or "").strip().lower()
+            if not serial:
+                raise HTTPException(status_code=400, detail="serial number cannot be empty")
+            update["serial_no"] = serial
+        if "issue" in changes:
+            issue = (changes["issue"] or "").strip()
+            if not issue:
+                raise HTTPException(status_code=400, detail="the issue cannot be empty")
+            update["issue"] = issue
+        if "service_charges" in changes:
+            charges = changes["service_charges"]
+            if charges is not None and charges < 0:
+                raise HTTPException(status_code=400, detail="service charges cannot be negative")
+            update["service_charges"] = charges
+
+        # location + address are validated together (a field service needs an address)
+        if "location" in changes or "address" in changes:
+            location = changes.get("location") or svc.get("location") or "indoor"
+            if location not in ("indoor", "outdoor"):
+                raise HTTPException(status_code=400, detail="location must be indoor or outdoor")
+            address = _check_field_address(location, changes.get("address", svc.get("address")))
+            update["location"] = location
+            update["address"] = address
+
+        # reassigning the technician
+        old_tech = svc.get("technician_alloted")
+        new_tech = None
+        if "technician_alloted" in changes:
+            new_tech = (changes["technician_alloted"] or "").strip()
+            if not new_tech:
+                raise HTTPException(status_code=400, detail="select a technician")
+            if new_tech != old_tech:
+                if svc.get("status") in ("completed", "rejected"):
+                    raise HTTPException(status_code=409, detail="a completed or rejected service cannot be reassigned")
+                person = mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": new_tech})
+                if not person:
+                    raise HTTPException(status_code=404, detail="that technician does not exist")
+                if person[0].get("role") == "admin":
+                    raise HTTPException(status_code=400, detail="a service cannot be assigned to an admin")
+                update["technician_alloted"] = new_tech
+            else:
+                new_tech = None
+
+        if not update:
+            raise HTTPException(status_code=400, detail="nothing to update")
+        db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, update_values=update)
+
+        if new_tech:
+            label = f"{update.get('product_name') or svc.get('product_name') or svc.get('product_id') or 'Service'} (serial {update.get('serial_no') or svc.get('serial_no') or '-'})"
+            _notify([new_tech], kind="service_assigned", title="Service assigned to you",
+                    body=f"{label} - {update.get('issue') or svc.get('issue') or ''}",
+                    service_id=service_id, link=f"/pages/technician.html?service={service_id}")
+            _notify([old_tech], kind="service_reassigned", title="Service reassigned",
+                    body=f"{label} was reassigned to {new_tech} by {user['username']}", service_id=service_id)
+        logging.info(f"service {service_id} edited by {user['username']}: {sorted(update)}")
+        return {"message": "service was updated successfully", "service_id": service_id, "updated": sorted(update)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("service edit failed!")
+        raise HTTPException(status_code=500, detail="service could not be edited")
 
 
 @app.post("/service/request_status_update/{service_id}")
