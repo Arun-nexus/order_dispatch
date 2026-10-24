@@ -69,23 +69,6 @@
             </div>
           </div>
 
-          <div class="input-box">
-            <label>User Type</label>
-            <div class="input-field">
-              <select id="role" required>
-                <option value="">Select Your User Type</option>
-                <option value="admin">Admin</option>
-                <option value="accounts">Accounts</option>
-                <option value="service_manager">Service Manager</option>
-                <option value="assembly">Assembly</option>
-                <option value="technician">Technician</option>
-                <option value="distributor">Employee-Sales Person</option>
-                <option value="inventory_manager">Inventory Manager</option>
-                <option value="qc">Regulatory/QA</option>
-              </select>
-            </div>
-          </div>
-
           <button type="submit" class="login-btn" id="loginBtn">
             <i class="fa-solid fa-arrow-right-to-bracket"></i> Login
           </button>
@@ -149,8 +132,7 @@
 
       const payload = {
         username: document.getElementById('username').value.trim(),
-        password: document.getElementById('password').value,
-        role: document.getElementById('role').value
+        password: document.getElementById('password').value
       };
 
       btn.disabled = true;

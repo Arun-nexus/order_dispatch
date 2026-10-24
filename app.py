@@ -127,7 +127,6 @@ GMAIL_NOTIFY_RECEIVER = os.getenv("GMAIL_NOTIFY_RECEIVER", GMAIL_SENDER_EMAIL)
 class LoginRequest(BaseModel):
     username: str
     password: str
-    role: str
 
 
 class CreateAccountRequest(BaseModel):
@@ -550,7 +549,7 @@ def login_page(request: LoginRequest, http_request: Request):
 
         user = dataset[0]
 
-        if user["password"] != request.password or user["role"] != request.role:
+        if user["password"] != request.password:
             raise HTTPException(status_code=401, detail="details did not match")
 
         if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username not in("arun","prashant","amit","sachin","tarun","manu","gaurav", "sandeep","harsh","manideep","radhey shyam","vijay","aslam"):
