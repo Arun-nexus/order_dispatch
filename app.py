@@ -2876,6 +2876,17 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
         all_product_alloc = [a for a in all_alloc if a.get("allocation_type") != "spare_part" and a.get("sent_to_dispatch")]
         pending_product_alloc = [a for a in all_product_alloc if not a.get("dispatch")]
 
+        pending_services, dispatched_services = [], []
+        try:
+            for sv in service_detail(product_id="", serial_no="").get_data(collection_name=SERVICE_COLLECTION, query={"status": "completed"}, projection={"image": 0, "video": 0}):
+                sv.pop("_id", None)
+                sv["allocation_id"] = sv.get("service_id")
+                sv["items"] = [{"product_id": sv.get("product_id"), "product_name": sv.get("product_name"), "model_no": sv.get("model_no"),
+                                "quantity": 1, "serial_numbers": [sv["serial_no"]] if sv.get("serial_no") else []}]
+                (dispatched_services if sv.get("dispatch") else pending_services).append(sv)
+        except Exception:
+            logging.error("completed services could not be added to the dispatch queue")
+
         dispatched_orders = [o for o in all_orders if o.get("dispatch")]
         dispatched_spare = [a for a in all_spare if a.get("dispatch")]
         dispatched_product_alloc = [a for a in all_product_alloc if a.get("dispatch")]
@@ -2907,6 +2918,8 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
             "dispatched_orders": dispatched_orders,
             "dispatched_spare_parts": dispatched_spare,
             "dispatched_product_allocations": dispatched_product_alloc,
+            "pending_services": pending_services,
+            "dispatched_services": dispatched_services,
             "assembly_dates": assembly_dates
         }
     except Exception as e:
@@ -3217,6 +3230,37 @@ def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user:
         raise
     except Exception as e:
         logging.error("order dispatch confirmation failed")
+        raise HTTPException(status_code=500, detail="dispatch could not be confirmed")
+
+
+@app.post("/dispatch/confirm/service/{service_id}")
+def confirm_service_dispatch(service_id: str, request: DispatchConfirmRequest, user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    try:
+        db = service_detail(product_id="", serial_no="")
+        matches = db.get_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, projection={"image": 0, "video": 0})
+        if not matches:
+            raise HTTPException(status_code=404, detail="service not found")
+        if matches[0].get("status") != "completed":
+            raise HTTPException(status_code=400, detail="only a completed service can be dispatched")
+        dispatch_info = {
+            "docket_no": request.docket_no,
+            "invoice_no": request.invoice_no,
+            "invoice_date": request.invoice_date,
+            "mode_of_delivery": request.mode_of_delivery,
+            "ship_to_different": request.ship_to_different,
+            "ship_to_address": request.ship_to_address if request.ship_to_different else None,
+            "image": request.image,
+            "media_updated_at": datetime.now(timezone.utc).isoformat() if request.image else None,
+            "dispatched_by": user["username"],
+            "dispatched_at": datetime.now(timezone.utc).isoformat()
+        }
+        db.update_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id}, update_values={"dispatch": dispatch_info})
+        logging.info(f"service {service_id} dispatch confirmed")
+        return {"message": "dispatch confirmed", "service_id": service_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("service dispatch confirmation failed")
         raise HTTPException(status_code=500, detail="dispatch could not be confirmed")
 
 

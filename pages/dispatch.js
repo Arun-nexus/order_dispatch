@@ -38,7 +38,7 @@ function dispatchRowState(d) {
 }
 
 function dispatchCardTypeLabel(kind) {
-  return kind === 'order' ? 'Order' : kind === 'product_allocation' ? 'Product' : 'Spare Part';
+  return kind === 'order' ? 'Order' : kind === 'product_allocation' ? 'Product' : kind === 'service' ? 'Service' : 'Spare Part';
 }
 
 function dispatchCardRows(cardType) {
@@ -48,6 +48,7 @@ function dispatchCardRows(cardType) {
   if (cardType === 'orders_pending') return all.filter(r => r.kind === 'order' && dispatchRowState(r.data) !== 'dispatched');
   if (cardType === 'spare_pending') return all.filter(r => r.kind === 'spare_part' && dispatchRowState(r.data) !== 'dispatched');
   if (cardType === 'product_pending') return all.filter(r => r.kind === 'product_allocation' && dispatchRowState(r.data) !== 'dispatched');
+  if (cardType === 'service_pending') return all.filter(r => r.kind === 'service' && dispatchRowState(r.data) !== 'dispatched');
   if (cardType === 'dispatched_today') return all.filter(r => r.data.dispatch?.dispatched_at && new Date(r.data.dispatch.dispatched_at).toDateString() === today);
   if (cardType === 'total_dispatched') return all.filter(r => !!r.data.dispatch);
   return [];
@@ -58,6 +59,7 @@ const DISPATCH_CARD_TITLES = {
   orders_pending: 'Orders Pending',
   spare_pending: 'Spare Parts Pending',
   product_pending: 'Products Pending',
+  service_pending: 'Services Pending',
   dispatched_today: 'Dispatched Today',
   total_dispatched: 'Total Dispatched'
 };
@@ -157,7 +159,7 @@ function dispCvExportRows(row) {
   const d = row.data;
   const head = [dispatchCardTypeLabel(row.kind), dateLabel(row)];
   const tail = [cvPlain(billToLabel(row)), d.dispatch?.docket_no ?? '-', d.dispatch?.dispatched_through || '-', d.dispatch?.invoice_no ?? '-', cvPlain(dispatchStatusHtml(d))];
-  if ((row.kind === 'order' || row.kind === 'product_allocation') && (d.items || []).length) {
+  if ((row.kind === 'order' || row.kind === 'product_allocation' || row.kind === 'service') && (d.items || []).length) {
     return d.items.map(i => {
       const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
       return [...head, `${i.product_name ?? ''}${meta ? ' (' + meta + ')' : ''}`, i.quantity ?? 0, ...tail];
@@ -187,7 +189,7 @@ function openDispatchCardDetailModal(cardType) {
   dispCV.type = cardType;
   dispCV.base = dispatchCardRows(cardType);
   dispCV.f = {};
-  const fixedKind = { orders_pending: 'order', spare_pending: 'spare_part', product_pending: 'product_allocation' }[cardType];
+  const fixedKind = { orders_pending: 'order', spare_pending: 'spare_part', product_pending: 'product_allocation', service_pending: 'service' }[cardType];
 
   const content = modal.querySelector('.modal-content');
   content.style.width = 'min(1100px,95vw)';
@@ -196,7 +198,7 @@ function openDispatchCardDetailModal(cardType) {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
     <div class="cv-bar">
       <input type="text" data-f="q" placeholder="Search docket, invoice, product, serial, bill to...">
-      ${fixedKind ? '' : `<select data-f="kind"><option value="">All Categories</option><option value="order">Orders</option><option value="spare_part">Spare Parts</option><option value="product_allocation">Allocated Products</option></select>`}
+      ${fixedKind ? '' : `<select data-f="kind"><option value="">All Categories</option><option value="order">Orders</option><option value="spare_part">Spare Parts</option><option value="product_allocation">Allocated Products</option><option value="service">Services</option></select>`}
       <select data-f="state"><option value="">All Status</option><option value="pending">Pending</option><option value="in_progress">In Progress</option><option value="dispatched">Dispatched</option></select>
       <label>Date</label>
       <input type="date" data-f="from" title="From"><input type="date" data-f="to" title="To">
@@ -335,6 +337,8 @@ async function loadDispatchQueue() {
     dispState.dispatchedOrders = data.dispatched_orders || [];
     dispState.dispatchedSpare = data.dispatched_spare_parts || [];
     dispState.dispatchedProductAlloc = data.dispatched_product_allocations || [];
+    dispState.pendingServices = data.pending_services || [];
+    dispState.dispatchedServices = data.dispatched_services || [];
     dispAssemblyDates = data.assembly_dates || {};
     dispPage = 1;
     updateCards();
@@ -349,21 +353,22 @@ function combinedRows() {
   const orderRows = [...dispState.pendingOrders, ...dispState.dispatchedOrders].map(o => ({ kind: 'order', data: o }));
   const spareRows = [...dispState.pendingSpare, ...dispState.dispatchedSpare].map(a => ({ kind: 'spare_part', data: a }));
   const productAllocRows = [...dispState.pendingProductAlloc, ...dispState.dispatchedProductAlloc].map(a => ({ kind: 'product_allocation', data: a }));
-  return [...orderRows, ...spareRows, ...productAllocRows];
+  const serviceRows = [...(dispState.pendingServices || []), ...(dispState.dispatchedServices || [])].map(a => ({ kind: 'service', data: a }));
+  return [...orderRows, ...spareRows, ...productAllocRows, ...serviceRows];
 }
 
 function updateCards() {
   const today = new Date().toDateString();
-  const dispatchedToday = [...dispState.dispatchedOrders, ...dispState.dispatchedSpare, ...dispState.dispatchedProductAlloc]
+  const dispatchedToday = [...dispState.dispatchedOrders, ...dispState.dispatchedSpare, ...dispState.dispatchedProductAlloc, ...(dispState.dispatchedServices || [])]
     .filter(x => x.dispatch?.dispatched_at && new Date(x.dispatch.dispatched_at).toDateString() === today).length;
 
-  document.getElementById('cardTotalPending').textContent = dispState.pendingOrders.length + dispState.pendingSpare.length + dispState.pendingProductAlloc.length;
+  document.getElementById('cardTotalPending').textContent = dispState.pendingOrders.length + dispState.pendingSpare.length + dispState.pendingProductAlloc.length + (dispState.pendingServices || []).length;
   document.getElementById('cardOrdersPending').textContent = dispState.pendingOrders.length;
   document.getElementById('cardSparePending').textContent = dispState.pendingSpare.length;
   const productPendingCard = document.getElementById('cardProductAllocPending');
   if (productPendingCard) productPendingCard.textContent = dispState.pendingProductAlloc.length;
   document.getElementById('cardDispatchedToday').textContent = dispatchedToday;
-  document.getElementById('cardTotalDispatched').textContent = dispState.dispatchedOrders.length + dispState.dispatchedSpare.length + dispState.dispatchedProductAlloc.length;
+  document.getElementById('cardTotalDispatched').textContent = dispState.dispatchedOrders.length + dispState.dispatchedSpare.length + dispState.dispatchedProductAlloc.length + (dispState.dispatchedServices || []).length;
 }
 
 function dateLabel(row) {
@@ -372,7 +377,7 @@ function dateLabel(row) {
 }
 
 function productLabel(row) {
-  if (row.kind === 'order' || row.kind === 'product_allocation') {
+  if (row.kind === 'order' || row.kind === 'product_allocation' || row.kind === 'service') {
     return (row.data.items || []).map(i => {
       const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
       return `<div style="margin-bottom:4px;">${i.product_name ?? ''}${meta ? `<br><small style="color:#94a3b8;">${meta}</small>` : ''}</div>`;
@@ -382,7 +387,7 @@ function productLabel(row) {
 }
 
 function quantityLabel(row) {
-  if (row.kind === 'order' || row.kind === 'product_allocation') {
+  if (row.kind === 'order' || row.kind === 'product_allocation' || row.kind === 'service') {
     return (row.data.items || []).map(i => `<div style="margin-bottom:4px;">${i.quantity ?? 0}</div>`).join('');
   }
   return row.data.spare_part?.quantity ?? '-';
@@ -396,6 +401,7 @@ function billToLabel(row) {
   if (row.kind === 'product_allocation') {
     return row.data.sales_person?.name || row.data.company_name || '-';
   }
+  if (row.kind === 'service') return row.data.company_name || `Service #${(row.data.service_id || '').slice(0, 8)}`;
   return `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)}`;
 }
 
@@ -437,7 +443,7 @@ function renderTable(rows) {
     tr.dataset.id = row.kind === 'order' ? d.order_id : d.allocation_id;
     tr.dataset.kind = row.kind;
 
-    const typeLabel = row.kind === 'order' ? 'Order' : row.kind === 'product_allocation' ? 'Product' : 'Spare Part';
+    const typeLabel = dispatchCardTypeLabel(row.kind);
     tr.innerHTML = `
       <td>${typeLabel}</td>
       <td>${dateLabel(row)}</td>
@@ -638,7 +644,7 @@ function openViewDispatchModal(row) {
   const d = row.data;
   const disp = d.dispatch || null;
   const c = d.customer || {};
-  const idLabel = row.kind === 'order' ? 'Order ID' : 'Allocation ID';
+  const idLabel = row.kind === 'order' ? 'Order ID' : row.kind === 'service' ? 'Service ID' : 'Allocation ID';
   const idValue = row.kind === 'order' ? d.order_id : d.allocation_id;
 
   let infoTiles = '';
@@ -663,6 +669,15 @@ function openViewDispatchModal(row) {
       + dvLeftoverTiles(d, usedTop));
     productsHtml = dvTitle('Products') + dvProductsTable(d.items || [], true);
     totalsHtml = dvTotalsBox(d);
+  } else if (row.kind === 'service') {
+    infoTiles = dvTileGrid(
+      dvTile('Company', d.company_name)
+      + dvTile('Issue', d.issue)
+      + dvTile('Purchase Date', d.purchase_date)
+      + dvTile('Service Charges', d.service_charges)
+      + dvTile('Approved By', d.approved_by)
+      + dvTile('Approved At', d.approved_at ? new Date(d.approved_at).toLocaleDateString('en-GB') : ''));
+    productsHtml = dvTitle('Products') + dvProductsTable(d.items || [], false);
   } else if (row.kind === 'product_allocation') {
     const usedTop = ['dispatch', 'items', 'sales_person', 'allocation_id', 'company_name', 'address', 'gst_number', 'phone_number', 'allotment_date', 'return_due_date', 'created_by', 'allocated_by', 'remarks', 'status'];
     infoTiles = dvTileGrid(
@@ -756,7 +771,7 @@ function odfDefaults(row) {
   const d = row.data, disp = d.dispatch || {};
   let company = '', address = '', ref = '', lines = [], serials = [], mfg = [];
 
-  if (row.kind === 'order' || row.kind === 'product_allocation') {
+  if (row.kind === 'order' || row.kind === 'product_allocation' || row.kind === 'service') {
     const items = d.items || [];
     lines = items.map((it, i) => `${i + 1}. ${it.product_name ?? ''}${it.model_no ? ' (' + it.model_no + ')' : ''}  -  Qty: ${it.quantity ?? 0}`);
     serials = items.filter(it => (it.serial_numbers || []).length).map(it => `${it.product_name ?? ''}: ${it.serial_numbers.join(', ')}`);
@@ -772,6 +787,10 @@ function odfDefaults(row) {
     company = c.company_name || '';
     address = c.company_address || '';
     ref = odfPersonName(d.reference || d.creator?.raised_by);
+  } else if (row.kind === 'service') {
+    company = d.company_name || '';
+    ref = odfPersonName(d.approved_by);
+    lines.unshift('SERVICED PRODUCT RETURN');
   } else if (row.kind === 'product_allocation') {
     company = d.sales_person?.name || d.company_name || '';
     address = d.address || '';
@@ -828,7 +847,9 @@ function openDispatchModal(row) {
   const existing = row.data.dispatch || null;
   const billTo = row.kind === 'order'
     ? `${row.data.customer?.company_name || ''}${row.data.customer?.company_address ? ', ' + row.data.customer.company_address : ''}`
-    : row.kind === 'product_allocation'
+    : row.kind === 'service'
+      ? row.data.company_name || ''
+      : row.kind === 'product_allocation'
       ? `${row.data.sales_person?.name || ''}${row.data.address ? ', ' + row.data.address : ''}`
       : `Service #${(row.data.spare_part?.service_id || '').slice(0, 8)} (technician location)`;
 
@@ -914,7 +935,9 @@ function openDispatchModal(row) {
 
     const endpoint = row.kind === 'order'
       ? `/dispatch/confirm/order/${row.data.order_id}`
-      : `/dispatch/confirm/spare_part/${row.data.allocation_id}`;
+      : row.kind === 'service'
+        ? `/dispatch/confirm/service/${row.data.service_id}`
+        : `/dispatch/confirm/spare_part/${row.data.allocation_id}`;
 
     const sendConfirmation = async (payload) => {
       try {
