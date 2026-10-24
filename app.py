@@ -4705,16 +4705,24 @@ def _type_group(product_type):
 
 
 def _assert_model_free(model_no, product_name, product_type, exclude_id=None):
+    # blocks ONLY when product name AND model no are BOTH the same as an existing lot
+    # (case-insensitive, ignoring leading/trailing spaces). Same model with a different
+    # product name, or same product name with a different model, is allowed.
     model = str(model_no or "").strip()
-    if not model:
+    name = str(product_name or "").strip()
+    if not model or not name:
         return
-    q = {"model_no": {"$regex": f"^{re.escape(model)}$", "$options": "i"}, "product_type": _type_group(product_type)}
+    q = {
+        "model_no": {"$regex": f"^{re.escape(model)}$", "$options": "i"},
+        "product_name": {"$regex": f"^\\s*{re.escape(name)}\\s*$", "$options": "i"},
+        "product_type": _type_group(product_type),
+    }
     if exclude_id is not None:
         q["_id"] = {"$ne": exclude_id}
     hit = mongodbclient().database[INVENTORY_COLLECTION].find_one(q, {"product_name": 1})
     if hit:
         raise HTTPException(status_code=409,
-                            detail=f"model no '{model}' already exists in inventory (product: {hit.get('product_name', '')})")
+                            detail=f"product '{name}' with model no '{model}' already exists in inventory")
 
 
 def _assert_serials_free(serials, product_type, exclude_id=None):
