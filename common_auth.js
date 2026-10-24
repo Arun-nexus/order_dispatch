@@ -145,26 +145,15 @@ function checkPageAccess() {
   }
 }
 
-// "pages/orders.html?tab=x#y" -> "orders.html"
-function pageFileOf(href) {
-  return String(href || '').split('#')[0].split('?')[0].split('/').pop();
-}
-
-// Removes every sidebar entry the user has no access to. The <li> is REMOVED (not just
-// display:none), so a stylesheet rule such as `.sidebar li { display:flex !important }`
-// can never bring a forbidden link back. Safe to call more than once.
 function filterSidebarByRole() {
   const role = getRole();
-  if (!role) return;
   const allowed = allowedPages(role);
   document.querySelectorAll('.sidebar ul li a').forEach(a => {
-    if (a.hasAttribute('data-work-link')) return;            // Work / Work Report link is decided by initWorkPopup
     const href = a.getAttribute('href');
-    if (!href || href.startsWith('#') || /^(javascript:|https?:|mailto:)/i.test(href)) return;
-    const file = pageFileOf(href);
+    if (!href || href.startsWith('#')) return;
+    const file = href.split('/').pop();
     if (file && !allowed.includes(file)) {
-      const li = a.closest('li');
-      if (li) li.remove();
+      a.closest('li').style.display = 'none';
     }
   });
 }
@@ -258,10 +247,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 });
-
-// Run once immediately too: on most pages common_auth.js loads after the sidebar markup,
-// so forbidden links disappear before the first paint instead of after DOMContentLoaded.
-try { if (getToken() && getRole() && document.querySelector('.sidebar ul')) filterSidebarByRole(); } catch (e) { }
 
 // =========================================================
 // Shared response popup ("wizard box") — replaces plain
@@ -1665,3 +1650,41 @@ window.addEventListener('load', () => {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
 })();
+
+window.serialSearchWidget = function (mount, onPick) {
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  mount.innerHTML = '<input class="ssw-in" placeholder="Search by serial number (min 3 characters)..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;">' +
+    '<div class="ssw-out" style="display:none;margin-top:4px;border:1px solid #e2e8f0;border-radius:8px;max-height:180px;overflow-y:auto;background:#fff;"></div>';
+  const inp = mount.querySelector('.ssw-in');
+  const out = mount.querySelector('.ssw-out');
+  let timer = null, seq = 0, results = [];
+  const hide = () => { out.style.display = 'none'; };
+  const show = html => { out.innerHTML = html; out.style.display = 'block'; };
+  const note = t => `<div style="padding:8px 10px;color:#94a3b8;font-size:13px;">${t}</div>`;
+  const run = async () => {
+    const q = inp.value.trim();
+    if (q.length < 3) { hide(); return; }
+    const mine = ++seq;
+    show(note('Searching...'));
+    try {
+      const res = await apiFetch('/inventory/serial_search?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      if (mine !== seq) return;
+      results = data.results || [];
+      if (!results.length) { show(note('No available serial number found.')); return; }
+      show(results.map((r, i) => `<div data-i="${i}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #f1f5f9;font-size:13px;"><b>${esc(r.serial_number)}</b><br><small style="color:#64748b;">${esc(r.product_name)}${r.model_no ? ' · ' + esc(r.model_no) : ''}</small></div>`).join(''));
+    } catch (e) {
+      if (mine === seq) show(note('Search failed.'));
+    }
+  };
+  inp.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 350); });
+  out.addEventListener('click', e => {
+    const row = e.target.closest('[data-i]');
+    if (!row) return;
+    const r = results[Number(row.dataset.i)];
+    if (!r) return;
+    onPick(r);
+    inp.value = '';
+    hide();
+  });
+};

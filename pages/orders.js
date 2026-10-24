@@ -1428,6 +1428,8 @@ function renderProductsStep() {
   const stockFor = (p) => totalQtyByKey.get(rowKey(p)) ?? (Number(p.quantity) || 0);
 
   wizardBody().innerHTML = `
+    <div id="serialSearchBox" style="margin-bottom:6px;"></div>
+    <div id="serialAddedMsg" style="font-size:12px;color:var(--success-dark);margin-bottom:8px;"></div>
     <div id="prodCatTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
     <div style="margin-top:14px;">
@@ -1625,6 +1627,26 @@ function renderProductsStep() {
   }
 
   document.getElementById('prodFilter').addEventListener('input', applyFilters);
+
+  const addedMsg = document.getElementById('serialAddedMsg');
+  window.serialSearchWidget(document.getElementById('serialSearchBox'), (r) => {
+    const key = `${r.product_id}||${r.product_name || ''}||${r.model_no || ''}`;
+    const choices = wiz.serialChoices[key] || (wiz.serialChoices[key] = []);
+    if (wiz.cart[key] && choices.includes(r.serial_number)) { addedMsg.textContent = r.serial_number + ' is already added.'; return; }
+    const prev = wiz.cart[key]?.quantity || 0;
+    choices.forEach((c, i) => { if (c === r.serial_number) choices[i] = ''; });
+    choices[prev] = r.serial_number;
+    wiz.cart[key] = {
+      product_id: r.product_id,
+      product_name: r.product_name,
+      model_no: r.model_no || '',
+      price: wiz.cart[key] ? wiz.cart[key].price : (Number(r.price) || 0),
+      tax_rate: wiz.cart[key] ? wiz.cart[key].tax_rate : (Number(r.tax_rate) || 0),
+      quantity: prev + 1
+    };
+    addedMsg.textContent = `Added ${r.serial_number} - ${r.product_name} (qty ${prev + 1})`;
+    applyFilters();
+  });
 
   document.getElementById('toPaymentBtn').addEventListener('click', () => {
     if (!Object.keys(wiz.cart).length) { alert('Add quantity for at least one item — a product, accessory or spare part.'); return; }
@@ -1838,12 +1860,15 @@ async function renderSerialReviewStep() {
     }
 
     const existingChoices = wiz.serialChoices[rowKey] || [];
+    const usedSerials = new Set(existingChoices.filter(Boolean));
+    const serialPool = available.filter(sn => !usedSerials.has(sn));
+    let poolIdx = 0;
     for (let slot = 0; slot < slots; slot++) {
-      const defaultSerial = available[slot]; // same order the backend auto-allocates in
-      const chosen = existingChoices[slot] || defaultSerial;
+      const pinnedSerial = existingChoices[slot];
+      const chosen = pinnedSerial || serialPool[poolIdx++] || '';
       html += `
         <div style="margin-top:8px;">
-          <label style="font-size:12px;color:var(--text-muted);">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <label style="font-size:12px;color:var(--text-muted);">Unit ${slot + 1} serial number${pinnedSerial ? '' : ' (auto)'}</label>
           <input list="serialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="serialPickInput"
                  data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;">

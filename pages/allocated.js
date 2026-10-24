@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (qp.get('alloc_service')) { openRequestedPartAllocation(qp); history.replaceState(null, '', location.pathname); }
   } catch (e) { console.error(e); }
   setInterval(() => renderAllocationsTable(getFilteredAllocations()), 60 * 1000); // keep countdowns fresh
-  setInterval(loadPendingRequests, 60 * 1000);
+  setInterval(() => { if (!reqBusy.size) loadPendingRequests(); }, 60 * 1000);
 });
 
 // ---------- Header search (by serial number, product name or sales person) ----------
@@ -556,46 +556,75 @@ function openInvoiceModal(r) {
     const fd = new FormData(e.target);
     let pay;
     try { pay = convPayRead(getTotal); } catch (err) { alert(err.message); return; }
-    await approveRequest(r.request_id, { invoice_no: fd.get('invoice_no'), invoice_date: fd.get('invoice_date'), ...pay });
-    close();
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Processing...'; }
+    const ok = await approveRequest(r.request_id, { invoice_no: fd.get('invoice_no'), invoice_date: fd.get('invoice_date'), ...pay });
+    if (ok) { close(); return; }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Approve & Create Order'; }
   });
   modal.style.display = 'flex';
 }
 
+const reqBusy = new Set();
+
+function setReqBusy(requestId, on) {
+  if (on) reqBusy.add(requestId); else reqBusy.delete(requestId);
+  document.querySelectorAll('.order-item[data-id="' + requestId + '"] button').forEach(b => {
+    b.disabled = on;
+    b.style.opacity = on ? '.55' : '';
+    b.style.cursor = on ? 'wait' : 'pointer';
+  });
+}
+
+async function refreshAfterRequestAction() {
+  await Promise.allSettled([loadPendingRequests(), loadAllocations(), loadInventoryForAllocation()]);
+}
+
 async function approveRequest(requestId, extra) {
+  if (reqBusy.has(requestId)) return false;
   const req = allocState.requests.find(x => x.request_id === requestId);
-  if (req && req.request_type === 'convert_to_order' && !extra) return openInvoiceModal(req);
-  if (!extra && !confirm('Approve this request?')) return;
+  if (req && req.request_type === 'convert_to_order' && !extra) { openInvoiceModal(req); return false; }
+  if (!extra && !confirm('Approve this request?')) return false;
+  let ok = false;
+  setReqBusy(requestId, true);
   try {
     const opts = { method: 'POST' };
     if (extra) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(extra); }
     const res = await apiFetch(`/request/approve/${requestId}`, opts);
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'approval failed');
-    if (data.pending_allocation && data.redirect) {          // spare part: go choose the hologram number(s)
-      if (/allocated\.html$/.test(location.pathname)) return openRequestedPartAllocation(new URL(data.redirect, location.href).searchParams);
-      window.location.href = data.redirect; return;
+    if (data.pending_allocation && data.redirect) {
+      setReqBusy(requestId, false);
+      if (/allocated\.html$/.test(location.pathname)) { openRequestedPartAllocation(new URL(data.redirect, location.href).searchParams); return true; }
+      window.location.href = data.redirect; return true;
     }
-    await loadPendingRequests();
-    await loadAllocations();
-    await loadInventoryForAllocation();
+    ok = true;
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  } finally {
+    setReqBusy(requestId, false);
   }
+  await refreshAfterRequestAction();
+  return ok;
 }
 
 async function rejectRequest(requestId) {
-  const reason = prompt('Reason for rejecting (optional):') || '';
+  if (reqBusy.has(requestId)) return;
+  const reason = prompt('Reason for rejecting (optional):');
+  if (reason === null) return;
+  setReqBusy(requestId, true);
   try {
     const res = await apiFetch(`/request/reject/${requestId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'rejection failed');
-    await loadPendingRequests();
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+  } finally {
+    setReqBusy(requestId, false);
   }
+  await refreshAfterRequestAction();
 }
 
 async function loadAllocations() {
@@ -1732,6 +1761,8 @@ function renderProductCartStep() {
   }
 
   body.innerHTML = `
+    <div id="allocSerialSearch" style="margin-bottom:6px;"></div>
+    <div id="allocSerialMsg" style="font-size:12px;color:#16a34a;margin-bottom:8px;"></div>
     <input id="allocProdFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
@@ -1771,6 +1802,17 @@ function renderProductCartStep() {
     }));
   };
   renderRows(products);
+  window.serialSearchWidget(document.getElementById('allocSerialSearch'), (r) => {
+    const key = `${r.product_id}||${r.product_name || ''}||${r.model_no || ''}`;
+    const choices = allocWiz.serialChoices[key] || (allocWiz.serialChoices[key] = []);
+    if (allocWiz.cart[key] && choices.includes(r.serial_number)) { document.getElementById('allocSerialMsg').textContent = r.serial_number + ' is already added.'; return; }
+    const prev = allocWiz.cart[key]?.quantity || 0;
+    choices.forEach((c, i) => { if (c === r.serial_number) choices[i] = ''; });
+    choices[prev] = r.serial_number;
+    allocWiz.cart[key] = { product_id: r.product_id, product_name: r.product_name, model_no: r.model_no || '', quantity: prev + 1 };
+    document.getElementById('allocSerialMsg').textContent = `Added ${r.serial_number} - ${r.product_name} (qty ${prev + 1})`;
+    renderRows(products);
+  });
   document.getElementById('allocProdFilter').addEventListener('input', e => {
     const term = e.target.value.trim().toLowerCase();
     renderRows(products.filter(p => (p.product_name || '').toLowerCase().includes(term) || (p.product_id || '').toLowerCase().includes(term) || (p.model_no || '').toLowerCase().includes(term)));
@@ -1829,12 +1871,15 @@ async function renderAllocSerialReviewStep() {
     }
 
     const existingChoices = allocWiz.serialChoices[rowKey] || [];
+    const usedSerials = new Set(existingChoices.filter(Boolean));
+    const serialPool = available.filter(sn => !usedSerials.has(sn));
+    let poolIdx = 0;
     for (let slot = 0; slot < slots; slot++) {
-      const defaultSerial = available[slot];
-      const chosen = existingChoices[slot] || defaultSerial;
+      const pinnedSerial = existingChoices[slot];
+      const chosen = pinnedSerial || serialPool[poolIdx++] || '';
       html += `
         <div style="margin-top:8px;">
-          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${chosen === defaultSerial ? ' (auto)' : ''}</label>
+          <label style="font-size:12px;color:#64748b;">Unit ${slot + 1} serial number${pinnedSerial ? '' : ' (auto)'}</label>
           <input list="allocSerialList__${rowKey.replace(/[^a-zA-Z0-9]/g, '_')}__${slot}" class="allocSerialPickInput"
                  data-row-key="${rowKey}" data-slot="${slot}" value="${chosen}"
                  style="width:100%;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">

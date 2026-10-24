@@ -32,6 +32,7 @@ from datetime import datetime, timezone, timedelta
 import io
 import time
 import threading
+import contextlib
 import hashlib
 import json
 from html.parser import HTMLParser
@@ -4363,6 +4364,38 @@ def available_serials(product_id: str, model_no: str = "", user: dict = Depends(
         raise HTTPException(status_code=500, detail="available serial numbers cannot be fetched")
 
 
+@app.get("/inventory/serial_search")
+def serial_search(q: str, limit: int = 10, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    term = (q or "").strip()
+    if len(term) < 3:
+        return {"results": []}
+    limit = max(1, min(int(limit or 10), 25))
+    try:
+        needle = term.lower()
+        lots = inventory_manager().get_data(
+            collection_name=INVENTORY_COLLECTION,
+            query={"serial_numbers": {"$regex": re.escape(term), "$options": "i"},
+                   "quantity": {"$gt": 0},
+                   "product_type": {"$nin": ["damaged", "spare_parts", "service_parts"]}})
+        lots.sort(key=lambda e: e.get("purchase_date") or "")
+        found, seen = [], set()
+        for lot in lots:
+            for sn in (lot.get("serial_numbers") or []):
+                if needle in str(sn).lower() and sn not in seen:
+                    seen.add(sn)
+                    found.append({"serial_number": sn, "product_id": lot.get("product_id"),
+                                  "product_name": lot.get("product_name"), "model_no": lot.get("model_no") or "",
+                                  "price": lot.get("price") or 0, "tax_rate": lot.get("tax_rate") or 0,
+                                  "lot_no": lot.get("lot_no") or ""})
+        found.sort(key=lambda r: (0 if str(r["serial_number"]).lower() == needle else 1, str(r["serial_number"])))
+        found = found[:limit * 3]
+        free = set(_unsold_serials([r["serial_number"] for r in found]))
+        return {"results": [r for r in found if r["serial_number"] in free][:limit]}
+    except Exception as e:
+        logging.error(f"serial search failed: {e}")
+        raise HTTPException(status_code=500, detail="serial search failed")
+
+
 def _unit_price(request):
     try:
         return float(str(request.price or 0).replace(",", "").strip() or 0)
@@ -5836,12 +5869,33 @@ def raise_demo_return_request(allocation_id: str, request: ReturnRequestModel, u
         raise HTTPException(status_code=500, detail="return request could not be raised")
 
 
+_REQ_LOCKS = {}
+_REQ_LOCKS_GUARD = threading.Lock()
+
+
+@contextlib.contextmanager
+def _request_lock(request_id: str):
+    with _REQ_LOCKS_GUARD:
+        lock = _REQ_LOCKS.setdefault(request_id, threading.Lock())
+    if not lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="this request is already being processed, please wait")
+    try:
+        yield
+    finally:
+        lock.release()
+        with _REQ_LOCKS_GUARD:
+            _REQ_LOCKS.pop(request_id, None)
+
+
 def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver: str, invoice_no: str, invoice_date: str,
-                           payment_mode: str = "", payment_details: dict = None):
+                           payment_mode: str = "", payment_details: dict = None, request_id: str = ""):
     """Moves an approved demo unit into Orders: same products/serials/company/price, dispatch info
     carried over (with the entered invoice details), and the allocation entry is removed.
     Stock is NOT touched — the units were already deducted when the demo was allotted.
     The order gets a real payment mode (Credit / Partial / UPI ...) chosen at conversion time."""
+    already = (alloc.get("converted_to_order") or {}).get("order_id")
+    if already:
+        return already
     # validate the payment first so a bad choice never leaves a half-created company behind
     conv_items = [{"price": details.get("price", 0), "tax_rate": details.get("tax_rate", 0), "quantity": i.get("quantity", 1)}
                   for i in alloc.get("items", [])]
@@ -5899,7 +5953,17 @@ def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver:
                  update_values={"status": "processing", "dispatch": dispatch,
                                 "converted_from_demo": {"allocation_id": alloc.get("allocation_id"),
                                                         "allotment_date": alloc.get("allotment_date")}})
-    allocation_manager().delete(collection_name=ALLOCATION_COLLECTION, query={"allocation_id": alloc.get("allocation_id")})
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        allocation_manager().update_data(
+            collection_name=ALLOCATION_COLLECTION, query={"allocation_id": alloc.get("allocation_id")},
+            update_values={"return_status": "returned", "returned_on": now_iso, "returned_by": approver,
+                           "converted_to_order": {"order_id": order.order_id, "converted_on": now_iso,
+                                                  "converted_by": approver, "invoice_no": invoice_no},
+                           "convert_request": {"request_id": request_id or "", "status": "approved",
+                                               "order_id": order.order_id}})
+    except Exception as alloc_err:
+        logging.error(f"order {order.order_id} created but allocation {alloc.get('allocation_id')} could not be marked returned: {alloc_err}")
     logging.info(f"demo allocation {alloc.get('allocation_id')} converted to order {order.order_id}")
     return order.order_id
 
@@ -6066,6 +6130,11 @@ def my_requests(user: dict = Depends(get_current_user)):
 
 @app.post("/request/approve/{request_id}")
 def approve_request(request_id: str, body: RequestApproveModel = None, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    with _request_lock(request_id):
+        return _approve_request_locked(request_id, body, user)
+
+
+def _approve_request_locked(request_id: str, body, user: dict):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
@@ -6117,7 +6186,7 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
                 raise HTTPException(status_code=404, detail="demo unit allocation no longer exists")
             order_id = _convert_demo_to_order(found[0], details, req["raised_by"], user["username"],
                                               body.invoice_no.strip(), body.invoice_date.strip(),
-                                              body.payment_mode, body.payment_details)
+                                              body.payment_mode, body.payment_details, request_id=request_id)
             db.set_status(collection_name=REQUESTS_COLLECTION, request_id=request_id,
                            status="approved", resolved_by=user["username"])
             return {"message": "request approved and demo unit converted to order", "order_id": order_id}
@@ -6235,6 +6304,11 @@ def approve_request(request_id: str, body: RequestApproveModel = None, user: dic
 
 @app.post("/request/reject/{request_id}")
 def reject_request(request_id: str, request: RequestRejectModel, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    with _request_lock(request_id):
+        return _reject_request_locked(request_id, request, user)
+
+
+def _reject_request_locked(request_id: str, request, user: dict):
     try:
         db = request_manager()
         existing = db.get_data(collection_name=REQUESTS_COLLECTION, query={"request_id": request_id})
