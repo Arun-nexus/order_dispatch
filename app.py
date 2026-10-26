@@ -271,6 +271,7 @@ class DispatchConfirmRequest(BaseModel):
     invoice_no: str
     invoice_date: str
     mode_of_delivery: Optional[str] = None
+    dispatched_through: Optional[str] = None
     ship_to_different: bool = False
     ship_to_address: Optional[dict]= None   # {company_name, address} — only used when ship_to_different is True
     image: Optional[str] = None   # optional base64 data URI, e.g. packaging/handover photo
@@ -3247,6 +3248,7 @@ def confirm_service_dispatch(service_id: str, request: DispatchConfirmRequest, u
             "invoice_no": request.invoice_no,
             "invoice_date": request.invoice_date,
             "mode_of_delivery": request.mode_of_delivery,
+            "dispatched_through": request.dispatched_through,
             "ship_to_different": request.ship_to_different,
             "ship_to_address": request.ship_to_address if request.ship_to_different else None,
             "image": request.image,

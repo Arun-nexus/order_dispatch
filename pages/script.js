@@ -1293,6 +1293,26 @@ const SVC_VIEWS = {
     act: { view: r => (r._inst ? openInstallDetailS(r._inst) : openRequestDetailS(r)), approve: r => (r._inst ? approveInstallRequest(r._inst) : approveReschedule(r)), reject: r => openRejectReschedule(r) },
     open: r => (r._inst ? openInstallDetailS(r._inst) : openRequestDetailS(r)),
     empty: 'No requests from technicians.'
+  },
+  dispatch: {
+    title: 'Dispatch', info: 'Completed services ready to be dispatched — confirm dispatch and add docket from here',
+    cols: ['Service', 'Product / Serial', 'Customer', 'Technician', 'Completed On', 'Docket No.', 'Invoice No.', 'Status', 'Actions'],
+    statuses: [['all', 'All'], ['pending', 'Pending'], ['in_progress', 'In Progress'], ['dispatched', 'Dispatched']],
+    list: () => svcDispatchList(), statusOf: s => svcDispatchState(s), techOf: s => s.technician_alloted || '',
+    text: s => [s.service_id, s.product_name, s.model_no, s.serial_no, s.company_name, s.technician_alloted, (s.dispatch || {}).docket_no, (s.dispatch || {}).invoice_no].join(' '),
+    cells: s => {
+      const st = svcDispatchState(s), d = s.dispatch || {};
+      return [`#${esc(String(s.service_id || '').slice(0, 8))}<br><small style="color:#64748b;">${esc(s.issue || '')}</small>`,
+      `${esc(s.product_name || s.product_id || '-')}<br><small style="color:#64748b;">${esc(s.serial_no || '-')}</small>`,
+      esc(s.company_name || '-'), esc(s.technician_alloted || '-'),
+      (s.approved_at || s.completed_at) ? fmtSchedule(s.approved_at || s.completed_at) : '-',
+      esc(d.docket_no || '-'), esc(d.invoice_no || '-'),
+      `<span class="${st === 'dispatched' ? 'completed' : 'pending'}">${st === 'dispatched' ? 'Dispatched' : st === 'in_progress' ? 'In Progress' : 'Pending'}</span>`];
+    },
+    actions: s => V_BTN + (svcDispatchState(s) === 'dispatched' ? '' : `<button type="button" data-act="disp" style="${B_PRI}">${s.dispatch ? 'Add Docket No.' : 'Confirm Dispatch'}</button>`),
+    act: { view: s => openViewModal(s), disp: s => openServiceDispatchModal(s) },
+    open: s => openViewModal(s),
+    empty: 'No completed services to dispatch.'
   }
 };
 
@@ -1404,6 +1424,7 @@ function renderCats() {
   set('catDemo', held.length);
   { const rp = svcState.demo.filter(demoReturnPending).length; set('catDemoSub', rp ? `${rp} return awaiting approval` : 'with technicians'); }
   { const pr = partRowsS(); set('catParts', pr.length); const rp = pr.filter(r => !r.returned).length; set('catPartsSub', rp ? `${rp} return pending` : 'all returns confirmed'); }
+  { const dl = svcDispatchList(); set('catDispatch', dl.length); const dp = dl.filter(s => svcDispatchState(s) !== 'dispatched').length; set('catDispatchSub', dp ? `${dp} waiting to dispatch` : 'all dispatched'); }
   set('catRequests', requestRowsS().filter(r => r.status === 'pending').length);
   set('catRequestsSub', 'waiting for you');
   document.querySelectorAll('#catCards .cat-card').forEach(c => c.classList.toggle('active', c.dataset.view === svcView));
@@ -1688,3 +1709,51 @@ function openRejectReschedule(r) {
 }
 
 function wireTopActions() { }
+
+function svcDispatchList() {
+  return svcState.services.filter(s => s.status === 'completed');
+}
+
+function svcDispatchState(s) {
+  return !s.dispatch ? 'pending' : s.dispatch.docket_no ? 'dispatched' : 'in_progress';
+}
+
+function openServiceDispatchModal(s) {
+  const ex = s.dispatch || {};
+  const modes = [['road', 'Road'], ['air', 'Air'], ['rail', 'Rail'], ['courier', 'Courier'], ['self_pickup', 'Self Pickup']];
+  const m = svcModal(ex.invoice_no ? 'Update Dispatch' : 'Confirm Dispatch', `
+    <p style="font-size:13px;color:#64748b;margin-bottom:8px;">${esc(s.product_name || s.product_id || '')} · ${esc(s.serial_no || '')} · ${esc(s.company_name || '')}</p>
+    <input id="sdDocket" placeholder="Docket No. (optional)" value="${esc(ex.docket_no || '')}" style="${IN_S}">
+    <label style="font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:8px;"><input type="checkbox" id="sdShipDiff" ${ex.ship_to_different ? 'checked' : ''}> Ship to a different address</label>
+    <div id="sdShipBox" style="display:${ex.ship_to_different ? 'block' : 'none'};">
+      <input id="sdShipCompany" placeholder="Ship To — Company Name" value="${esc((ex.ship_to_address || {}).company_name || '')}" style="${IN_S}">
+      <input id="sdShipAddress" placeholder="Ship To — Address" value="${esc((ex.ship_to_address || {}).address || '')}" style="${IN_S}">
+    </div>
+    <select id="sdMode" style="${IN_S}"><option value="">Mode of Delivery</option>${modes.map(([k, l]) => `<option value="${k}" ${ex.mode_of_delivery === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <input id="sdThrough" placeholder="By (Courier / Transporter Name)" value="${esc(ex.dispatched_through || '')}" style="${IN_S}">
+    <input id="sdInvoice" placeholder="Invoice No." value="${esc(ex.invoice_no || '')}" style="${IN_S}">
+    <input id="sdInvDate" type="date" value="${esc(ex.invoice_date ? String(ex.invoice_date).slice(0, 10) : '')}" style="${IN_S}">
+    <label style="font-size:12px;color:#64748b;">Packaging / Handover Photo (optional)</label>
+    <input id="sdImage" type="file" accept="image/*" style="width:100%;padding:6px 0 12px;">
+    ${formFooter(ex.invoice_no ? 'Update' : 'Confirm')}`, 480);
+  m.querySelector('#sdShipDiff').onchange = e => { m.querySelector('#sdShipBox').style.display = e.target.checked ? 'block' : 'none'; };
+  bindForm(m, async (mm, err) => {
+    const v = id => mm.querySelector(id).value.trim();
+    if (!v('#sdMode') || !v('#sdThrough') || !v('#sdInvoice') || !v('#sdInvDate')) { err.textContent = 'Fill mode, courier name, invoice no. and invoice date.'; return; }
+    const file = mm.querySelector('#sdImage').files[0];
+    if (file && file.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 2MB or under.'; return; }
+    const diff = mm.querySelector('#sdShipDiff').checked;
+    await svcPost(`/dispatch/confirm/service/${encodeURIComponent(s.service_id)}`, {
+      docket_no: v('#sdDocket') ? v('#sdDocket').toLowerCase() : null,
+      invoice_no: v('#sdInvoice').toLowerCase(),
+      invoice_date: v('#sdInvDate'),
+      mode_of_delivery: v('#sdMode'),
+      dispatched_through: v('#sdThrough'),
+      ship_to_different: diff,
+      ship_to_address: diff ? { company_name: v('#sdShipCompany'), address: v('#sdShipAddress') } : null,
+      image: file ? await readFileAsBase64(file) : null
+    });
+    mm.remove();
+    await loadServices();
+  });
+}

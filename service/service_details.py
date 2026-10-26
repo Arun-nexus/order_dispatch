@@ -32,7 +32,7 @@ class ServiceStatus(str, enum.Enum):
 WORKFLOW_ORDER = ["assigned", "spare_decision", "report", "pending_approval", "done"]
 
 # big base64 fields are left out of list endpoints; GET /service/media/{id} serves them for one service
-SERVICE_LIST_PROJECTION = {"damage_image": 0, "final_image": 0, "faulty_parts.image": 0}
+SERVICE_LIST_PROJECTION = {"damage_image": 0, "final_image": 0, "faulty_parts.image": 0, "dispatch.image": 0}
 
 
 class service_detail(mongodbclient):
