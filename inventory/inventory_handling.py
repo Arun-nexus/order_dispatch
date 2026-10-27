@@ -2,6 +2,7 @@ from mongodb.mongodb_connection import mongodbclient
 from logger import logging
 from bson import ObjectId
 import uuid
+import re
 
 
 class inventory_manager(mongodbclient):
@@ -668,8 +669,13 @@ class inventory_manager(mongodbclient):
 
     @staticmethod
     def _model_query(model_no):
-        """model_no "" / None both mean "no variant" — old lots store null, not ""."""
-        return model_no if model_no else {"$in": [None, ""]}
+        """model_no "" / None both mean "no variant" — old lots store null, not "".
+        A given model_no is matched ignoring case and leading/trailing spaces, so a request
+        raised with "XY-100" still finds a lot that was later saved as "xy-100 " (this
+        mismatch used to show up as a false "out of stock")."""
+        if not model_no or not str(model_no).strip():
+            return {"$in": [None, ""]}
+        return {"$regex": "^\\s*" + re.escape(str(model_no).strip()) + "\\s*$", "$options": "i"}
 
     def list_available_serials(self, collection_name, product_id, model_no=None):
         """
@@ -799,6 +805,61 @@ class inventory_manager(mongodbclient):
 
         except Exception as e:
             logging.error("serial allocation failed!")
+            raise Exception(e)
+
+    def unserialised_quantity(self, collection_name, product_id, model_no=None):
+        """
+        Units in stock that are NOT backed by a serial number on file: for every live lot,
+        quantity minus the serials listed on it (never below 0). A lot with quantity 5 and
+        2 serials on file has 3 such units. Used so a partially serialised lot is not
+        reported as "short" when only its serial list is shorter than its quantity.
+        """
+        try:
+            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
+            if model_no is not None:
+                query["model_no"] = self._model_query(model_no)
+            entries = self.get_data(collection_name=collection_name, query=query)
+            total = 0
+            for e in entries:
+                qty = int(e.get("quantity", 0) or 0)
+                total += max(0, qty - len(e.get("serial_numbers") or []))
+            return total
+        except Exception as e:
+            logging.error("counting unserialised units failed!")
+            raise Exception(e)
+
+    def allocate_unserialised_units(self, collection_name, product_id, quantity, model_no=None):
+        """
+        Deducts `quantity` units that have no serial number on file (see unserialised_quantity),
+        oldest lot first. Only the lot quantity goes down - serial numbers listed on a lot are
+        never touched, so serials that were skipped (e.g. already sold) stay exactly as they are.
+        Raises if there are fewer such units than requested.
+        """
+        try:
+            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
+            if model_no is not None:
+                query["model_no"] = self._model_query(model_no)
+            entries = self.get_data(collection_name=collection_name, query=query)
+            entries.sort(key=lambda e: e.get("purchase_date") or "")
+
+            remaining = quantity
+            for entry in entries:
+                if remaining <= 0:
+                    break
+                qty = int(entry.get("quantity", 0) or 0)
+                free = qty - len(entry.get("serial_numbers") or [])
+                take = min(remaining, free)
+                if take <= 0:
+                    continue
+                self._decrement_or_delete(collection_name, entry["_id"], qty - take)
+                remaining -= take
+
+            if remaining > 0:
+                variant_note = f" (model {model_no})" if model_no else ""
+                raise Exception(f"insufficient un-serialised stock for product {product_id}{variant_note}, short by {remaining}")
+            logging.info(f"allocated {quantity} un-serialised unit(s) for product {product_id}")
+        except Exception as e:
+            logging.error("un-serialised unit allocation failed!")
             raise Exception(e)
 
     def allocate_units(self, collection_name, product_id, quantity, model_no=None):
