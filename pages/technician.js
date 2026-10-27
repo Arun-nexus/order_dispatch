@@ -662,7 +662,7 @@ function openRequestServiceModal() {
       return;
     }
 
-    const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+    const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
     const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
 
     if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
