@@ -243,7 +243,7 @@ function ocvEnsure() {
 // "ID · Model" for products / accessories, "Belongs to: <product>" for spare / service parts
 function ocvInv(i) {
   const list = doState.products || [];
-  return list.find(p => p.product_name === i.product_name && (p.product_id || '') === (i.product_id || '') && (p.model_no || '') === (i.model_no || ''))
+  return list.find(p => p.product_name === i.product_name && (p.model_no || '') === (i.model_no || ''))
     || list.find(p => p.product_name === i.product_name) || null;
 }
 function ocvIdent(i) {
@@ -662,21 +662,30 @@ function renderNewCustomerStep() {
   });
 }
 
-// Multiple inventory entries can share the same product_id (e.g. separate
-// batches/lots). Showing them as separate rows would let the user type into
-// two different rows for "the same" product — since the cart is keyed by
-// product_id, only the last one edited would actually stick. Collapse them
-// into a single row per product_id.
-// A row is only "the same product" when product_id + product_name + model_no
-// ALL match — if even one differs, it's a different, independent product and
-// gets its own row and its own cart line. (Same rule as orders.js.)
-function rowKeyFor(p) { return `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`; }
+// Inventory can hold several lots (batches) of the same product, and older lots may carry a
+// different/blank product_id. product_id is NOT part of a product's identity any more: a product is
+// "the same" only when product name + model no + product type ALL match (spare/service parts are
+// also told apart by the product they belong to). All matching lots collapse into ONE row whose
+// stock is the SUM of the lots; damaged and empty lots are never listed. The row's other details
+// come from the most recently received lot, so an outdated lot can't show up as its own row.
+function rowKeyFor(p) {
+  const type = p.product_type || 'product';
+  const parent = (type === 'spare_parts' || type === 'service_parts') ? (p.parent_product_name || '').trim().toLowerCase() : '';
+  return `${(p.product_name || '').trim().toLowerCase()}||${(p.model_no || '').trim().toLowerCase()}||${type}||${parent}`;
+}
 
 function dedupeProducts(rawProducts) {
   const map = new Map();
   for (const p of rawProducts) {
+    const type = p.product_type || 'product';
+    const qty = Number(p.quantity) || 0;
+    if (type === 'damaged' || qty <= 0) continue;
     const key = rowKeyFor(p);
-    if (!map.has(key)) map.set(key, { ...p });
+    const prev = map.get(key);
+    if (!prev) { map.set(key, { ...p, quantity: qty, _latest: p.purchase_date || '' }); continue; }
+    const newer = (p.purchase_date || '') > prev._latest;
+    const base = newer ? { ...p, _latest: p.purchase_date || '' } : prev;
+    map.set(key, { ...base, quantity: prev.quantity + qty });
   }
   return Array.from(map.values());
 }
@@ -741,7 +750,7 @@ function renderProductsStep() {
     const priceInCart = cartLine?.price ?? '';
     return `
       <tr>
-        <td>${esc(p.product_name ?? '')}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + esc(p.parent_product_name || '—') : esc(p.product_id) + (p.model_no ? ' — ' + esc(p.model_no) : '')}</small></td>
+        <td>${esc(p.product_name ?? '')}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + esc(p.parent_product_name || '—') : (p.model_no ? 'Model: ' + esc(p.model_no) : '')}</small></td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
               placeholder="0" data-row-key="${esc(key)}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
@@ -789,6 +798,7 @@ function renderProductsStep() {
       product_id: p.product_id,
       product_name: p.product_name,
       model_no: p.model_no || '',
+      product_type: p.product_type || 'product',
       price,
       tax_rate: Number(p.tax_rate) || 0,
       quantity: qty
@@ -974,7 +984,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     customer_id: orderWiz.customerId || '',
     customer: orderWiz.customer || {},
     items: Object.values(orderWiz.cart).map(i => ({
-      product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
+      product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '', product_type: i.product_type || '',
       quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
     })),
     payment_mode: mode,

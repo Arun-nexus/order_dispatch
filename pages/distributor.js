@@ -777,7 +777,7 @@ function renderProductsStep() {
     if (!p) return;
     const qty = Math.max(0, Math.min(Number(inp.value) || 0, Number(p.quantity) || 0));
     inp.value = qty;
-    if (qty > 0) spWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, model_no: p.model_no || '', quantity: qty };
+    if (qty > 0) spWiz.cart[key] = { product_id: p.product_id, product_name: p.product_name, model_no: p.model_no || '', product_type: p.product_type || 'product', quantity: qty };
     else delete spWiz.cart[key];
   });
 

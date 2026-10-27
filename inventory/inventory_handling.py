@@ -251,7 +251,7 @@ class inventory_manager(mongodbclient):
             # is exactly how a return used to end up creating a second,
             # separate inventory document instead of merging into the old
             # one. Match null/missing the same way "" is matched instead.
-            query = {"product_id": product_id, "product_name": product_name}
+            query = {"product_name": product_name}   # product_id is not part of a product's identity
             if model_no:
                 query["model_no"] = model_no
             else:
@@ -382,14 +382,12 @@ class inventory_manager(mongodbclient):
             logging.error("product deletion was unsuccessful")
             raise Exception(e)
 
-    def get_available_quantity(self, collection_name, product_id, model_no=None):
+    def get_available_quantity(self, collection_name, product_id, model_no=None, product_name=None, product_type=None):
         try:
-            query = {"product_id": product_id, "product_type": {"$ne": "damaged"}}
+            query = self._identity_query(product_id, product_name, model_no, product_type)
             # model_no disambiguates between variants sharing the same product_id
             # (e.g. black vs grey) — only filter by it when one was actually given,
             # so callers that intentionally want the product_id-wide total still can
-            if model_no is not None:
-                query["model_no"] = self._model_query(model_no)
             entries = self.get_data(collection_name=collection_name, query=query)
             return sum(int(e.get("quantity", 0) or 0) for e in entries)
         except Exception as e:
@@ -677,7 +675,35 @@ class inventory_manager(mongodbclient):
             return {"$in": [None, ""]}
         return {"$regex": "^\\s*" + re.escape(str(model_no).strip()) + "\\s*$", "$options": "i"}
 
-    def list_available_serials(self, collection_name, product_id, model_no=None):
+    @staticmethod
+    def _text_query(value):
+        """Case-insensitive match ignoring leading/trailing spaces."""
+        return {"$regex": "^\\s*" + re.escape(str(value).strip()) + "\\s*$", "$options": "i"}
+
+    def _identity_query(self, product_id, product_name=None, model_no=None, product_type=None):
+        """Which inventory lots count as "the same product".
+        With a product_name the identity is product name + model no + product type -
+        product_id is deliberately NOT used (inventory products now all carry a blank / single-space
+        id, so it can't tell products apart and a mismatch caused false "out of stock").
+        model_no "" / None = no variant. product_type "" / None = any live (non-damaged) type;
+        "product" also matches older lots that have no product_type saved.
+        Callers that only have a product_id (no name) keep the old product_id matching."""
+        if product_name and str(product_name).strip():
+            q = {"product_name": self._text_query(product_name), "model_no": self._model_query(model_no)}
+        else:
+            q = {"product_id": product_id}
+            if model_no is not None:
+                q["model_no"] = self._model_query(model_no)
+        t = (product_type or "").strip()
+        if t == "product":
+            q["product_type"] = {"$in": [None, "", "product"]}
+        elif t:
+            q["product_type"] = t
+        else:
+            q["product_type"] = {"$ne": "damaged"}
+        return q
+
+    def list_available_serials(self, collection_name, product_id, model_no=None, product_name=None, product_type=None):
         """
         Returns every serial number currently on file for product_id (optionally
         scoped to a single model_no variant), oldest lot first — the exact same
@@ -689,23 +715,26 @@ class inventory_manager(mongodbclient):
         try:
             # damaged lots share product_id/model_no with the live lot — they must
             # never show up as available (that was leaking faulty serials into orders)
-            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
-            if model_no is not None:
-                query["model_no"] = self._model_query(model_no)
+            query = self._identity_query(product_id, product_name, model_no, product_type)
+            query["quantity"] = {"$gt": 0}
             entries = self.get_data(collection_name=collection_name, query=query)
             entries.sort(key=lambda e: e.get("purchase_date") or "")
             serials, seen = [], set()
             for entry in entries:
-                for s in (entry.get("serial_numbers") or []):
-                    if s not in seen:
-                        seen.add(s)
+                # a lot can never hand out more serials than it has units: stale lots that list
+                # more serials than `quantity` would otherwise leak phantom (extra) serials
+                lot_qty = int(entry.get("quantity", 0) or 0)
+                for s in (entry.get("serial_numbers") or [])[:lot_qty]:
+                    key = str(s).strip().lower()
+                    if key not in seen:
+                        seen.add(key)
                         serials.append(s)
             return serials
         except Exception as e:
             logging.error("listing available serial numbers failed!")
             raise Exception(e)
 
-    def allocate_specific_serials(self, collection_name, product_id, serial_numbers, model_no=None):
+    def allocate_specific_serials(self, collection_name, product_id, serial_numbers, model_no=None, product_name=None, product_type=None):
         """
         Deducts exactly the given serial_numbers (a manual/reviewed selection
         from the order UI, as opposed to allocate_serials' auto oldest-first
@@ -723,14 +752,16 @@ class inventory_manager(mongodbclient):
         elsewhere (e.g. allocate_serials/allocate_units).
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
-            if model_no is not None:
-                query["model_no"] = self._model_query(model_no)
+            query = self._identity_query(product_id, product_name, model_no, product_type)
+            query["quantity"] = {"$gt": 0}
             entries = self.get_data(collection_name=collection_name, query=query)
 
             allocated = []
             for serial in serial_numbers:
-                match = next((e for e in entries if serial in (e.get("serial_numbers") or [])), None)
+                # only lots that still have stock left in THIS call (a lot emptied by an earlier
+                # serial is already deleted - it must not be matched / decremented again)
+                match = next((e for e in entries
+                              if int(e.get("quantity", 0) or 0) > 0 and serial in (e.get("serial_numbers") or [])), None)
                 if not match:
                     variant_note = f" (model {model_no})" if model_no else ""
                     raise Exception(f"serial number {serial} is not available for product {product_id}{variant_note}")
@@ -807,7 +838,7 @@ class inventory_manager(mongodbclient):
             logging.error("serial allocation failed!")
             raise Exception(e)
 
-    def unserialised_quantity(self, collection_name, product_id, model_no=None):
+    def unserialised_quantity(self, collection_name, product_id, model_no=None, product_name=None, product_type=None):
         """
         Units in stock that are NOT backed by a serial number on file: for every live lot,
         quantity minus the serials listed on it (never below 0). A lot with quantity 5 and
@@ -815,9 +846,8 @@ class inventory_manager(mongodbclient):
         reported as "short" when only its serial list is shorter than its quantity.
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
-            if model_no is not None:
-                query["model_no"] = self._model_query(model_no)
+            query = self._identity_query(product_id, product_name, model_no, product_type)
+            query["quantity"] = {"$gt": 0}
             entries = self.get_data(collection_name=collection_name, query=query)
             total = 0
             for e in entries:
@@ -828,7 +858,7 @@ class inventory_manager(mongodbclient):
             logging.error("counting unserialised units failed!")
             raise Exception(e)
 
-    def allocate_unserialised_units(self, collection_name, product_id, quantity, model_no=None):
+    def allocate_unserialised_units(self, collection_name, product_id, quantity, model_no=None, product_name=None, product_type=None):
         """
         Deducts `quantity` units that have no serial number on file (see unserialised_quantity),
         oldest lot first. Only the lot quantity goes down - serial numbers listed on a lot are
@@ -836,9 +866,8 @@ class inventory_manager(mongodbclient):
         Raises if there are fewer such units than requested.
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
-            if model_no is not None:
-                query["model_no"] = self._model_query(model_no)
+            query = self._identity_query(product_id, product_name, model_no, product_type)
+            query["quantity"] = {"$gt": 0}
             entries = self.get_data(collection_name=collection_name, query=query)
             entries.sort(key=lambda e: e.get("purchase_date") or "")
 
@@ -862,7 +891,7 @@ class inventory_manager(mongodbclient):
             logging.error("un-serialised unit allocation failed!")
             raise Exception(e)
 
-    def allocate_units(self, collection_name, product_id, quantity, model_no=None):
+    def allocate_units(self, collection_name, product_id, quantity, model_no=None, product_name=None, product_type=None):
         """
         Deducts `quantity` units of product_id from inventory (oldest lots first) —
         for use anywhere a full quantity+serials list is recorded together (e.g. an
@@ -888,9 +917,8 @@ class inventory_manager(mongodbclient):
         all matching lots is insufficient.
         """
         try:
-            query = {"product_id": product_id, "quantity": {"$gt": 0}, "product_type": {"$ne": "damaged"}}
-            if model_no is not None:
-                query["model_no"] = self._model_query(model_no)
+            query = self._identity_query(product_id, product_name, model_no, product_type)
+            query["quantity"] = {"$gt": 0}
             entries = self.get_data(
                 collection_name=collection_name,
                 query=query
