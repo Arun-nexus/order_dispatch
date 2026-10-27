@@ -200,7 +200,7 @@ async function fetchMedia(serviceId) {
 async function pickImage(file) {
   if (!file) return '';
   if (!file.type.startsWith('image/')) throw new Error('Please choose an image file.');
-  if (file.size > 2 * 1024 * 1024) throw new Error(`Image is ${(file.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`);
+  if (file.size > 10 * 1024 * 1024) throw new Error(`Image is ${(file.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`);
   return readFileAsBase64(file);
 }
 
