@@ -90,7 +90,7 @@ class inventory_manager(mongodbclient):
         Category-change-by-serial: if a serial number being added here is
         already on file under a *different* product_type entry anywhere in
         inventory, that unit is pulled out of its old entry (1 unit + that
-        serial removed, entry deleted if it hits zero) and lands in the
+        serial removed, entry kept at 0 if it hits zero) and lands in the
         product_type being added now. This is how a unit gets flagged
         faulty (product_type="damaged") when it's re-added as damaged even
         though it was previously a product/spare_parts/service_parts/
@@ -130,14 +130,12 @@ class inventory_manager(mongodbclient):
                     owner_serials = owner.get("serial_numbers") or []
                     remaining_serials = [s for s in owner_serials if s != serial]
                     new_owner_quantity = max(int(owner.get("quantity", 0) or 0) - 1, 0)
-                    if remaining_serials or new_owner_quantity > 0:
-                        self.update_data(
-                            collection_name=collection_name,
-                            query={"_id": ObjectId(owner["_id"])},
-                            update_values={"serial_numbers": remaining_serials, "quantity": new_owner_quantity}
-                        )
-                    else:
-                        self.delete_data(collection_name=collection_name, query={"_id": ObjectId(owner["_id"])})
+                    # keep the old entry even when it drops to 0 (never auto-deleted)
+                    self.update_data(
+                        collection_name=collection_name,
+                        query={"_id": ObjectId(owner["_id"])},
+                        update_values={"serial_numbers": remaining_serials, "quantity": new_owner_quantity}
+                    )
                     logging.info(
                         f"serial {serial} moved out of '{owner.get('product_type', 'product')}' "
                         f"into '{self.product_type}'"
@@ -306,16 +304,11 @@ class inventory_manager(mongodbclient):
 
     def update(self, collection_name, query, update_values, many=False):
         try:
-            # if this update sets quantity down to 0 (or below), delete the
-            # entry outright instead of leaving an empty/zero-quantity row
-            # behind — covers manual edits (e.g. the admin edit form) that
-            # set quantity directly, as opposed to the allocate/consume
-            # paths below which decrement it themselves.
+            # a quantity of 0 (or below) is kept as a 0-quantity row - the entry is NOT deleted
+            # automatically. Only the explicit "delete product" action removes an inventory row.
             new_quantity = update_values.get("quantity")
             if new_quantity is not None and int(new_quantity or 0) <= 0:
-                deleted = super().delete_data(collection_name=collection_name, query=query)
-                logging.info("quantity reached 0 — inventory entry deleted instead of updated")
-                return deleted
+                update_values = dict(update_values, quantity=0)
 
             data = super().update_data(collection_name=collection_name, query=query,
                                          update_values=update_values, many=many)
@@ -328,21 +321,22 @@ class inventory_manager(mongodbclient):
     def _decrement_or_delete(self, collection_name, entry_id, new_quantity, extra_update_values=None):
         """
         Shared by every allocate/consume path below: applies a quantity
-        decrement to the entry at entry_id. If the resulting quantity is 0
-        (or less), the entry is deleted outright instead of being left
-        behind as a zero-quantity row. extra_update_values (e.g. an updated
-        serial_numbers/hologram_numbers list) are applied alongside quantity
-        when the entry survives; they're moot when it's deleted along with it.
+        decrement to the entry at entry_id. When the resulting quantity is 0
+        (or less) the entry is KEPT as a 0-quantity row (never auto-deleted) -
+        it is simply not eligible for allocation (every allocator filters
+        quantity > 0) and shows as out of stock. extra_update_values (e.g. an
+        updated serial_numbers/hologram_numbers list) are applied alongside.
         """
-        if new_quantity <= 0:
-            self.delete_data(collection_name=collection_name, query={"_id": ObjectId(entry_id)})
-            logging.info(f"quantity reached 0 for entry {entry_id} — deleted from inventory")
-        else:
-            update_values = {"quantity": new_quantity}
-            if extra_update_values:
-                update_values.update(extra_update_values)
-            self.update_data(collection_name=collection_name, query={"_id": ObjectId(entry_id)},
-                              update_values=update_values)
+        new_quantity = max(int(new_quantity or 0), 0)
+        update_values = {"quantity": new_quantity}
+        if extra_update_values:
+            update_values.update(extra_update_values)
+        if new_quantity == 0 and "serial_numbers" in update_values:
+            update_values["serial_numbers"] = []   # nothing left in stock -> no stray serials
+        self.update_data(collection_name=collection_name, query={"_id": ObjectId(entry_id)},
+                          update_values=update_values)
+        if new_quantity == 0:
+            logging.info(f"quantity reached 0 for entry {entry_id} — kept in inventory as out of stock")
 
     def get_data(self, collection_name, query=None, projection=None, sort=None, skip=None, limit=None):
         try:
@@ -490,8 +484,8 @@ class inventory_manager(mongodbclient):
         assembly is edited and fewer parts are needed than were first deducted.
 
         The units go back into the newest existing lot for that product_name +
-        product_type. If every lot was already used up (and therefore deleted
-        by _decrement_or_delete), a fresh lot is created instead.
+        product_type. Used-up lots stay as 0-quantity rows, so they are reused;
+        a fresh lot is only created when none exists at all.
         """
         try:
             quantity = int(quantity or 0)
