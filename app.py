@@ -1248,6 +1248,7 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
             deducted.append((item, allocated_serials))
             order_item = dict(item)
             order_item["serial_numbers"] = allocated_serials
+            order_item["serial_lots"] = inventory_db.lots_for(allocated_serials)
             order_items.append(order_item)
 
         order = order_manager(
@@ -1363,6 +1364,7 @@ def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
                         price=item.get("price", 0),
                         tax_rate=item.get("tax_rate", 0),
                         serial_numbers=item.get("serial_numbers", []) or [],
+                        serial_lots=item.get("serial_lots") or [],
                     ).add_or_merge(collection_name=INVENTORY_COLLECTION)
                 logging.info(f"order {order_id} deleted — items restocked to inventory")
             except Exception as restock_err:
@@ -1429,6 +1431,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                             price=item.get("price", 0),
                             tax_rate=item.get("tax_rate", 0),
                             serial_numbers=item.get("serial_numbers", []) or [],
+                            serial_lots=item.get("serial_lots") or [],
                         ).add_or_merge(collection_name=INVENTORY_COLLECTION)
                     logging.info(f"order {order_id} cancelled — items restocked to inventory")
                 except Exception as restock_err:
@@ -1627,6 +1630,8 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 # from one line to another in the same edit is available
                 # again by the time we try to deduct it for its new line,
                 # instead of failing with "not available".
+                old_lot_map = {x.get("serial_number"): x.get("lot_no", "") for it in old_items for x in (it.get("serial_lots") or [])}
+                edit_taken = {}
                 restores = []   # (product_id, product_name, model_no, qty, serials)
                 deductions = [] # (product_id, product_name, model_no, qty, serials)
 
@@ -1687,6 +1692,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                         model_no=model_no,
                         quantity=qty,
                         serial_numbers=serials,
+                        serial_lots=[{"serial_number": sn, "lot_no": old_lot_map.get(sn, "")} for sn in serials if old_lot_map.get(sn)],
                     )
 
                 for product_id, product_name, model_no, qty, serials in deductions:
@@ -1711,6 +1717,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                             )
                     except Exception as e:
                         raise HTTPException(status_code=400, detail=f"{product_name or product_id}: {e}")
+                edit_taken.update(inv_db.taken_lots)
 
             computed_items = []
             for _orig_idx, raw_item in new_items:
@@ -1723,6 +1730,8 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 item["line_amount"] = line_amount
                 item["line_tax"] = line_tax
                 item["line_total"] = line_amount + line_tax
+                lot_map = {**{x.get("serial_number"): x.get("lot_no", "") for it in old_items for x in (it.get("serial_lots") or [])}, **edit_taken}
+                item["serial_lots"] = [{"serial_number": sn, "lot_no": lot_map.get(sn, "")} for sn in (item.get("serial_numbers") or []) if sn]
                 computed_items.append(item)
 
             updated["items"] = computed_items

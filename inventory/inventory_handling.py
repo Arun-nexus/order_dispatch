@@ -12,9 +12,12 @@ class inventory_manager(mongodbclient):
                  model_no=None, supplier_address=None, serial_numbers=None, product_type=None,
                  warranty_until=None, reason="",
                  parent_product_name="", part_category=None, hologram_numbers=None,
-                 created_by=None, invoice_no=""):
+                 created_by=None, invoice_no="", serial_lots=None):
 
         super().__init__()
+
+        self.serial_lots = list(serial_lots or [])
+        self.taken_lots = {}
 
         self.product_name = product_name
         self.product_id = product_id
@@ -66,6 +69,8 @@ class inventory_manager(mongodbclient):
                 "created_by": self.created_by,
                 "updated_by": self.created_by,
             }
+            if self.serial_lots:
+                product_dic["serial_lots"] = self.serial_lots
             if self.product_type in ("spare_parts", "service_parts"):
                 product_dic["parent_product_name"] = self.parent_product_name
                 product_dic["part_category"] = self.part_category
@@ -163,6 +168,8 @@ class inventory_manager(mongodbclient):
                     "purchase_date": self.purchase_date,
                     "updated_by": self.created_by,
                 }
+                if self.serial_lots:
+                    update_values["serial_lots"] = (entry.get("serial_lots") or []) + self.serial_lots
                 self.update_data(
                     collection_name=collection_name,
                     query={"_id": ObjectId(entry["_id"])},
@@ -220,7 +227,19 @@ class inventory_manager(mongodbclient):
             logging.error("adding spare/service part failed!")
             raise Exception(e)
 
-    def restock_returned_units(self, collection_name, product_id, product_name, model_no, quantity, serial_numbers=None):
+    def _take_lots(self, entry, serials):
+        lots = {x.get("serial_number"): x.get("lot_no") for x in (entry.get("serial_lots") or [])}
+        for sn in serials:
+            self.taken_lots[sn] = lots.get(sn) or (entry.get("lot_no") or "")
+        if "serial_lots" not in entry:
+            return {}
+        gone = set(serials)
+        return {"serial_lots": [x for x in (entry.get("serial_lots") or []) if x.get("serial_number") not in gone]}
+
+    def lots_for(self, serials):
+        return [{"serial_number": sn, "lot_no": self.taken_lots.get(sn, "")} for sn in (serials or []) if sn]
+
+    def restock_returned_units(self, collection_name, product_id, product_name, model_no, quantity, serial_numbers=None, serial_lots=None):
         """
         Used when a previously allocated (undamaged) unit is returned and needs
         to go back into inventory. Adds `quantity` back onto the lot that
@@ -276,7 +295,8 @@ class inventory_manager(mongodbclient):
                 self.update_data(
                     collection_name=collection_name,
                     query={"_id": ObjectId(entry["_id"])},
-                    update_values={"serial_numbers": merged_serials, "quantity": new_quantity}
+                    update_values={"serial_numbers": merged_serials, "quantity": new_quantity,
+                                   **({"serial_lots": (entry.get("serial_lots") or []) + [x for x in serial_lots if x.get("serial_number") in set(merged_serials) - set(current_serials)]} if serial_lots else {})}
                 )
                 logging.info(f"restocked {quantity} returned unit(s) into existing inventory entry for {product_id}")
                 return {"mode": "merged", "product_id": product_id, "quantity_added": quantity}
@@ -294,6 +314,7 @@ class inventory_manager(mongodbclient):
                 tax_rate=0,
                 serial_numbers=list(serial_numbers or []),
                 product_type="product",
+                serial_lots=serial_lots,
             )
             logging.info(f"original lot for {product_id} no longer exists — created fallback entry for returned stock")
             return fallback.add(collection_name=collection_name)
@@ -762,8 +783,10 @@ class inventory_manager(mongodbclient):
 
                 leftover_serials = [s for s in (match.get("serial_numbers") or []) if s != serial]
                 new_quantity = int(match.get("quantity", 0) or 0) - 1
+                lot_update = self._take_lots(match, [serial])
                 self._decrement_or_delete(collection_name, match["_id"], new_quantity,
-                                           {"serial_numbers": leftover_serials})
+                                           {"serial_numbers": leftover_serials, **lot_update})
+                match.update(lot_update)
                 # keep our local view in sync so two requested serials from the
                 # same lot in one call don't both match the stale entry
                 match["serial_numbers"] = leftover_serials
@@ -936,8 +959,9 @@ class inventory_manager(mongodbclient):
                 taken_serials = available_serials[:serial_take]
                 leftover_serials = available_serials[serial_take:]
 
+                lot_update = self._take_lots(entry, taken_serials)
                 self._decrement_or_delete(collection_name, entry["_id"], available_qty - take,
-                                           {"serial_numbers": leftover_serials})
+                                           {"serial_numbers": leftover_serials, **lot_update})
 
                 allocated.extend(taken_serials)
                 remaining -= take

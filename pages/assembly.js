@@ -840,19 +840,19 @@ function renderPartsUsedRows() {
       // list (stock fully consumed) — keep it selectable so edits don't lose it
       const isSel = sp => sp.part_name === p.name && (partBelongs(sp) === (p.belongsTo || '') || !p.belongsTo);
       const missing = p.name && !availableParts.some(isSel)
-        ? `<option value="${partKey(p.name, p.belongsTo)}" selected>${p.name}${p.belongsTo ? ' — ' + p.belongsTo : ''} (0 left in stock)</option>` : '';
+        ? `<option value="${escAttr(partKey(p.name, p.belongsTo))}" selected>${aesc(p.name)}${p.belongsTo ? ' — ' + aesc(p.belongsTo) : ''} (0 left in stock)</option>` : '';
       nameField = `
         <select class="partUsedName" style="flex:2;">
           ${missing}
-          ${availableParts.map(sp => `<option value="${partKey(sp.part_name, partBelongs(sp))}" ${(isSel(sp) && !(p.belongsTo ? false : availableParts.find(isSel) !== sp)) ? 'selected' : ''}>${sp.part_name}${partBelongs(sp) ? ' — ' + partBelongs(sp) : ''} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
+          ${availableParts.map(sp => `<option value="${escAttr(partKey(sp.part_name, partBelongs(sp)))}" ${(isSel(sp) && !(p.belongsTo ? false : availableParts.find(isSel) !== sp)) ? 'selected' : ''}>${aesc(sp.part_name)}${partBelongs(sp) ? ' — ' + aesc(partBelongs(sp)) : ''} (${sp.hologram_available} hologram-tagged in stock)</option>`).join('')}
         </select>`;
     } else {
-      nameField = `<input type="text" class="partUsedName" placeholder="Part Name" value="${p.name}" style="flex:2;">`;
+      nameField = `<input type="text" class="partUsedName" placeholder="Part Name" value="${escAttr(p.name)}" style="flex:2;">`;
     }
 
     const belongsField = p.source === 'inventory'
-      ? `<span class="partBelongs" style="flex:1.2;font-size:12px;color:#475569;background:#f1f5f9;border-radius:6px;padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Belongs to">${p.belongsTo || '—'}</span>`
-      : `<input type="text" class="partUsedBelongs" placeholder="Belongs to" value="${p.belongsTo || ''}" style="flex:1.2;">`;
+      ? `<span class="partBelongs" style="flex:1.2;font-size:12px;color:#475569;background:#f1f5f9;border-radius:6px;padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Belongs to">${aesc(p.belongsTo || '—')}</span>`
+      : `<input type="text" class="partUsedBelongs" placeholder="Belongs to" value="${escAttr(p.belongsTo || '')}" style="flex:1.2;">`;
 
     return `
       <div style="display:flex;gap:8px;align-items:center;" data-part-row="${i}">
@@ -961,11 +961,18 @@ function renderAStep3() {
       Hologram numbers aren't entered here — each unit will automatically get the next hologram number on file for
       <strong>${hologramPart ? hologramPart.name : 'the inventory part'}</strong> when you save.
     </p>
+    <div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong style="font-size:13px;">Lots (lot no. + quantity)</strong>
+        <span id="lotSummary" style="font-size:12px;"></span>
+      </div>
+      <div id="lotBlocks" style="display:flex;flex-direction:column;gap:6px;"></div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="button" id="addLotBtn" style="padding:6px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:12px;"><i class="fa-solid fa-plus"></i> Add Lot</button>
+        <button type="button" id="applyLotsBtn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;font-size:12px;"><i class="fa-solid fa-tag"></i> Apply Lots to Units</button>
+      </div>
+    </div>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">
-      <input type="text" id="lotAllInput" placeholder="Lot No. for all units" style="padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;width:170px;">
-      <button type="button" id="lotAllBtn" style="padding:6px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;cursor:pointer;font-size:12px;">
-        <i class="fa-solid fa-tag"></i> Apply Lot No. to all
-      </button>
       <button type="button" id="genFromUnit1Btn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;">
         <i class="fa-solid fa-arrow-down-9-1"></i> Generate Remaining From Unit 1
       </button>
@@ -1004,16 +1011,17 @@ function renderAStep3() {
     renderSerialRows();
   });
 
-  box.querySelector('#lotAllBtn').addEventListener('click', () => {
-    syncSerialsFromDom();
-    const lot = box.querySelector('#lotAllInput').value.trim();
-    if (!lot) {
-      showResponseModal('Enter a Lot No.', 'Type the Lot No. first, then apply it to all units. You can still change any unit\'s lot afterwards.', false);
-      return;
-    }
-    assemblyDraft.lots = assemblyDraft.lots.map(() => lot);
-    renderSerialRows();
+  box.querySelector('#addLotBtn').addEventListener('click', () => {
+    syncLotBlocksFromDom();
+    const left = assemblyDraft.quantity - lotBlocksTotal();
+    assemblyDraft.lotBlocks.push({ lot: '', qty: left > 0 ? String(left) : '' });
+    renderLotBlocks();
   });
+  box.querySelector('#applyLotsBtn').addEventListener('click', () => {
+    syncSerialsFromDom();
+    applyLotBlocks(true);
+  });
+  renderLotBlocks();
 
   box.querySelector('#regenSerialsBtn').addEventListener('click', () => {
     assemblyDraft.serials = generateSerialNumbers(assemblyDraft.quantity, assemblyDraft.productId);
@@ -1022,6 +1030,61 @@ function renderAStep3() {
   box.querySelector('#saveAssemblyBtn').addEventListener('click', finalizeAssembly);
 
   renderSerialRows();
+}
+
+function lotBlocksTotal() {
+  return (assemblyDraft.lotBlocks || []).reduce((t, b) => t + (parseInt(b.qty, 10) || 0), 0);
+}
+
+function renderLotBlocks() {
+  const wrap = document.getElementById('lotBlocks');
+  if (!wrap) return;
+  if (!Array.isArray(assemblyDraft.lotBlocks) || !assemblyDraft.lotBlocks.length) assemblyDraft.lotBlocks = [{ lot: '', qty: String(assemblyDraft.quantity) }];
+  wrap.innerHTML = assemblyDraft.lotBlocks.map((b, i) => `
+    <div data-lot-block="${i}" style="display:flex;gap:8px;align-items:center;">
+      <input type="text" class="lotBlockNo" placeholder="Lot No." value="${escAttr(b.lot)}" style="flex:2;">
+      <input type="number" min="1" class="lotBlockQty" placeholder="Qty" value="${escAttr(b.qty)}" style="flex:1;">
+      <button type="button" class="lotBlockDel" data-i="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:34px;height:34px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+    </div>`).join('');
+  wrap.oninput = updateLotSummary;
+  wrap.querySelectorAll('.lotBlockDel').forEach(btn => btn.addEventListener('click', () => {
+    syncLotBlocksFromDom();
+    assemblyDraft.lotBlocks.splice(Number(btn.dataset.i), 1);
+    renderLotBlocks();
+  }));
+  updateLotSummary();
+}
+
+function syncLotBlocksFromDom() {
+  document.querySelectorAll('#lotBlocks [data-lot-block]').forEach(row => {
+    const i = Number(row.dataset.lotBlock);
+    assemblyDraft.lotBlocks[i] = { lot: row.querySelector('.lotBlockNo').value.trim(), qty: row.querySelector('.lotBlockQty').value };
+  });
+}
+
+function updateLotSummary() {
+  syncLotBlocksFromDom();
+  const el = document.getElementById('lotSummary');
+  if (!el) return;
+  const total = lotBlocksTotal();
+  const ok = total === assemblyDraft.quantity;
+  el.style.color = ok ? '#16a34a' : '#d97706';
+  el.textContent = `${total} / ${assemblyDraft.quantity} units assigned`;
+}
+
+function applyLotBlocks(showErrors) {
+  syncLotBlocksFromDom();
+  const blocks = assemblyDraft.lotBlocks || [];
+  const fail = msg => { if (showErrors) showResponseModal('Check lots', msg, false); return false; };
+  if (blocks.some(b => !b.lot)) return fail('Every lot needs a Lot No.');
+  if (blocks.some(b => !(parseInt(b.qty, 10) > 0))) return fail('Every lot needs a quantity greater than 0.');
+  if (new Set(blocks.map(b => b.lot)).size !== blocks.length) return fail('Each Lot No. should appear only once here; increase its quantity instead.');
+  if (lotBlocksTotal() !== assemblyDraft.quantity) return fail(`Lot quantities add up to ${lotBlocksTotal()}, but this assembly has ${assemblyDraft.quantity} units.`);
+  const lots = [];
+  blocks.forEach(b => { for (let k = 0; k < parseInt(b.qty, 10); k++) lots.push(b.lot); });
+  assemblyDraft.lots = lots;
+  renderSerialRows();
+  return true;
 }
 
 function renderSerialRows() {
@@ -1049,6 +1112,7 @@ function syncSerialsFromDom() {
 // ---------- FINALIZE ----------
 async function finalizeAssembly() {
   syncSerialsFromDom();
+  if ((assemblyDraft.lots || []).some(l => !String(l || '').trim())) applyLotBlocks(false);
 
   if (assemblyDraft.serials.some(s => !s)) {
     showResponseModal('Missing values', 'Every unit needs a serial number.', false);
