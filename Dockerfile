@@ -6,4 +6,4 @@ RUN grep -v -i -E '^(altgraph|clr_loader|pefile|proxy_tools|pyinstaller|pyinstal
 RUN pip install --no-cache-dir -r requirement-linux.txt
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
-CMD exec uvicorn serve:app --host 0.0.0.0 --port $PORT
+CMD exec uvicorn app:app --host 0.0.0.0 --port $PORT
