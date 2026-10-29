@@ -1644,7 +1644,7 @@ ALL_RESOURCES = [ORDERS, INVENTORY, SHIPMENTS, ASSEMBLY, ALLOCATIONS, DISPATCH, 
 ALL_RESOURCES = [r for r in ALL_RESOURCES if not ONLY_TOOLS or r.name in ONLY_TOOLS]
 for _res in ALL_RESOURCES:
     _make_tool(_res)
-
+    
 
 async def _overview(pages: str = "", auth_token: str = "") -> dict:
     want = {p.strip().lower() for p in pages.split(",") if p.strip()}
