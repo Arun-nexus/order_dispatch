@@ -24,6 +24,10 @@ Decoupling:
   ERP_CACHE_TTL    seconds (default 20) - list routes ka chhota cache, har write par clear ho jata hai
   ERP_INPROCESS    1 => app.py ko import karke call karo
   ERP_APP_MODULE   default "app"
+  ERP_APP_PATH     ERP ke app.py ka full path (master AI ke apne app.py se naam clash ho to yahi use karo)
+  ERP_TOOL_PREFIX  tool naam prefix (default "erp_")      ERP_TOOLS  sirf ye pages expose karo, e.g. "orders,dispatch"
+  ERP_DOC_MODE     short (default, chhote local model ke liye) | full
+  ERP_EXPOSE_AUTH_TOKEN  1 (default) = tools me auth_token param (web app inject karta hai) | 0 = model se chhupao, service account use
   MCP_TRANSPORT / MCP_HOST / MCP_PORT   (stdio | http | sse ...)
 
 Run:  python erp_backend_tools.py
@@ -31,10 +35,12 @@ Run:  python erp_backend_tools.py
 import asyncio
 import hashlib
 import importlib
+import importlib.util
 import inspect
 import json
 import os
 import re
+import sys
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, Callable, Literal
@@ -54,6 +60,11 @@ TIMEOUT = float(os.getenv("ERP_TIMEOUT", "60"))
 CACHE_TTL = float(os.getenv("ERP_CACHE_TTL", "20"))
 INPROCESS = os.getenv("ERP_INPROCESS", "").strip().lower() in ("1", "true", "yes")
 APP_MODULE = os.getenv("ERP_APP_MODULE", "app")
+APP_PATH = os.getenv("ERP_APP_PATH", "").strip()        # ERP ke app.py ka full path (naam-clash se bachne ke liye)
+TOOL_PREFIX = os.getenv("ERP_TOOL_PREFIX", "erp_")        # tools.py ke saath ek hi client me chalana ho to badlo, e.g. "erp2_"
+ONLY_TOOLS = {x.strip().lower() for x in os.getenv("ERP_TOOLS", "").split(",") if x.strip()}   # e.g. "orders,inventory"
+DOC_MODE = os.getenv("ERP_DOC_MODE", "short").lower()     # short = chhote model (4B, 6k ctx) ke liye; full = bade model ke liye
+EXPOSE_TOKEN = os.getenv("ERP_EXPOSE_AUTH_TOKEN", "1").strip().lower() in ("1", "true", "yes")
 
 mcp = FastMCP("Acer Biomedical ERP - backend tools")
 
@@ -77,7 +88,16 @@ _asgi = {"app": None}
 def _make_client() -> httpx.AsyncClient:
     if INPROCESS:
         if _asgi["app"] is None:
-            _asgi["app"] = getattr(importlib.import_module(APP_MODULE), "app")
+            if APP_PATH:
+                folder = os.path.dirname(os.path.abspath(APP_PATH))
+                if folder not in sys.path:
+                    sys.path.append(folder)            # ERP ke apne imports (order.*, user.* ...) chalne ke liye
+                spec = importlib.util.spec_from_file_location("erp_app_module", APP_PATH)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+            else:
+                mod = importlib.import_module(APP_MODULE)
+            _asgi["app"] = getattr(mod, "app")
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=_asgi["app"]),
                                  base_url="http://erp.local", timeout=TIMEOUT)
     return httpx.AsyncClient(base_url=BASE_URL, timeout=TIMEOUT)
@@ -338,7 +358,7 @@ class Res:
         self.alt_ids = alt_ids
 
     def actions(self):
-        return ["filter", "view", "summary"] + list(self.routes) + list(self.extra)
+        return ["help", "filter", "view", "summary"] + list(self.routes) + list(self.extra)
 
 
 def _pairs(res: Res, raws: list):
@@ -489,6 +509,8 @@ async def _do_write(res: Res, action, id, id2, data, token):
 async def _handle(res: Res, action, id, id2, search, filters, sort, order, limit, offset,
                   group_by, sum_field, detail, data, token):
     try:
+        if action == "help":
+            return {"ok": True, "resource": res.name, "valid_actions": res.actions(), "help": res.doc.strip() + "\n" + _COMMON_DOC}
         if action in ("filter", "list"):
             return await _do_filter(res, token, search, filters, sort, order, limit, offset, group_by, sum_field, detail)
         if action == "summary":
@@ -516,31 +538,40 @@ Field = rows me dikhne wala naam ya raw dotted path (jaise customer.company_name
 = page ke top cards. Backend errors (`error`) seedha dikhao, retry se pehle data theek karo."""
 
 
+def _tool_doc(res: Res) -> str:
+    if DOC_MODE == "full":
+        return res.doc.strip() + "\n" + _COMMON_DOC
+    first = res.doc.strip().splitlines()[0].strip().split(" (")[0][:100]
+    acts = ", ".join(a for a in res.actions() if a != "help")
+    return (f"{first}. Actions: {acts}, help. Filters/data fields ke liye pehle action='help'. "
+            "filters={field: value}, data={...} add/update ke liye.")
+
+
 def _make_tool(res: Res):
     actions = tuple(res.actions())
+    name = f"{TOOL_PREFIX}{res.name}"
 
-    async def tool(
-        action: Literal[actions],
-        id: str = "",
-        id2: str = "",
-        search: str = "",
-        filters: dict | str | None = None,
-        sort: str = "",
-        order: str = "",
-        limit: int = 20,
-        offset: int = 0,
-        group_by: str = "",
-        sum_field: str = "",
-        detail: bool = False,
-        data: dict | str | None = None,
-        auth_token: str = "",
-    ) -> dict:
-        return await _handle(res, action, id, id2, search, filters, sort, order, limit, offset,
-                             group_by, sum_field, detail, data, auth_token)
+    if EXPOSE_TOKEN:
+        async def tool(
+            action: Literal[actions], id: str = "", id2: str = "", search: str = "",
+            filters: Any = None, sort: str = "", order: str = "", limit: int = 20, offset: int = 0,
+            group_by: str = "", sum_field: str = "", detail: bool = False, data: Any = None,
+            auth_token: str = "",
+        ) -> dict:
+            return await _handle(res, action, id, id2, search, filters, sort, order, limit, offset,
+                                 group_by, sum_field, detail, data, auth_token)
+    else:
+        async def tool(
+            action: Literal[actions], id: str = "", id2: str = "", search: str = "",
+            filters: Any = None, sort: str = "", order: str = "", limit: int = 20, offset: int = 0,
+            group_by: str = "", sum_field: str = "", detail: bool = False, data: Any = None,
+        ) -> dict:
+            return await _handle(res, action, id, id2, search, filters, sort, order, limit, offset,
+                                 group_by, sum_field, detail, data, "")
 
-    tool.__name__ = res.tool_name
-    tool.__doc__ = res.doc.strip() + "\n" + _COMMON_DOC
-    mcp.tool(name=res.tool_name)(tool)
+    tool.__name__ = name
+    tool.__doc__ = _tool_doc(res)
+    mcp.tool(name=name)(tool)
     return tool
 
 
@@ -1604,17 +1635,18 @@ WORK = Res(
             "seen": R("POST", "/work/{id}/seen")},
 )
 
+
+# ======================================================================================
+# 5. REGISTER TOOLS  +  one-shot overview
+# ======================================================================================
 ALL_RESOURCES = [ORDERS, INVENTORY, SHIPMENTS, ASSEMBLY, ALLOCATIONS, DISPATCH, SERVICES, INSTALLATIONS,
                  CUSTOMERS, USERS, REQUESTS, WORK]
+ALL_RESOURCES = [r for r in ALL_RESOURCES if not ONLY_TOOLS or r.name in ONLY_TOOLS]
 for _res in ALL_RESOURCES:
     _make_tool(_res)
 
 
-@mcp.tool(name="erp_overview")
-async def erp_overview(pages: str = "", auth_token: str = "") -> dict:
-    """Saare ERP pages ke top cards ek hi call me (orders, inventory, shipments, assembly, allocations, dispatch, services,
-    customers, requests, work ...). `pages` = comma separated subset (e.g. "orders,dispatch"), khali = sab.
-    Jis page ki permission nahi hoti uska `error` aata hai, baaki chalte rehte hain."""
+async def _overview(pages: str = "", auth_token: str = "") -> dict:
     want = {p.strip().lower() for p in pages.split(",") if p.strip()}
     targets = [r for r in ALL_RESOURCES if r.cards and (not want or r.name in want)]
 
@@ -1627,6 +1659,18 @@ async def erp_overview(pages: str = "", auth_token: str = "") -> dict:
 
     results = await asyncio.gather(*[one(r) for r in targets])
     return {"ok": True, "date": TODAY().isoformat(), "pages": dict(results)}
+
+
+_OV_DOC = ("Saare ERP pages ke top cards ek call me. pages = comma separated subset (e.g. 'orders,dispatch'), khali = sab. "
+           "Jis page ki permission nahi uska error aata hai, baaki chalte rehte hain.")
+if EXPOSE_TOKEN:
+    async def _ov_tool(pages: str = "", auth_token: str = "") -> dict:
+        return await _overview(pages, auth_token)
+else:
+    async def _ov_tool(pages: str = "") -> dict:
+        return await _overview(pages, "")
+_ov_tool.__name__, _ov_tool.__doc__ = f"{TOOL_PREFIX}overview", _OV_DOC
+mcp.tool(name=f"{TOOL_PREFIX}overview")(_ov_tool)
 
 
 if __name__ == "__main__":
