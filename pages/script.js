@@ -421,6 +421,7 @@ function openActionMenu(s, evt) {
 
   const role = getRole();
   const canManage = role === 'admin' || role === 'employee';
+  const canConfirmReturn = canManage || role === 'service_manager';   // backend: /service/manager_confirm allows service_manager, admin, accounts
 
   const menu = document.createElement('div');
   menu.id = 'svcActionMenu';
@@ -434,10 +435,8 @@ function openActionMenu(s, evt) {
   if (s.status !== 'rejected' && typeof openAllocatePartModal === 'function') items.push({ label: 'Allocate Spare Part', action: () => openAllocatePartModal({ service: s, onDone: () => Promise.all([loadServices(), loadPartAllocs()]) }) });
   if (s.status !== 'completed' && s.status !== 'rejected') items.push({ label: 'Reschedule', action: () => openRescheduleModal(s) });
   if (s.status === 'pending_approval') items.unshift({ label: 'Review & Approve', action: () => openReviewModal(s) });
-  if (canManage) {
-    items.push({ label: 'Manager Confirm Return', action: () => managerConfirmReturn(s.service_id) });
-    items.push({ label: 'Extend Warranty', action: () => extendWarranty(s.service_id) });
-  }
+  if (canConfirmReturn) items.push({ label: 'Manager Confirm Return', action: () => managerConfirmReturn(s.service_id) });
+  if (canManage) items.push({ label: 'Extend Warranty', action: () => extendWarranty(s.service_id) });
 
   if (['admin', 'accounts', 'service_manager', 'employee'].includes(role)) items.splice(s.status === 'pending_approval' ? 2 : 1, 0, { label: 'Edit Service', action: () => openEditServiceModal(s) });
 
