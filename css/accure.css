@@ -1948,3 +1948,32 @@ form .save-btn {
   font-weight: 600;
 
 }
+
+.erp-switch {
+  gap: 6px;
+  align-items: center;
+  margin-right: 12px
+}
+
+.erp-btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap
+}
+
+.erp-btn:hover {
+  background: #f1f5f9
+}
+
+.erp-btn.active {
+  background: #1665ff;
+  border-color: #1665ff;
+  color: #fff;
+  pointer-events: none
+}
