@@ -3388,12 +3388,36 @@ def confirm_spare_part_dispatch(allocation_id: str, request: DispatchConfirmRequ
 def services(user: dict = Depends(get_current_user)):
     try:
         db = service_detail()
+        run_in_background("migrate_service_media", lambda: db.migrate_stale_media(SERVICE_COLLECTION), 900)
         dataset = db.get_service_data(collection_name=SERVICE_COLLECTION, query={}, projection=SERVICE_LIST_PROJECTION)
         logging.info("service dataset was fetched successfully")
         return {"message": "service dataset", "dataset": dataset}
     except Exception as e:
         logging.error("service dataset cannot be fetched")
         raise HTTPException(status_code=500, detail="service dataset cannot be fetched")
+
+
+@app.get("/service/proof/{service_id}")
+def service_proof(service_id: str, user: dict = Depends(require_role("service_manager", "admin", "accounts", "technician", "distributor"))):
+    try:
+        rows = mongodbclient().get_data(
+            collection_name=SERVICE_COLLECTION, query={"service_id": service_id},
+            projection={"image": 1, "video": 1, "image_drive_link": 1, "video_drive_link": 1, "technician_alloted": 1})
+        if not rows:
+            raise HTTPException(status_code=404, detail="service not found")
+        s = rows[0]
+        if user["role"] in ("technician", "distributor") and s.get("technician_alloted") != user["username"]:
+            raise HTTPException(status_code=403, detail="this service is not assigned to you")
+        out = {}
+        for f in ("image", "video"):
+            v = s.get(f) or ""
+            out[f] = (s.get(f + "_drive_link") or "") if v == GDRIVE_PLACEHOLDER else v
+        return out
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("service proof cannot be fetched")
+        raise HTTPException(status_code=500, detail="proof cannot be fetched")
 
 
 def _check_field_address(location: str, address: str) -> str:
@@ -5948,6 +5972,9 @@ class OrderRequestModel(BaseModel):
     payment_mode: str
     payment_details: dict = {}
     discount: float = 0
+    remarks: str = ""
+    ship_to_different: bool = False
+    ship_to_address: Optional[dict] = None
 
 
 class RequestRejectModel(BaseModel):
@@ -6305,6 +6332,12 @@ def raise_order_request(request: OrderRequestModel, user: dict = Depends(require
             raise HTTPException(status_code=400, detail="customer details are required")
         if request.payment_mode not in VALID_PAYMENT_MODES:
             raise HTTPException(status_code=400, detail="invalid payment mode")
+        ship_addr = None
+        if request.ship_to_different:
+            sa = request.ship_to_address or {}
+            ship_addr = {"company_name": str(sa.get("company_name") or "").strip(), "address": str(sa.get("address") or "").strip()}
+            if not ship_addr["company_name"] or not ship_addr["address"]:
+                raise HTTPException(status_code=400, detail="enter ship to company name and address")
 
         req = request_manager(
             request_type="order",
@@ -6315,7 +6348,10 @@ def raise_order_request(request: OrderRequestModel, user: dict = Depends(require
                 "items": [item.dict() for item in request.items],
                 "payment_mode": request.payment_mode,
                 "payment_details": request.payment_details,
-                "discount": request.discount
+                "discount": request.discount,
+                "remarks": (request.remarks or "").strip()[:1000],
+                "ship_to_different": bool(ship_addr),
+                "ship_to_address": ship_addr
             }
         )
         req.add(collection_name=REQUESTS_COLLECTION)
@@ -6468,6 +6504,15 @@ def _approve_request_locked(request_id: str, body, user: dict):
                 discount=details.get("discount", 0),
                 creator={"type": "request", "raised_by": req["raised_by"], "approved_by": user["username"]}
             )
+            extra_vals = {}
+            if details.get("remarks"):
+                extra_vals["order_remarks"] = details["remarks"]
+            if details.get("ship_to_different") and details.get("ship_to_address"):
+                extra_vals["ship_to_different"] = True
+                extra_vals["ship_to_address"] = details["ship_to_address"]
+            if extra_vals:
+                order_manager().update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},
+                                       update_values=extra_vals)
             # carry the P.O./attachments over to the order (files stay under the request id)
             if details.get("attachments"):
                 order_manager().update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},

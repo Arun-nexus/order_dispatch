@@ -845,6 +845,9 @@ function openDispatchModal(row) {
   const modal = document.getElementById('dispatchModal');
   const content = modal.querySelector('.modal-content');
   const existing = row.data.dispatch || null;
+  const reqShip = row.kind === 'order' && !existing && row.data.ship_to_different && row.data.ship_to_address ? row.data.ship_to_address : null;
+  const shipOn = !!(existing?.ship_to_different || reqShip);
+  const shipVal = existing?.ship_to_address || reqShip || {};
   const billTo = row.kind === 'order'
     ? `${row.data.customer?.company_name || ''}${row.data.customer?.company_address ? ', ' + row.data.customer.company_address : ''}`
     : row.kind === 'service'
@@ -867,11 +870,11 @@ function openDispatchModal(row) {
       </div>
 
       <label style="font-size:13px;color:#475569;display:flex;align-items:center;gap:6px;">
-        <input type="checkbox" id="shipDifferentCheck" ${existing?.ship_to_different ? 'checked' : ''}> Ship to a different address
+        <input type="checkbox" id="shipDifferentCheck" ${shipOn ? 'checked' : ''}> Ship to a different address${reqShip ? ' <small style="color:#d97706;">(requested by distributor)</small>' : ''}
       </label>
-      <div id="shipToFields" style="display:${existing?.ship_to_different ? 'flex' : 'none'};flex-direction:column;gap:10px;">
-        <input name="ship_company_name" placeholder="Ship To — Company Name" value="${existing?.ship_to_address?.company_name ?? ''}">
-        <input name="ship_address" placeholder="Ship To — Address" value="${existing?.ship_to_address?.address ?? ''}">
+      <div id="shipToFields" style="display:${shipOn ? 'flex' : 'none'};flex-direction:column;gap:10px;">
+        <input name="ship_company_name" placeholder="Ship To — Company Name" value="${String(shipVal.company_name ?? '').replace(/"/g, '&quot;')}">
+        <input name="ship_address" placeholder="Ship To — Address" value="${String(shipVal.address ?? '').replace(/"/g, '&quot;')}">
       </div>
 
       <select name="mode_of_delivery" required>

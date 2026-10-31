@@ -496,24 +496,26 @@ function openViewModal(s) {
   modal.style.display = 'flex';
 }
 
-function openImageModal(s) {
+async function openImageModal(s) {
   const modal = document.getElementById('imageModal');
-  if (!modal) return;
-
-  const hasImage = !!s.image;
-  const hasVideo = !!s.video;
-
-  if (!hasImage && !hasVideo) {
+  if (!modal || !s) return;
+  let media;
+  try {
+    const res = await apiFetch(`/service/proof/${encodeURIComponent(s.service_id)}`);
+    media = await res.json();
+    if (!res.ok) throw new Error(media.detail || 'could not load media');
+  } catch (e) {
+    if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message);
+    return;
+  }
+  if (!media.image && !media.video) {
     alert('Image or video was not present for this service.');
     return;
   }
-
   const img = modal.querySelector('img');
   const video = modal.querySelector('video');
-
-  if (hasImage) { img.src = s.image; img.style.display = 'block'; } else { img.style.display = 'none'; img.removeAttribute('src'); }
-  if (hasVideo) { video.src = s.video; video.style.display = 'block'; } else { video.style.display = 'none'; video.removeAttribute('src'); }
-
+  if (media.image) { img.src = media.image; img.style.display = 'block'; } else { img.style.display = 'none'; img.removeAttribute('src'); }
+  if (media.video) { video.src = media.video; video.style.display = 'block'; } else { video.style.display = 'none'; video.removeAttribute('src'); }
   modal.style.display = 'flex';
 }
 

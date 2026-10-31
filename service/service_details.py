@@ -32,7 +32,7 @@ class ServiceStatus(str, enum.Enum):
 WORKFLOW_ORDER = ["assigned", "spare_decision", "report", "pending_approval", "done"]
 
 # big base64 fields are left out of list endpoints; GET /service/media/{id} serves them for one service
-SERVICE_LIST_PROJECTION = {"damage_image": 0, "final_image": 0, "faulty_parts.image": 0, "dispatch.image": 0}
+SERVICE_LIST_PROJECTION = {"image": 0, "video": 0, "damage_image": 0, "final_image": 0, "faulty_parts.image": 0, "dispatch.image": 0}
 
 
 class service_detail(mongodbclient):
@@ -211,7 +211,6 @@ class service_detail(mongodbclient):
 
     def get_service_data(self, collection_name, query=None, projection=None):
         try:
-            self.migrate_stale_media(collection_name=collection_name)
             service = super().get_data(collection_name=collection_name, query=query, projection=projection)
             logging.info("service data was fetched successfully!")
             return service
@@ -220,57 +219,58 @@ class service_detail(mongodbclient):
             raise Exception(e)
 
     def migrate_stale_media(self, collection_name):
-        """
-        Finds service records whose image/video is still a raw base64 blob and
-        is older than MEDIA_STALE_DAYS (default 2 days), uploads that media to
-        Google Drive, and replaces the field in Mongo with a placeholder string
-        + the Drive link. Runs automatically on every get_service_data() call.
-        Never raises - a Drive/network hiccup should not break page loads.
-        """
         try:
             cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=MEDIA_STALE_DAYS)).isoformat()
-
             stale_docs = super().get_data(collection_name=collection_name, query={
-                "media_updated_at": {"$ne": None, "$lt": cutoff_iso},
                 "$or": [
-                    {"image": {"$regex": "^data:"}},
-                    {"video": {"$regex": "^data:"}}
+                    {"media_updated_at": {"$ne": None, "$lt": cutoff_iso}, "image": {"$regex": "^data:"}},
+                    {"media_updated_at": {"$ne": None, "$lt": cutoff_iso}, "video": {"$regex": "^data:"}},
+                    {"created_at": {"$lt": cutoff_iso}, "damage_image": {"$regex": "^data:"}},
+                    {"created_at": {"$lt": cutoff_iso}, "final_image": {"$regex": "^data:"}},
+                    {"created_at": {"$lt": cutoff_iso}, "faulty_parts.image": {"$regex": "^data:"}},
                 ]
             })
-
-            if not stale_docs:
-                return 0
-
-            migrated_count = 0
+            count = 0
             for doc in stale_docs:
-                update_values = {}
-                service_id = doc.get("service_id")
-
-                image_val = doc.get("image") or ""
-                if image_val.startswith("data:"):
-                    try:
-                        link = upload_base64_to_drive(image_val, filename=f"{service_id}_image")
-                        update_values["image"] = GDRIVE_PLACEHOLDER
-                        update_values["image_drive_link"] = link
-                    except Exception as media_err:
-                        logging.error(f"failed to migrate image for service {service_id}: {media_err}")
-
-                video_val = doc.get("video") or ""
-                if video_val.startswith("data:"):
-                    try:
-                        link = upload_base64_to_drive(video_val, filename=f"{service_id}_video")
-                        update_values["video"] = GDRIVE_PLACEHOLDER
-                        update_values["video_drive_link"] = link
-                    except Exception as media_err:
-                        logging.error(f"failed to migrate video for service {service_id}: {media_err}")
-
-                if update_values:
-                    super().update_data(collection_name=collection_name, query={"service_id": service_id}, update_values=update_values)
-                    migrated_count += 1
-
-            if migrated_count:
-                logging.info(f"migrated media to Google Drive for {migrated_count} service record(s)")
-            return migrated_count
+                sid = doc.get("service_id")
+                upd = {}
+                old = doc.get("media_updated_at") or doc.get("created_at") or ""
+                if old and old < cutoff_iso:
+                    for f in ("image", "video"):
+                        v = doc.get(f) or ""
+                        if v.startswith("data:"):
+                            try:
+                                upd[f + "_drive_link"] = upload_base64_to_drive(v, filename=f"{sid}_{f}")
+                                upd[f] = GDRIVE_PLACEHOLDER
+                            except Exception as e:
+                                logging.error(f"migrate {f} failed for {sid}: {e}")
+                created = doc.get("created_at") or ""
+                if created and created < cutoff_iso:
+                    for f in ("damage_image", "final_image"):
+                        v = doc.get(f) or ""
+                        if v.startswith("data:"):
+                            try:
+                                upd[f + "_drive_link"] = upload_base64_to_drive(v, filename=f"{sid}_{f}")
+                                upd[f] = GDRIVE_PLACEHOLDER
+                            except Exception as e:
+                                logging.error(f"migrate {f} failed for {sid}: {e}")
+                    parts = [dict(p) for p in (doc.get("faulty_parts") or [])]
+                    changed = False
+                    for i, p in enumerate(parts):
+                        v = p.get("image") or ""
+                        if v.startswith("data:"):
+                            try:
+                                p["image_drive_link"] = upload_base64_to_drive(v, filename=f"{sid}_faulty_{i}")
+                                p["image"] = GDRIVE_PLACEHOLDER
+                                changed = True
+                            except Exception as e:
+                                logging.error(f"migrate faulty image failed for {sid}: {e}")
+                    if changed:
+                        upd["faulty_parts"] = parts
+                if upd:
+                    super().update_data(collection_name=collection_name, query={"service_id": sid}, update_values=upd)
+                    count += 1
+            return count
         except Exception as e:
             logging.error(f"stale media migration skipped due to error: {e}")
             return 0
@@ -448,13 +448,18 @@ class service_detail(mongodbclient):
 
     def get_media(self, collection_name, service_id):
         svc = self._get_one(collection_name, service_id)
+
+        def pick(d, f):
+            v = d.get(f) or ""
+            return (d.get(f + "_drive_link") or "") if v == GDRIVE_PLACEHOLDER else v
+
         return {
             "service_id": service_id,
             "technician_alloted": svc.get("technician_alloted"),
-            "damage_image": svc.get("damage_image") or "",
-            "final_image": svc.get("final_image") or "",
+            "damage_image": pick(svc, "damage_image"),
+            "final_image": pick(svc, "final_image"),
             "faulty_parts": [{"part_name": p.get("part_name"), "old_hologram_number": p.get("old_hologram_number"),
-                              "new_hologram_number": p.get("new_hologram_number") or "", "image": p.get("image") or ""}
+                              "new_hologram_number": p.get("new_hologram_number") or "", "image": pick(p, "image")}
                              for p in (svc.get("faulty_parts") or [])],
         }
 
