@@ -184,6 +184,16 @@ function fmtReqDateTime(iso) {
     d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
+// spare part request: requested part(s) with old hologram + the service's product/serial/issue
+function sparePartSummary(r) {
+  const d = r.details || {};
+  const parts = (d.parts || []).map(p => `<b>${esc(p.part_name || 'Part')}</b>${p.old_hologram_number ? ' (old hologram ' + esc(p.old_hologram_number) + ')' : ''}`).join(', ')
+    || esc(d.note || '');
+  const i = d.service_info;
+  const svc = i ? ` • ${esc(i.product_name || '-')}${i.model_no ? ' · ' + esc(i.model_no) : ''} • Serial: ${esc(i.serial_no || '-')}${i.company_name ? ' • ' + esc(i.company_name) : ''}${i.issue ? ' • Issue: ' + esc(i.issue) : ''}` : '';
+  return (parts + svc) || '';
+}
+
 function renderPendingRequests() {
   const box = document.getElementById('pendingRequestsList');
   const badge = document.getElementById('notifBadge');
@@ -209,7 +219,7 @@ function renderPendingRequests() {
   }
 
   box.innerHTML = listed.map(r => {
-    const iconMap = { demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen', convert_to_order: 'fa-file-invoice-dollar', return_demo: 'fa-rotate-left' };
+    const iconMap = { reschedule: 'fa-calendar-days', service: 'fa-screwdriver-wrench', demo_unit: 'fa-handshake', spare_part: 'fa-gears', order: 'fa-cart-shopping', media_review: 'fa-photo-film', status_update: 'fa-pen', convert_to_order: 'fa-file-invoice-dollar', return_demo: 'fa-rotate-left' };
     const icon = iconMap[r.request_type] || 'fa-bell';
 
     let title, subtitle;
@@ -233,9 +243,17 @@ function renderPendingRequests() {
     } else if (r.request_type === 'status_update') {
       title = `Status Change — Service #${(r.details?.service_id || '').slice(0, 8)}`;
       subtitle = `Requested: "${(r.details?.service_status || '').replace('_', ' ')}"${r.details?.reason ? ' — ' + r.details.reason : ''}`;
+    } else if (r.request_type === 'reschedule') {
+      const d = r.details || {};
+      title = `${d.kind === 'installation' ? 'Installation' : 'Service'} Reschedule — ${esc(d.label || '')}`;
+      subtitle = `Current: ${fmtReqDateTime(d.current_date)} → Requested: <b>${fmtReqDateTime(d.requested_date)}</b>${d.reason ? ' • Reason: ' + esc(d.reason) : ''}`;
+    } else if (r.request_type === 'service') {
+      const d = r.details || {};
+      title = `New Service — ${esc(d.company_name || d.product_name || d.product_id || '')}`;
+      subtitle = `${esc(d.product_name || d.product_id || '')}${d.model_no ? ' · ' + esc(d.model_no) : ''} • Serial: ${esc(d.serial_no || '-')} • Issue: ${esc(d.issue || '-')}`;
     } else {
       title = `Spare Part — Service #${(r.details?.service_id || '').slice(0, 8)}`;
-      subtitle = r.details?.note || '';
+      subtitle = sparePartSummary(r);
     }
 
     if (r.status === 'partially_approved') {
@@ -338,10 +356,31 @@ function openRequestDetailsModal(r) {
       ${(d.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${d.attachments.map((f, i) => `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(f.name)}</a>`).join('')}</p></div>` : ''}`;
   } else if (r.request_type === 'spare_part') {
     heading = 'Spare Part Request';
+    const si = d.service_info || {};
+    const partRows = (d.parts || []).map(p => detailRow(p.part_name || 'Part', 'Faulty (old) hologram: ' + (p.old_hologram_number || '-'))).join('');
     body = `
-      <div class="detail"><small>Spare Part</small><p>${d.note || '-'}</p></div>
-      <div class="detail"><small>Technician</small><p>${r.raised_by ?? '-'}</p></div>
-      <div class="detail"><small>Service ID</small><p>${d.service_id ?? '-'}</p></div>`;
+      ${partRows || detailRow('Spare Part', d.note)}
+      ${detailRow('Technician', r.raised_by)}
+      ${detailRow('Service ID', d.service_id)}
+      ${detailRow('Product', si.product_name)}${detailRow('Model No.', si.model_no)}${detailRow('Serial No.', si.serial_no)}
+      ${detailRow('Company', si.company_name)}${detailRow('Issue', si.issue)}
+      ${detailRow('Service Status', String(si.status || '').replace(/_/g, ' '))}${detailRow('Address', si.address)}`;
+  } else if (r.request_type === 'reschedule') {
+    heading = (d.kind === 'installation' ? 'Installation' : 'Service') + ' Reschedule Request';
+    body = `
+      ${detailRow('Item', d.label)}
+      ${detailRow('Current Date', d.current_date ? fmtReqDateTime(d.current_date) : '-')}
+      ${detailRow('Requested Date', d.requested_date ? fmtReqDateTime(d.requested_date) : '-')}
+      ${detailRow('Reason', d.reason)}
+      ${detailRow('Requested By', r.raised_by)}`;
+  } else if (r.request_type === 'service') {
+    heading = 'New Service Request';
+    body = `
+      ${detailRow('Company', d.company_name)}${detailRow('Product', d.product_name || d.product_id)}${detailRow('Model No.', d.model_no)}
+      ${detailRow('Serial No.', d.serial_no)}${detailRow('Purchase Date', d.purchase_date)}
+      ${detailRow('Type', d.location === 'outdoor' ? 'Field' : 'Inhouse')}${detailRow('Address', d.address)}
+      ${detailRow('Issue', d.issue)}${detailRow('Spare Parts', d.spare_parts)}
+      ${detailRow('Requested By', r.raised_by)}`;
   } else if (r.request_type === 'status_update') {
     heading = 'Status Change Request';
     body = `
@@ -676,6 +715,9 @@ function allocCardList(type) {
 }
 
 function requestSummary(r) {
+  if (r.request_type === 'reschedule') return `${esc(r.details?.label || '')} → ${fmtReqDateTime(r.details?.requested_date)}${r.details?.reason ? ' (' + esc(r.details.reason) + ')' : ''}`;
+  if (r.request_type === 'service') return `${esc(r.details?.product_name || r.details?.product_id || '')} — ${esc(r.details?.issue || '')}`;
+  if (r.request_type === 'spare_part') return sparePartSummary(r);
   const items = r.details?.items || r.details?.items_list || [];
   if (items.length) return items.map(i => `${esc(i.product_name || '')} x${i.quantity ?? 1}`).join(', ');
   if (r.details?.customer?.company_name) return esc(r.details.customer.company_name);
@@ -684,7 +726,7 @@ function requestSummary(r) {
 }
 
 const allocCV = { type: '', base: [], f: {}, requests: false };
-const ALLOC_REQ_LABELS = { demo_unit: 'Demo Unit', spare_part: 'Spare Part', order: 'Order', media_review: 'Service Media', status_update: 'Status Change', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
+const ALLOC_REQ_LABELS = { reschedule: 'Reschedule', service: 'New Service', demo_unit: 'Demo Unit', spare_part: 'Spare Part', order: 'Order', media_review: 'Service Media', status_update: 'Status Change', convert_to_order: 'Convert to Order', return_demo: 'Demo Return' };
 const ALLOC_KIND_LABELS = { product: 'Product', demo_unit: 'Demo', spare_part: 'Spare Part' };
 
 function cvEnsureStyles() {
