@@ -1133,8 +1133,10 @@ const dRowS = (label, value) => `<div class="detail"><small>${label}</small><p>$
 
 function demoItemsS(a) {
   return (a.items || []).map(it => ({
-    name: it.product_name || it.product_id || '-', model: it.model_no || it.model_number || '-',
-    serials: (it.serial_numbers || []).join(', ') || '-', qty: it.quantity || (it.serial_numbers || []).length || 1
+    name: (it.product_name || it.product_id || '-') + (DEMO_TYPE_LABEL[it.product_type] && it.product_type !== 'product' ? ` [${DEMO_TYPE_LABEL[it.product_type]}]` : ''),
+    model: it.model_no || it.model_number || '-',
+    serials: [(it.serial_numbers || []).join(', '), (it.hologram_numbers || []).length ? 'Hologram: ' + it.hologram_numbers.join(', ') : ''].filter(Boolean).join(' · ') || '-',
+    qty: it.quantity || (it.serial_numbers || []).length || (it.hologram_numbers || []).length || 1
   }));
 }
 const allocWhenS = a => a.created_at || a.allocated_at || a.allocation_date || '';
@@ -1197,18 +1199,37 @@ async function loadRequests() {
   renderAll();
 }
 
+const DEMO_TYPE_LABEL = { product: 'Product', accessories: 'Accessory', spare_parts: 'Spare Part', service_parts: 'Service Part' };
+const DEMO_TYPE_ORDER = ['product', 'accessories', 'spare_parts', 'service_parts'];
+const isPartType = t => t === 'spare_parts' || t === 'service_parts';
+
+// everything except damaged stock can go out as a demo: products, accessories, spare parts, service parts
 async function loadInventoryOptions() {
   try {
     const res = await apiFetch('/inventory/');
     const data = await res.json();
     const map = {};
-    (res.ok ? data.dataset || [] : []).filter(r => !r.product_type || r.product_type === 'product').forEach(r => {
-      const key = `${r.product_id}||${r.model_no || ''}`;
-      if (!map[key]) map[key] = { product_id: r.product_id, product_name: r.product_name, model_no: r.model_no || '', qty: 0 };
+    (res.ok ? data.dataset || [] : []).filter(r => (r.product_type || 'product') !== 'damaged' && (Number(r.quantity) || 0) > 0).forEach(r => {
+      const type = r.product_type || 'product';
+      const key = [r.product_id || '', r.product_name || '', r.model_no || '', type, r.parent_product_name || ''].join('||');
+      if (!map[key]) map[key] = { product_id: r.product_id || '', product_name: r.product_name, model_no: r.model_no || '', product_type: type, parent_product_name: r.parent_product_name || '', qty: 0 };
       map[key].qty += Number(r.quantity) || 0;
     });
-    svcState.inventory = Object.values(map).sort((a, b) => String(a.product_name).localeCompare(String(b.product_name)));
+    svcState.inventory = Object.values(map).sort((a, b) =>
+      DEMO_TYPE_ORDER.indexOf(a.product_type) - DEMO_TYPE_ORDER.indexOf(b.product_type) || String(a.product_name).localeCompare(String(b.product_name)));
   } catch (e) { svcState.inventory = []; }
+}
+
+// serials (products / accessories) or hologram numbers (parts) available for one stock line
+async function loadDemoUnits(p) {
+  if (p._units) return p._units;
+  const q = new URLSearchParams({ product_id: p.product_id, product_name: p.product_name, model_no: p.model_no,
+    product_type: p.product_type, parent_product_name: p.parent_product_name });
+  const res = await apiFetch('/allocation/demo_stock/units?' + q.toString());
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || 'could not load stock numbers');
+  p._units = data.units || [];
+  return p._units;
 }
 
 const SVC_VIEWS = {
@@ -1612,7 +1633,7 @@ function openDemoDetailS(a) {
   svcModal('Demo Unit Details', `
     ${dRowS('Assigned To', esc(a.allocated_by))}${dRowS('Status', esc(demoStatusS(a)))}${dRowS('Allocated On', allocWhenS(a) ? fmtSchedule(allocWhenS(a)) : '-')}
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin:10px 0;"><table style="width:100%;font-size:13px;border-collapse:collapse;">
-      <thead style="background:var(--bg-light);"><tr>${['Product', 'Model No.', 'Serial No(s).', 'Qty'].map(h => `<th style="text-align:left;padding:8px;">${h}</th>`).join('')}</tr></thead>
+      <thead style="background:var(--bg-light);"><tr>${['Product', 'Model No.', 'Serial / Hologram No(s).', 'Qty'].map(h => `<th style="text-align:left;padding:8px;">${h}</th>`).join('')}</tr></thead>
       <tbody>${it.map(x => `<tr><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.name)}</td><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.model)}</td><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.serials)}</td><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.qty)}</td></tr>`).join('')}</tbody></table></div>
     ${cust.company_name ? dRowS('Customer', esc(cust.company_name)) : ''}${a.remarks ? dRowS('Remarks', esc(a.remarks)) : ''}`, 620);
 }
@@ -1633,26 +1654,102 @@ async function openReassignDemo(a) {
 
 async function openAssignDemo() {
   await Promise.all([loadAssignees(), loadInventoryOptions()]);
-  const rowHtml = () => `<div class="ad-row" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-    <select class="ad-prod" style="${IN_S}margin:0;flex:1;"><option value="">Select product</option>${svcState.inventory.map((p, n) => `<option value="${n}">${esc(p.product_name)}${p.model_no ? ' (' + esc(p.model_no) + ')' : ''} — ${p.qty} in stock</option>`).join('')}</select>
-    <input class="ad-qty" type="number" min="1" value="1" style="${IN_S}margin:0;width:70px;">
-    <button type="button" class="ad-rm" style="${B_ICO}">&times;</button></div>`;
+  svcState.inventory.forEach(p => { delete p._units; });
+  let rowNo = 0;
+  const optHtml = () => svcState.inventory.map((p, n) => `<option value="${n}">[${esc(DEMO_TYPE_LABEL[p.product_type] || p.product_type)}] ${esc(p.product_name)}${p.model_no ? ' (' + esc(p.model_no) + ')' : ''}${p.parent_product_name ? ' · for ' + esc(p.parent_product_name) : ''} — ${p.qty} in stock</option>`).join('');
   const m = svcModal('Assign Demo Unit', `<label style="font-size:13px;">Technician</label>${techSelectHtml('adTech', '', 'Select technician')}
-    <label style="font-size:13px;">Products from stock</label><div id="adRows">${rowHtml()}</div>
-    <button type="button" id="adAdd" style="${B_GRY}margin-bottom:10px;">+ Add product</button>
-    <label style="font-size:13px;display:block;">Remarks</label><textarea id="adRemarks" rows="2" style="${IN_S}"></textarea>${formFooter('Assign')}`, 520);
+    <label style="font-size:13px;">Items from stock <small style="color:#64748b;">(products &amp; accessories by serial no., parts by hologram no.)</small></label><div id="adRows"></div>
+    <button type="button" id="adAdd" style="${B_GRY}margin-bottom:10px;">+ Add item</button>
+    <label style="font-size:13px;display:block;">Remarks</label><textarea id="adRemarks" rows="2" style="${IN_S}"></textarea>${formFooter('Assign')}`, 620);
   const rows = m.querySelector('#adRows');
-  const bindRm = () => rows.querySelectorAll('.ad-rm').forEach(b => b.onclick = () => { if (rows.children.length > 1) b.closest('.ad-row').remove(); });
-  bindRm();
-  m.querySelector('#adAdd').onclick = () => { rows.insertAdjacentHTML('beforeend', rowHtml()); bindRm(); };
+
+  const addRow = () => {
+    const id = ++rowNo;
+    const row = document.createElement('div');
+    row.className = 'ad-row';
+    row.style.cssText = 'border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:8px;';
+    row.innerHTML = `<div style="display:flex;gap:6px;align-items:center;">
+        <select class="ad-prod" style="${IN_S}margin:0;flex:1;"><option value="">Select item</option>${optHtml()}</select>
+        <input class="ad-qty" type="number" min="1" value="1" style="${IN_S}margin:0;width:70px;">
+        <button type="button" class="ad-rm" style="${B_ICO}">&times;</button></div>
+      <div class="ad-mode" style="display:none;margin-top:8px;font-size:13px;">
+        <label style="margin-right:14px;"><input type="radio" name="adMode${id}" value="auto" checked> Auto (oldest first)</label>
+        <label><input type="radio" name="adMode${id}" value="pick"> Choose <span class="ad-kind">serial</span> numbers myself</label></div>
+      <div class="ad-pick" style="display:none;margin-top:6px;"></div>`;
+    rows.appendChild(row);
+    row._sel = new Set();
+    const prod = row.querySelector('.ad-prod'), qty = row.querySelector('.ad-qty');
+    const modeBox = row.querySelector('.ad-mode'), pick = row.querySelector('.ad-pick');
+    const mode = () => row.querySelector(`input[name="adMode${id}"]:checked`).value;
+    const cur = () => svcState.inventory[prod.value];
+
+    const renderPick = (units, kind) => {
+      const filt = (row._filter || '').toLowerCase();
+      const shown = units.filter(u => !filt || u.toLowerCase().includes(filt));
+      const cap = 200;
+      pick.innerHTML = `<input type="text" class="ad-search" placeholder="Search ${kind} number…" value="${esc(row._filter || '')}" style="${IN_S}margin:0 0 6px;">
+        <div style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px;font-size:13px;">
+          ${shown.slice(0, cap).map(u => `<label style="display:block;padding:2px 0;"><input type="checkbox" value="${esc(u)}"${row._sel.has(u) ? ' checked' : ''}> ${esc(u)}</label>`).join('') || '<span style="color:#64748b;">No match</span>'}
+          ${shown.length > cap ? `<div style="color:#64748b;padding-top:4px;">Showing first ${cap} of ${shown.length} — search to narrow down</div>` : ''}</div>
+        <div class="ad-count" style="font-size:12px;color:#64748b;margin-top:4px;">${row._sel.size} selected of ${units.length} available</div>`;
+      pick.querySelector('.ad-search').oninput = e => { row._filter = e.target.value; renderPick(units, kind); const s = pick.querySelector('.ad-search'); s.focus(); s.setSelectionRange(s.value.length, s.value.length); };
+      pick.querySelectorAll('input[type=checkbox]').forEach(cb => cb.onchange = () => {
+        cb.checked ? row._sel.add(cb.value) : row._sel.delete(cb.value);
+        qty.value = row._sel.size || 1;
+        pick.querySelector('.ad-count').textContent = `${row._sel.size} selected of ${units.length} available`;
+      });
+    };
+
+    const resetMode = () => { row._sel.clear(); row._filter = ''; pick.style.display = 'none'; pick.innerHTML = ''; qty.disabled = false; };
+    prod.onchange = () => {
+      resetMode();
+      row.querySelector('input[name="adMode' + id + '"][value="auto"]').checked = true;
+      const p = cur();
+      modeBox.style.display = p ? 'block' : 'none';
+      if (p) row.querySelector('.ad-kind').textContent = isPartType(p.product_type) ? 'hologram' : 'serial';
+    };
+    row.querySelectorAll(`input[name="adMode${id}"]`).forEach(r => r.onchange = async () => {
+      const p = cur();
+      if (!p) return;
+      if (mode() === 'auto') { resetMode(); return; }
+      const kind = isPartType(p.product_type) ? 'hologram' : 'serial';
+      pick.style.display = 'block';
+      pick.innerHTML = `<span style="color:#64748b;font-size:13px;">Loading ${kind} numbers…</span>`;
+      try {
+        const units = await loadDemoUnits(p);
+        if (!units.length) {
+          pick.innerHTML = `<span style="color:#b45309;font-size:13px;">No ${kind} numbers on file for this item — it will be allocated automatically.</span>`;
+          row.querySelector(`input[name="adMode${id}"][value="auto"]`).checked = true;
+          return;
+        }
+        qty.disabled = true; qty.value = row._sel.size || 1;
+        renderPick(units, kind);
+      } catch (e) { pick.innerHTML = `<span style="color:#dc2626;font-size:13px;">${esc(e.message)}</span>`; }
+    });
+    row.querySelector('.ad-rm').onclick = () => { if (rows.children.length > 1) row.remove(); };
+  };
+  addRow();
+  m.querySelector('#adAdd').onclick = addRow;
+
   bindForm(m, async (mm, err) => {
     const tech = mm.querySelector('#adTech').value;
     if (!tech) { err.textContent = 'Select a technician.'; return; }
-    const items = [...rows.querySelectorAll('.ad-row')].map(r => {
+    const items = [];
+    for (const r of rows.querySelectorAll('.ad-row')) {
       const p = svcState.inventory[r.querySelector('.ad-prod').value];
-      return p ? { product_id: p.product_id, product_name: p.product_name, model_no: p.model_no, quantity: Number(r.querySelector('.ad-qty').value) || 0 } : null;
-    });
-    if (!items.length || items.some(x => !x || x.quantity < 1)) { err.textContent = 'Select a product and quantity in every row.'; return; }
+      if (!p) { err.textContent = 'Select an item in every row.'; return; }
+      const part = isPartType(p.product_type);
+      const chosen = [...r._sel];
+      const asPick = r.querySelector('.ad-qty').disabled;   // disabled = "choose myself" with a list on screen
+      if (asPick && !chosen.length) { err.textContent = `Tick at least one ${part ? 'hologram' : 'serial'} number for ${p.product_name}, or switch it to Auto.`; return; }
+      const quantity = asPick ? chosen.length : (Number(r.querySelector('.ad-qty').value) || 0);
+      if (quantity < 1) { err.textContent = 'Enter a quantity of at least 1 in every row.'; return; }
+      items.push({
+        product_id: p.product_id, product_name: p.product_name, model_no: p.model_no, parent_product_name: p.parent_product_name,
+        product_type: p.product_type, quantity,
+        serial_numbers: asPick && !part ? chosen : [], hologram_numbers: asPick && part ? chosen : []
+      });
+    }
     await svcPost('/allocation/assign_demo', { technician_id: tech, items, remarks: mm.querySelector('#adRemarks').value });
     mm.remove();
     await loadDemo();

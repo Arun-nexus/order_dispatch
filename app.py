@@ -95,6 +95,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---- request timing: logs slow requests and how much of the time was spent in MongoDB ----
+from mongodb.mongodb_connection import db_stats as _db_stats
+
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    stats = {"calls": 0, "ms": 0.0}
+    token = _db_stats.set(stats)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    finally:
+        _db_stats.reset(token)
+    total = (time.perf_counter() - started) * 1000
+    if total > 1000:
+        logging.warning(
+            f"SLOW REQUEST {request.method} {request.url.path} {total:.0f} ms "
+            f"(db_calls={stats['calls']}, db_ms={stats['ms']:.0f})")
+    return response
+
 # resolve everything relative to THIS file's own folder, not whatever
 # directory uvicorn happens to be launched from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -386,9 +405,17 @@ class InstallationAssignRequest(BaseModel):
     technician_id: str
 
 
+class DemoItem(AllocationItem):
+    """One line of a demo assignment. product_type picks the stock family:
+    product / accessories -> serial_numbers (optional, else oldest-first auto pick)
+    spare_parts / service_parts -> hologram_numbers (optional, else auto pick)."""
+    parent_product_name: str = ""
+    hologram_numbers: list[str] = []
+
+
 class AssignDemoRequest(BaseModel):
     technician_id: str
-    items: list[AllocationItem]
+    items: list[DemoItem]
     remarks: str = ""
 
 
@@ -1138,12 +1165,62 @@ def _auto_pick_item(inventory_db, item: dict):
                             product_name=name or None, product_type=ptype or None)
 
 
+_HOLOGRAM_PART_TYPES = ("spare_parts", "service_parts")
+
+
+def _is_part_item(item) -> bool:
+    """True for stock that is tracked by hologram number (spare / service parts)."""
+    g = item.get if isinstance(item, dict) else (lambda k, d=None: getattr(item, k, d))
+    return (g("product_type") or "") in _HOLOGRAM_PART_TYPES
+
+
+def _part_lots(inventory_db, name, ptype, parent=None):
+    q = {"product_name": name, "product_type": ptype}
+    if parent:
+        q["parent_product_name"] = parent
+    return inventory_db.get_data(collection_name=INVENTORY_COLLECTION, query=q)
+
+
+def _part_stock(inventory_db, name, ptype, parent=None):
+    """(total quantity, [hologram numbers on file]) for a part across all its lots."""
+    lots = _part_lots(inventory_db, name, ptype, parent)
+    qty = sum(int(l.get("quantity") or 0) for l in lots)
+    holos = [h for l in lots for h in (l.get("hologram_numbers") or [])]
+    return qty, holos
+
+
+def _restock_part_item(name, ptype, parent, qty, holograms):
+    """Puts a part (and its hologram numbers) back into inventory: merged into an existing lot of the
+    same part, else a new lot is created. Used for demo returns and for rolling back a failed allotment."""
+    holograms = [h for h in (holograms or []) if h]
+    qty = int(qty or 0) or len(holograms) or 1
+    col = mongodbclient().database[INVENTORY_COLLECTION]
+    lots = _part_lots(inventory_manager(), name, ptype, parent)
+    lots.sort(key=lambda l: l.get("purchase_date") or "")
+    lot = lots[-1] if lots else None
+    if lot:
+        upd = {"$inc": {"quantity": qty}}
+        if holograms:
+            upd["$addToSet"] = {"hologram_numbers": {"$each": holograms}}
+        col.update_one({"_id": lot["_id"]}, upd)
+        return
+    inventory_manager(
+        product_name=name, product_id=f"RET-{uuid.uuid4().hex[:8].upper()}", quantity=qty,
+        purchase_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"), lot_no="", supplier="", price="", tax_rate=0,
+        product_type=ptype, parent_product_name=parent or "", hologram_numbers=holograms,
+    ).add(collection_name=INVENTORY_COLLECTION)
+
+
 def _rollback_stock(inventory_db, deducted):
     """Puts back stock that was already deducted when a later step of the same approval failed,
     so a failed approve doesn't leave the request pending with half its stock gone.
     deducted = [(item_dict, serials_list), ...]"""
     for item, serials in reversed(deducted):
         try:
+            if _is_part_item(item):
+                _restock_part_item(item.get("product_name"), item.get("product_type"), item.get("parent_product_name"),
+                                   item.get("quantity", 0), serials)
+                continue
             serials = [s for s in (serials or []) if s]
             qty = int(item.get("quantity", 0) or 0)
             pid, name, model = item.get("product_id"), item.get("product_name"), item.get("model_no") or ""
@@ -2845,6 +2922,10 @@ def ensure_indexes():
         CUSTOMER_COLLECTION: ["customer_id"],
         SERVICE_COLLECTION: ["service_id"],
         INSTALLATION_COLLECTION: ["installation_id", "technician_id", "status"],
+        NOTIFICATIONS_COLLECTION: ["username"],
+        MESSAGES_COLLECTION: ["to_username", "from_username", "message_id"],
+        WORK_COLLECTION: ["work_id", "assigned_to"],
+        ATTENDANCE_COLLECTION: ["date", "emp_code"],
     }
     db = mongodbclient().database
     for coll, fields in wanted.items():
@@ -5829,39 +5910,129 @@ def _user_snapshot(username: str) -> dict:
     }
 
 
+def _clean_list(values):
+    return [str(v).strip() for v in (values or []) if v and str(v).strip()]
+
+
+def _pick_part_units(inventory_db, item: dict):
+    """Deducts a spare / service part. Chosen hologram numbers are taken exactly; otherwise holograms are
+    auto-picked (oldest first) and parts stocked without holograms are taken by plain quantity.
+    Returns the hologram numbers handed out (may be empty)."""
+    name, ptype, parent = item.get("product_name"), item.get("product_type"), item.get("parent_product_name") or None
+    qty = item["quantity"]
+    chosen = _clean_list(item.get("hologram_numbers"))
+    if chosen:
+        inventory_db.allocate_specific_holograms(INVENTORY_COLLECTION, chosen, product_name=name)
+        return chosen
+    have = inventory_db.get_hologram_available_by_name(
+        collection_name=INVENTORY_COLLECTION, product_name=name, product_type=ptype, parent_product_name=parent)
+    taken = []
+    if have:
+        taken = inventory_db.allocate_hologram_numbers_by_name(
+            collection_name=INVENTORY_COLLECTION, product_name=name, product_type=ptype, quantity=min(have, qty),
+            parent_product_name=parent, collect=[])
+    rest = qty - len(taken)
+    if rest > 0:   # lots that carry no hologram numbers: plain quantity
+        inventory_db.consume_quantity(
+            collection_name=INVENTORY_COLLECTION, product_name=name, product_type=ptype, quantity=rest,
+            parent_product_name=parent, collect=[])
+    return taken
+
+
 def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id: str):
-    """Approved demo request: deduct stock and allocate straight to the requesting user.
+    """Approved demo request / direct assignment: deduct stock and allocate straight to the requesting user.
+    Products & accessories are tracked by serial number, spare / service parts by hologram number; either can
+    be auto-picked or chosen by the caller. Damaged stock can never be allotted.
     No customer/company details at this stage. One allocation document per unit."""
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product")
     snapshot = _user_snapshot(requester)
     inventory_db = inventory_manager()
 
-    need = {}
+    if any((i.get("product_type") or "") == "damaged" for i in items):
+        raise HTTPException(status_code=400, detail="damaged stock cannot be allotted as a demo unit")
+
+    # ---- check EVERYTHING before deducting anything ----
+    need = {}          # product / accessory lines with no serial chosen -> auto-picked
+    part_need = {}     # part lines with no hologram chosen -> auto-picked
+    seen_units = set()
     for item in items:
-        key = _item_ident(item)
-        need[key] = need.get(key, 0) + item["quantity"]
-    # check EVERYTHING before deducting anything, using the same rules the allocator uses
+        qty = item["quantity"]
+        if qty < 1:
+            raise HTTPException(status_code=400, detail=f"{item.get('product_name', '')}: quantity must be at least 1")
+        if _is_part_item(item):
+            name, ptype, parent = item.get("product_name"), item.get("product_type"), item.get("parent_product_name") or None
+            chosen = _clean_list(item.get("hologram_numbers"))
+            stock_qty, holos = _part_stock(inventory_db, name, ptype, parent)
+            if chosen:
+                if len(chosen) != qty:
+                    raise HTTPException(status_code=400, detail=f"{name}: {len(chosen)} hologram number(s) chosen but quantity is {qty}")
+                for h in chosen:
+                    if h in seen_units:
+                        raise HTTPException(status_code=400, detail=f"{name}: hologram {h} selected twice")
+                    seen_units.add(h)
+                missing = [h for h in chosen if h not in set(holos)]
+                if missing:
+                    raise HTTPException(status_code=400, detail=f"{name}: hologram number(s) not in stock: {', '.join(missing)}")
+            else:
+                k = (name, ptype, parent)
+                part_need[k] = part_need.get(k, 0) + qty
+                if part_need[k] > stock_qty:
+                    raise HTTPException(status_code=400, detail=f"insufficient stock for {name}: only {stock_qty} available")
+        else:
+            name, model_no, ptype = _item_ident(item)
+            pid = item.get("product_id", "")
+            chosen = _clean_list(item.get("serial_numbers"))
+            if chosen:
+                if len(chosen) != qty:
+                    raise HTTPException(status_code=400, detail=f"{name or pid}: {len(chosen)} serial number(s) chosen but quantity is {qty}")
+                for s in chosen:
+                    if s in seen_units:
+                        raise HTTPException(status_code=400, detail=f"{name or pid}: serial {s} selected twice")
+                    seen_units.add(s)
+                free = set(_unsold_serials(inventory_db.list_available_serials(
+                    INVENTORY_COLLECTION, pid, model_no=model_no or None, product_name=name or None, product_type=ptype or None)))
+                missing = [s for s in chosen if s not in free]
+                if missing:
+                    raise HTTPException(status_code=400, detail=f"{name or pid}: serial number(s) not available: {', '.join(missing)}")
+            else:
+                k = (name, model_no, ptype)
+                need[k] = need.get(k, 0) + qty
     for (name, model_no, ptype), qty in need.items():
-        pid = next((i.get("product_id", "") for i in items if _item_ident(i) == (name, model_no, ptype)), "")
+        pid = next((i.get("product_id", "") for i in items if not _is_part_item(i) and _item_ident(i) == (name, model_no, ptype)), "")
         sellable, skipped = _sellable_quantity(inventory_db, pid, model_no or None, product_name=name or None, product_type=ptype or None)
         if sellable < qty:
             variant_note = f" (model {model_no})" if model_no else ""
             raise HTTPException(status_code=400, detail=_stock_short_detail(name or pid, sellable, skipped, variant_note))
 
+    # ---- deduct + record ----
     ids = []
     deducted = []
     try:
         for item in items:
-            serials = _auto_pick_item(inventory_db, item)
-            deducted.append((item, serials))
+            is_part = _is_part_item(item)
+            if is_part:
+                units = _pick_part_units(inventory_db, item)
+            else:
+                chosen = _clean_list(item.get("serial_numbers"))
+                if chosen:
+                    units = inventory_db.allocate_specific_serials(
+                        collection_name=INVENTORY_COLLECTION, product_id=item.get("product_id", ""), serial_numbers=chosen,
+                        model_no=item.get("model_no") or None, product_name=item.get("product_name") or None,
+                        product_type=item.get("product_type") or None)
+                else:
+                    units = _auto_pick_item(inventory_db, item)
+            deducted.append((item, units))
             for i in range(item["quantity"]):
-                serial = serials[i] if i < len(serials) else None
+                unit = units[i] if i < len(units) else None
+                row = {"product_id": item.get("product_id", ""), "product_name": item["product_name"],
+                       "model_no": item.get("model_no", ""), "product_type": item.get("product_type") or "",
+                       "parent_product_name": item.get("parent_product_name") or "", "quantity": 1,
+                       "serial_numbers": [] if is_part else ([unit] if unit else [])}
+                if is_part and unit:
+                    row["hologram_numbers"] = [unit]
                 alloc = allocation_manager(
-                    sales_person=snapshot,
-                    items=[{"product_id": item["product_id"], "product_name": item["product_name"],
-                            "model_no": item.get("model_no", ""), "quantity": 1,
-                            "serial_numbers": [serial] if serial else []}],
+                    sales_person=snapshot, items=[row],
                     allocated_by=requester, allocation_type="demo_unit",
                     request_id=request_id, remarks=remarks)
                 alloc.add(collection_name=ALLOCATION_COLLECTION)
@@ -5878,6 +6049,30 @@ def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id:
         raise
     logging.info(f"demo request {request_id} allocated to {requester}: {ids}")
     return ids
+
+
+@app.get("/allocation/demo_stock/units")
+def demo_stock_units(product_id: str = "", product_name: str = "", model_no: str = "", product_type: str = "",
+                     parent_product_name: str = "",
+                     user: dict = Depends(require_role("service_manager", "admin", "accounts"))):
+    """Units of one stock line that can be handed out as a demo, for the 'choose my own' picker:
+    parts (spare / service) -> hologram numbers, products / accessories -> unsold serial numbers."""
+    try:
+        if product_type == "damaged":
+            raise HTTPException(status_code=400, detail="damaged stock cannot be allotted as a demo unit")
+        db = inventory_manager()
+        if product_type in _HOLOGRAM_PART_TYPES:
+            _, holos = _part_stock(db, product_name, product_type, parent_product_name or None)
+            return {"kind": "hologram", "units": list(dict.fromkeys(holos))}
+        serials = _unsold_serials(db.list_available_serials(
+            INVENTORY_COLLECTION, product_id, model_no=model_no or None,
+            product_name=product_name or None, product_type=product_type or None))
+        return {"kind": "serial", "units": serials}
+    except HTTPException:
+        raise
+    except Exception:
+        logging.error("fetching demo stock units failed")
+        raise HTTPException(status_code=500, detail="stock units cannot be fetched")
 
 
 @app.post("/allocation/assign_demo")
@@ -6951,11 +7146,18 @@ def _normalize_return_item(item):
     pid = str(item.get("product_id") or "").strip()
     name = str(item.get("product_name") or "").strip() or pid or "Returned item"
     model = str(item.get("model_no") or item.get("model_number") or "").strip()
-    return {"product_id": pid, "product_name": name, "model_no": model, "quantity": qty, "serial_numbers": serials}
+    return {"product_id": pid, "product_name": name, "model_no": model, "quantity": qty, "serial_numbers": serials,
+            "product_type": str(item.get("product_type") or "").strip(),
+            "parent_product_name": str(item.get("parent_product_name") or "").strip(),
+            "hologram_numbers": [str(x).strip() for x in (item.get("hologram_numbers") or []) if x and str(x).strip()]}
 
 
 def _restock_one_item(inv_db, it):
     """Same product_id + name + model -> merged into that lot, else a new lot is created. Never gives up silently."""
+    if it.get("product_type") in _HOLOGRAM_PART_TYPES:
+        _restock_part_item(it["product_name"], it["product_type"], it.get("parent_product_name"),
+                           it["quantity"], it.get("hologram_numbers"))
+        return "restocked"
     last_err = None
     for _ in range(2):  
         try:
