@@ -416,6 +416,8 @@ class DemoItem(AllocationItem):
 class AssignDemoRequest(BaseModel):
     technician_id: str
     items: list[DemoItem]
+    # optional company the demo is going to: company_name, company_address, gst_number, contractor_person, contractor_number
+    customer: dict = {}
     remarks: str = ""
 
 
@@ -5939,7 +5941,7 @@ def _pick_part_units(inventory_db, item: dict):
     return taken
 
 
-def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id: str):
+def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id: str, customer: dict = None):
     """Approved demo request / direct assignment: deduct stock and allocate straight to the requesting user.
     Products & accessories are tracked by serial number, spare / service parts by hologram number; either can
     be auto-picked or chosen by the caller. Damaged stock can never be allotted.
@@ -6031,10 +6033,11 @@ def _fulfill_demo_request(items: list, requester: str, remarks: str, request_id:
                        "serial_numbers": [] if is_part else ([unit] if unit else [])}
                 if is_part and unit:
                     row["hologram_numbers"] = [unit]
+                extra = {"customer": dict(customer)} if customer else {}
                 alloc = allocation_manager(
                     sales_person=snapshot, items=[row],
                     allocated_by=requester, allocation_type="demo_unit",
-                    request_id=request_id, remarks=remarks)
+                    request_id=request_id, remarks=remarks, **extra)
                 alloc.add(collection_name=ALLOCATION_COLLECTION)
                 ids.append(alloc.allocation_id)
     except Exception:
@@ -6081,7 +6084,12 @@ def assign_demo_unit(request: AssignDemoRequest, user: dict = Depends(require_ro
         tech = request.technician_id.strip()
         if not tech:
             raise HTTPException(status_code=400, detail="select a technician")
-        ids = _fulfill_demo_request([i.dict() for i in request.items], tech, request.remarks.strip(), "")
+        # optional company details: keep only what was filled in; a company name is needed if anything is given
+        cust = {k: str(v).strip() for k, v in (request.customer or {}).items()
+                if k in ("company_name", "company_address", "gst_number", "contractor_person", "contractor_number") and v and str(v).strip()}
+        if cust and not cust.get("company_name"):
+            raise HTTPException(status_code=400, detail="enter the company name (or clear the company details)")
+        ids = _fulfill_demo_request([i.dict() for i in request.items], tech, request.remarks.strip(), "", customer=cust or None)
         _notify([tech], kind="demo_assigned", title="Demo unit assigned to you",
                 body=", ".join(f"{i.product_name} x{i.quantity}" for i in request.items),
                 link="/pages/technician.html?tab=demo")

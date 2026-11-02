@@ -822,7 +822,7 @@ async function openCreateModal() {
             </div>
             <div id="createPartList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;"></div>
           </div>
-          <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 10MB)</label>
+          <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 2MB)</label>
           <input type="file" name="image_file" accept="image/*">
           <label style="font-size:12px;color:var(--text-muted);">Video proof (optional, max 20MB)</label>
           <input type="file" name="video_file" accept="video/*">
@@ -870,11 +870,11 @@ async function openCreateModal() {
         return;
       }
 
-      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 10MB
+      const MAX_IMAGE_BYTES = 2 * 1024 * 1024;   // 2MB
       const MAX_VIDEO_BYTES = 20 * 1024 * 1024;  // 20MB
 
       if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
-        errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 10MB or under.`;
+        errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`;
         errorBox.style.display = 'block';
         return;
       }
@@ -1635,7 +1635,7 @@ function openDemoDetailS(a) {
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin:10px 0;"><table style="width:100%;font-size:13px;border-collapse:collapse;">
       <thead style="background:var(--bg-light);"><tr>${['Product', 'Model No.', 'Serial / Hologram No(s).', 'Qty'].map(h => `<th style="text-align:left;padding:8px;">${h}</th>`).join('')}</tr></thead>
       <tbody>${it.map(x => `<tr><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.name)}</td><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.model)}</td><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.serials)}</td><td style="padding:8px;border-top:1px solid var(--border);">${esc(x.qty)}</td></tr>`).join('')}</tbody></table></div>
-    ${cust.company_name ? dRowS('Customer', esc(cust.company_name)) : ''}${a.remarks ? dRowS('Remarks', esc(a.remarks)) : ''}`, 620);
+    ${cust.company_name ? dRowS('Company', esc(cust.company_name)) : ''}${cust.company_address ? dRowS('Address', esc(cust.company_address)) : ''}${cust.gst_number ? dRowS('GST No.', esc(cust.gst_number)) : ''}${cust.contractor_person || cust.contractor_number ? dRowS('Contact', esc([cust.contractor_person, cust.contractor_number].filter(Boolean).join(' · '))) : ''}${a.remarks ? dRowS('Remarks', esc(a.remarks)) : ''}`, 620);
 }
 
 async function openReassignDemo(a) {
@@ -1656,10 +1656,14 @@ async function openAssignDemo() {
   await Promise.all([loadAssignees(), loadInventoryOptions()]);
   svcState.inventory.forEach(p => { delete p._units; });
   let rowNo = 0;
-  const optHtml = () => svcState.inventory.map((p, n) => `<option value="${n}">[${esc(DEMO_TYPE_LABEL[p.product_type] || p.product_type)}] ${esc(p.product_name)}${p.model_no ? ' (' + esc(p.model_no) + ')' : ''}${p.parent_product_name ? ' · for ' + esc(p.parent_product_name) : ''} — ${p.qty} in stock</option>`).join('');
+  const optHtml = (q = '', keep = '') => svcState.inventory.map((p, n) => ({ p, n })).filter(({ p, n }) => String(n) === String(keep) || !q || [p.product_name, p.model_no, p.parent_product_name, DEMO_TYPE_LABEL[p.product_type], p.product_type].join(' ').toLowerCase().includes(q.toLowerCase())).map(({ p, n }) => `<option value="${n}"${String(n) === String(keep) ? ' selected' : ''}>[${esc(DEMO_TYPE_LABEL[p.product_type] || p.product_type)}] ${esc(p.product_name)}${p.model_no ? ' (' + esc(p.model_no) + ')' : ''}${p.parent_product_name ? ' · for ' + esc(p.parent_product_name) : ''} — ${p.qty} in stock</option>`).join('');
   const m = svcModal('Assign Demo Unit', `<label style="font-size:13px;">Technician</label>${techSelectHtml('adTech', '', 'Select technician')}
     <label style="font-size:13px;">Items from stock <small style="color:#64748b;">(products &amp; accessories by serial no., parts by hologram no.)</small></label><div id="adRows"></div>
     <button type="button" id="adAdd" style="${B_GRY}margin-bottom:10px;">+ Add item</button>
+    <details id="adCo" style="margin-bottom:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">Company details <small style="font-weight:400;color:#64748b;">(optional)</small></summary>
+      <input id="adCoName" placeholder="Company name" style="${IN_S}margin-bottom:6px;">
+      <input id="adCoAddr" placeholder="Address" style="${IN_S}margin-bottom:6px;">
+      <div style="display:flex;gap:6px;"><input id="adCoGst" placeholder="GST number" style="${IN_S}margin:0;"><input id="adCoPerson" placeholder="Contact person" style="${IN_S}margin:0;"><input id="adCoPhone" placeholder="Phone" style="${IN_S}margin:0;"></div></details>
     <label style="font-size:13px;display:block;">Remarks</label><textarea id="adRemarks" rows="2" style="${IN_S}"></textarea>${formFooter('Assign')}`, 620);
   const rows = m.querySelector('#adRows');
 
@@ -1668,7 +1672,8 @@ async function openAssignDemo() {
     const row = document.createElement('div');
     row.className = 'ad-row';
     row.style.cssText = 'border:1px solid var(--border);border-radius:10px;padding:8px;margin-bottom:8px;';
-    row.innerHTML = `<div style="display:flex;gap:6px;align-items:center;">
+    row.innerHTML = `<input type="text" class="ad-find" placeholder="🔍 Search item — name, model, type (spare part, accessory…)" style="${IN_S}margin:0 0 6px;">
+      <div style="display:flex;gap:6px;align-items:center;">
         <select class="ad-prod" style="${IN_S}margin:0;flex:1;"><option value="">Select item</option>${optHtml()}</select>
         <input class="ad-qty" type="number" min="1" value="1" style="${IN_S}margin:0;width:70px;">
         <button type="button" class="ad-rm" style="${B_ICO}">&times;</button></div>
@@ -1700,6 +1705,14 @@ async function openAssignDemo() {
       });
     };
 
+    const find = row.querySelector('.ad-find');
+    find.oninput = () => {
+      const keep = prod.value;
+      prod.innerHTML = `<option value="">Select item</option>${optHtml(find.value.trim(), keep)}`;
+      const opts = [...prod.options].filter(o => o.value);
+      if (!prod.value && opts.length === 1) { prod.value = opts[0].value; prod.onchange(); }   // single match -> pick it
+      if (!opts.length) prod.innerHTML = '<option value="">No item matches</option>';
+    };
     const resetMode = () => { row._sel.clear(); row._filter = ''; pick.style.display = 'none'; pick.innerHTML = ''; qty.disabled = false; };
     prod.onchange = () => {
       resetMode();
@@ -1750,7 +1763,10 @@ async function openAssignDemo() {
         serial_numbers: asPick && !part ? chosen : [], hologram_numbers: asPick && part ? chosen : []
       });
     }
-    await svcPost('/allocation/assign_demo', { technician_id: tech, items, remarks: mm.querySelector('#adRemarks').value });
+    const val = id => mm.querySelector(id).value.trim();
+    const customer = { company_name: val('#adCoName'), company_address: val('#adCoAddr'), gst_number: val('#adCoGst'), contractor_person: val('#adCoPerson'), contractor_number: val('#adCoPhone') };
+    if (Object.values(customer).some(Boolean) && !customer.company_name) { mm.querySelector('#adCo').open = true; err.textContent = 'Enter the company name, or clear the company details.'; return; }
+    await svcPost('/allocation/assign_demo', { technician_id: tech, items, remarks: mm.querySelector('#adRemarks').value, customer });
     mm.remove();
     await loadDemo();
   });
@@ -1855,7 +1871,7 @@ function openServiceDispatchModal(s) {
     const v = id => mm.querySelector(id).value.trim();
     if (!v('#sdMode') || !v('#sdThrough') || !v('#sdInvoice') || !v('#sdInvDate')) { err.textContent = 'Fill mode, courier name, invoice no. and invoice date.'; return; }
     const file = mm.querySelector('#sdImage').files[0];
-    if (file && file.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 10MB or under.'; return; }
+    if (file && file.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 2MB or under.'; return; }
     const diff = mm.querySelector('#sdShipDiff').checked;
     await svcPost(`/dispatch/confirm/service/${encodeURIComponent(s.service_id)}`, {
       docket_no: v('#sdDocket') ? v('#sdDocket').toLowerCase() : null,
