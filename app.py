@@ -6394,12 +6394,48 @@ def raise_service_request(request: ServiceRequestModel, user: dict = Depends(req
         raise HTTPException(status_code=500, detail="request could not be raised")
 
 
+def _enrich_spare_requests(dataset):
+    try:
+        rows = [r for r in dataset if r.get("request_type") == "spare_part"]
+        ids = list({(r.get("details") or {}).get("service_id") for r in rows if (r.get("details") or {}).get("service_id")})
+        svcs = {}
+        if ids:
+            for s in mongodbclient().get_data(
+                    collection_name=SERVICE_COLLECTION, query={"service_id": {"$in": ids}},
+                    projection={"service_id": 1, "product_name": 1, "product_id": 1, "model_no": 1, "serial_no": 1,
+                                "company_name": 1, "issue": 1, "technician_alloted": 1, "status": 1, "location": 1, "address": 1}):
+                svcs[s.get("service_id")] = s
+        for r in rows:
+            d = r.setdefault("details", {})
+            s = svcs.get(d.get("service_id"))
+            if s:
+                d["service_info"] = {
+                    "product_name": (s.get("product_name") or str(s.get("product_id") or "").strip()),
+                    "model_no": s.get("model_no") or "", "serial_no": s.get("serial_no") or "",
+                    "company_name": s.get("company_name") or "", "issue": s.get("issue") or "",
+                    "technician": s.get("technician_alloted") or "", "status": s.get("status") or "",
+                    "location": s.get("location") or "", "address": s.get("address") or "",
+                }
+            if not d.get("parts") and d.get("note"):
+                parts = []
+                for chunk in str(d["note"]).split(";"):
+                    m = re.match(r"\s*(.+?)\s*\(old hologram\s*(.*?)\)\s*$", chunk)
+                    if m:
+                        parts.append({"part_name": m.group(1), "old_hologram_number": m.group(2)})
+                    elif chunk.strip():
+                        parts.append({"part_name": chunk.strip(), "old_hologram_number": ""})
+                d["parts"] = parts
+    except Exception as e:
+        logging.error(f"spare request enrichment failed: {e}")
+    return dataset
+
+
 @app.get("/request/")
 def all_requests(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
     try:
         db = request_manager()
         # return-proof files are base64 blobs — fetched on demand via /request/{id}/proof
-        dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={}, projection={"details.proof.data": 0})
+        dataset = _enrich_spare_requests(db.get_data(collection_name=REQUESTS_COLLECTION, query={}, projection={"details.proof.data": 0}))
         return {"message": "requests", "dataset": dataset}
     except Exception as e:
         logging.error("fetching requests failed")
@@ -6424,6 +6460,7 @@ def my_requests(user: dict = Depends(get_current_user)):
         db = request_manager()
         dataset = db.get_data(collection_name=REQUESTS_COLLECTION, query={"raised_by": user["username"]},
                               projection={"details.proof.data": 0})
+        dataset = _enrich_spare_requests(dataset)
         return {"message": "my requests", "dataset": dataset}
     except Exception as e:
         logging.error("fetching my requests failed")

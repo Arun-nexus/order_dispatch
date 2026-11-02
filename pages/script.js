@@ -1281,8 +1281,8 @@ const SVC_VIEWS = {
     text: r => [r.raised_by, (r.details || {}).label, (r.details || {}).reason, (r.details || {}).note].join(' '),
     cells: r => {
       const d = r.details || {};
-      if (r.request_type === 'spare_part') return [esc(r.raised_by), 'Spare part request', esc(sparePartNamesS(r) || '-'), '-', '-',
-        `Needs spare part for service #${esc(String(d.service_id || '').slice(0, 8))}`,
+      if (r.request_type === 'spare_part') return [esc(r.raised_by), 'Spare part request', sparePartItemsS(r), '-', '-',
+        sparePartInfoS(r),
         `<span class="${r.status === 'approved' ? 'completed' : r.status === 'rejected' ? 'rejected' : 'pending'}">${esc(r.status)}</span>`, r.created_at ? fmtSchedule(r.created_at) : '-'];
       if (r._inst) return [esc(r.raised_by), 'Installation request', esc(d.label || '-'), '-', '-', 'Wants to take this installation', `<span class="pending">${esc(r.status)}</span>`, r.created_at ? fmtSchedule(r.created_at) : '-'];
       return [esc(r.raised_by), d.kind === 'installation' ? 'Installation reschedule' : 'Service reschedule', esc(d.label || '-'), d.current_date ? fmtSchedule(d.current_date) : '-',
@@ -1663,8 +1663,9 @@ function openRequestDetailS(r) {
   const d = r.details || {};
   if (r.request_type === 'spare_part') {
     svcModal('Spare Part Request', `${dRowS('Raised By', esc(r.raised_by))}${dRowS('Service ID', esc(d.service_id))}
-      ${dRowS('Parts needed', esc(sparePartNamesS(r)))}
-      ${(d.parts || []).map(p => dRowS(esc(p.part_name || 'Part'), 'Faulty hologram ' + esc(p.old_hologram_number || '-'))).join('')}
+      ${d.service_info ? `${dRowS('Product', esc(d.service_info.product_name || '-'))}${dRowS('Model No.', esc(d.service_info.model_no || '-'))}${dRowS('Serial No.', esc(d.service_info.serial_no || '-'))}${dRowS('Company', esc(d.service_info.company_name || '-'))}${dRowS('Technician', esc(d.service_info.technician || '-'))}${dRowS('Issue', esc(d.service_info.issue || '-'))}${dRowS('Service Status', esc(String(d.service_info.status || '-').replace(/_/g, ' ')))}${d.service_info.address ? dRowS('Address', esc(d.service_info.address)) : ''}` : ''}
+      ${dRowS('Requested On', r.created_at ? fmtSchedule(r.created_at) : '-')}
+      ${(d.parts || []).length ? (d.parts || []).map(p => dRowS(esc(p.part_name || 'Part'), 'Faulty (old) hologram: ' + esc(p.old_hologram_number || '-'))).join('') : dRowS('Parts needed', esc(sparePartNamesS(r) || '-'))}
       ${dRowS('Status', esc(r.status))}${r.status === 'rejected' && r.reason ? dRowS('Rejection Reason', esc(r.reason)) : ''}${dRowS('Resolved By', esc(r.resolved_by))}
       ${r.status === 'pending' ? '<p style="font-size:12px;color:#64748b;margin-top:10px;">Approve opens the allocate popup with this service and part added — you only choose the hologram number(s).</p>' : ''}`);
     return;
@@ -1679,6 +1680,21 @@ function sparePartNamesS(r) {
   const d = r.details || {};
   const names = (d.parts || []).map(p => p.part_name).filter(Boolean);
   return names.length ? names.join(', ') : (d.note || '');
+}
+
+function sparePartItemsS(r) {
+  const d = r.details || {};
+  const parts = d.parts || [];
+  if (!parts.length) return esc(sparePartNamesS(r) || '-');
+  return parts.map(p => `<b>${esc(p.part_name || 'Part')}</b>${p.old_hologram_number ? `<br><small style="color:#64748b;">Old hologram: ${esc(p.old_hologram_number)}</small>` : ''}`).join('<br>');
+}
+
+function sparePartInfoS(r) {
+  const d = r.details || {};
+  const i = d.service_info;
+  const id = `Service #${esc(String(d.service_id || '').slice(0, 8))}`;
+  if (!i) return `Needs spare part for ${id}`;
+  return `${id}<br><small style="color:#64748b;">${esc(i.product_name || '-')}${i.model_no ? ' · ' + esc(i.model_no) : ''} · ${esc(i.serial_no || '-')}<br>${esc(i.company_name || '')}${i.issue ? ' — ' + esc(i.issue) : ''}</small>`;
 }
 
 async function approveReschedule(r) {
