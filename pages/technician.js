@@ -628,7 +628,7 @@ function openRequestServiceModal() {
       <input name="purchase_date" type="date" style="padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required>
       <textarea name="issue" placeholder="Issue description" style="min-height:70px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;" required></textarea>
       <textarea name="spare_parts" placeholder="Spare parts needed (optional)" style="min-height:50px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;"></textarea>
-      <label style="font-size:12px;color:#64748b;">Image proof (optional, max 2MB)</label>
+      <label style="font-size:12px;color:#64748b;">Image proof (optional, max 10MB)</label>
       <input type="file" name="image_file" accept="image/*">
       <label style="font-size:12px;color:#64748b;">Video proof (optional, max 20MB)</label>
       <input type="file" name="video_file" accept="video/*">
@@ -666,7 +666,7 @@ function openRequestServiceModal() {
     const MAX_VIDEO_BYTES = 20 * 1024 * 1024;
 
     if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
-      errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`;
+      errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 10MB or under.`;
       errorBox.style.display = 'block';
       return;
     }
@@ -839,7 +839,7 @@ function openDemoReturn(a) {
     <select id="retVia" style="${INP}">
       <option value="">Select</option><option>Courier</option><option>Hand delivery</option><option>Dropped at office</option><option>Other</option>
     </select>
-    <label style="${LBL}">Proof photo (optional, max 2MB)</label>
+    <label style="${LBL}">Proof photo (optional, max 10MB)</label>
     <input type="file" id="retImg" accept="image/*" style="${INP}">
     <label style="${LBL}">Note (optional)</label>
     <textarea id="retNote" rows="2" style="${INP}"></textarea>
@@ -857,7 +857,7 @@ function openDemoReturn(a) {
     const via = content.querySelector('#retVia').value;
     const f = content.querySelector('#retImg').files[0];
     if (!via) { err.textContent = 'Select how the unit was returned.'; return; }
-    if (f && f.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 2MB or under.'; return; }
+    if (f && f.size > 10 * 1024 * 1024) { err.textContent = 'Image must be 10MB or under.'; return; }
     save.disabled = true;
     try {
       const proof = { note: content.querySelector('#retNote').value.trim() };
@@ -1167,7 +1167,7 @@ function openInstallComplete(i) {
     </div>
     <p style="font-size:13px;color:#64748b;">${techEsc(i.product_name)} · ${techEsc(i.company_name)}</p>
     <div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:8px;padding:8px 12px;font-size:12px;margin-top:8px;">Upload a photo of the installed product. The installation is marked completed only after the service manager approves it.</div>
-    <label style="${LBL}">Installation photo * (max 2MB)</label>
+    <label style="${LBL}">Installation photo * (max 10MB)</label>
     <input type="file" id="instDoneImg" accept="image/*" style="${INP}">
     <img id="instDonePrev" style="display:none;max-width:100%;max-height:200px;border-radius:10px;margin-top:8px;">
     <label style="${LBL}">Note (optional)</label>
@@ -1190,7 +1190,7 @@ function openInstallComplete(i) {
     const err = content.querySelector('#instDoneErr');
     const f = fileEl.files[0];
     if (!f) { err.textContent = 'Upload the installation photo first.'; return; }
-    if (f.size > 2 * 1024 * 1024) { err.textContent = `Image is ${(f.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`; return; }
+    if (f.size > 10 * 1024 * 1024) { err.textContent = `Image is ${(f.size / 1024 / 1024).toFixed(1)}MB — must be 10MB or under.`; return; }
     save.disabled = true; save.textContent = 'Sending...';
     try {
       const image = await readFileAsBase64(f);

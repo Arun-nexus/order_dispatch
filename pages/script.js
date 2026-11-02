@@ -822,7 +822,7 @@ async function openCreateModal() {
             </div>
             <div id="createPartList" style="margin-top:8px;display:flex;flex-direction:column;gap:6px;"></div>
           </div>
-          <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 2MB)</label>
+          <label style="font-size:12px;color:var(--text-muted);">Image proof (optional, max 10MB)</label>
           <input type="file" name="image_file" accept="image/*">
           <label style="font-size:12px;color:var(--text-muted);">Video proof (optional, max 20MB)</label>
           <input type="file" name="video_file" accept="video/*">
@@ -870,11 +870,11 @@ async function openCreateModal() {
         return;
       }
 
-      const MAX_IMAGE_BYTES = 2 * 1024 * 1024;   // 2MB
+      const MAX_IMAGE_BYTES = 10 * 1024 * 1024;   // 10MB
       const MAX_VIDEO_BYTES = 20 * 1024 * 1024;  // 20MB
 
       if (imageFile && imageFile.size > MAX_IMAGE_BYTES) {
-        errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 2MB or under.`;
+        errorBox.textContent = `Image is ${(imageFile.size / 1024 / 1024).toFixed(1)}MB — must be 10MB or under.`;
         errorBox.style.display = 'block';
         return;
       }
@@ -1855,7 +1855,7 @@ function openServiceDispatchModal(s) {
     const v = id => mm.querySelector(id).value.trim();
     if (!v('#sdMode') || !v('#sdThrough') || !v('#sdInvoice') || !v('#sdInvDate')) { err.textContent = 'Fill mode, courier name, invoice no. and invoice date.'; return; }
     const file = mm.querySelector('#sdImage').files[0];
-    if (file && file.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 2MB or under.'; return; }
+    if (file && file.size > 2 * 1024 * 1024) { err.textContent = 'Image must be 10MB or under.'; return; }
     const diff = mm.querySelector('#sdShipDiff').checked;
     await svcPost(`/dispatch/confirm/service/${encodeURIComponent(s.service_id)}`, {
       docket_no: v('#sdDocket') ? v('#sdDocket').toLowerCase() : null,
