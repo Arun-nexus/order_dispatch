@@ -1,37 +1,3 @@
-"""
-erp_backend_tools.py  -  BACKEND-HEAVY MCP tools for the Acer Biomedical ERP
-===========================================================================
-
-Kyun? ERP ka frontend (orders.js, inventory.js ...) filter / search / sort / cards / warranty / overdue /
-ledger ka sara kaam browser me karta hai. MCP client (Claude etc.) ke paas browser nahi hota, isliye woh
-raw routes se poora dataset kheench ke khud calculate karne me atak jata hai.
-
-Ye file wahi sara kaam SERVER SIDE karti hai:
-  filter  -> search + filters + sort + pagination + cards + group_by, sab ek call me, chhota compact output
-  view    -> ek record (compact summary + poora record)
-  summary -> sirf page ke cards (counts / totals)
-  add / update / delete + page ke workflow actions -> app.py ke EXISTING routes ko hi call karti hai
-
-Decoupling:
-  * app.py me KOI change nahi. Sirf uske routes call hote hain.
-  * Default = HTTP (ERP_BASE_URL). Chaho to ERP_INPROCESS=1 karke app.py ko import karke
-    in-process call karo (network nahi lagta, phir bhi app.py edit nahi hota).
-  * tools.py se koi import nahi - dono alag alag chal sakti hain.
-
-.env:
-  ERP_BASE_URL, ERP_USERNAME, ERP_PASSWORD, APP_CLIENT_KEY, ERP_TIMEOUT   (tools.py jaise hi)
-  ERP_TOKEN        optional ready token
-  ERP_CACHE_TTL    seconds (default 20) - list routes ka chhota cache, har write par clear ho jata hai
-  ERP_INPROCESS    1 => app.py ko import karke call karo
-  ERP_APP_MODULE   default "app"
-  ERP_APP_PATH     ERP ke app.py ka full path (master AI ke apne app.py se naam clash ho to yahi use karo)
-  ERP_TOOL_PREFIX  tool naam prefix (default "erp_")      ERP_TOOLS  sirf ye pages expose karo, e.g. "orders,dispatch"
-  ERP_DOC_MODE     short (default, chhote local model ke liye) | full
-  ERP_EXPOSE_AUTH_TOKEN  1 (default) = tools me auth_token param (web app inject karta hai) | 0 = model se chhupao, service account use
-  MCP_TRANSPORT / MCP_HOST / MCP_PORT   (stdio | http | sse ...)
-
-Run:  python erp_backend_tools.py
-"""
 import asyncio
 import hashlib
 import importlib
@@ -72,10 +38,6 @@ _auth = {"token": os.getenv("ERP_TOKEN", "").strip() or None}
 _auth_lock = asyncio.Lock()
 _HIDDEN_KEYS = {"password", "confirm_password"}
 
-
-# ======================================================================================
-# 1. TRANSPORT  (HTTP ya in-process, dono me app.py ke routes hi call hote hain)
-# ======================================================================================
 class ErpError(Exception):
     def __init__(self, status: int, detail: Any):
         super().__init__(str(detail))

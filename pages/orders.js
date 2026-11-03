@@ -327,7 +327,12 @@ async function validateAndFixEditSerials(rows, items) {
     if (!newlyTyped.length) continue; // every serial here was already on the order — nothing new to check
 
     try {
-      const params = new URLSearchParams({ product_id: original.product_id || '', model_no: original.model_no || '' });
+      const params = new URLSearchParams({
+        product_id: original.product_id || '',
+        model_no: original.model_no || '',
+        product_name: original.product_name || '',
+        product_type: original.product_type || ''
+      });
       const res = await apiFetch(`/inventory/available_serials?${params}`);
       if (!res.ok) continue; // can't verify right now — leave as-is, backend will still catch a genuinely bad serial
       const data = await res.json();
@@ -511,6 +516,7 @@ function openEditOrderModal(o) {
         product_id: original.product_id,
         product_name: original.product_name,
         model_no: original.model_no || '',
+        product_type: original.product_type || '',
         quantity,
         price,
         tax_rate,

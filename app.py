@@ -1702,6 +1702,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 kept_indices.add(orig_idx)
                 new_items.append((orig_idx, item))
 
+            edit_taken = {}
             if not order.get("dispatch"):
                 inv_db = inventory_manager()
                 # process ALL restocks (freed-up serials/quantity) before ANY
@@ -1713,6 +1714,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 edit_taken = {}
                 restores = []   # (product_id, product_name, model_no, qty, serials)
                 deductions = [] # (product_id, product_name, model_no, qty, serials)
+                type_map = {}   # (product_id, product_name, model_no) -> product_type
 
                 # any old line whose index isn't among the surviving rows was
                 # removed entirely in this edit — its full quantity/serials
@@ -1736,6 +1738,9 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                     product_id = old_item.get("product_id", new_item.get("product_id", ""))
                     product_name = old_item.get("product_name", new_item.get("product_name", ""))
                     model_no = old_item.get("model_no", new_item.get("model_no", "")) or ""
+                    _pt = old_item.get("product_type") or new_item.get("product_type") or ""
+                    if _pt:
+                        type_map[(product_id, product_name, model_no)] = _pt
                     old_serials = set(old_item.get("serial_numbers", []) or [])
                     new_serials = set(new_item.get("serial_numbers", []) or [])
                     old_qty = int(old_item.get("quantity", 0) or 0)
@@ -1764,15 +1769,19 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 for product_id, product_name, model_no, qty, serials in restores:
                     if qty <= 0:
                         continue
-                    inv_db.restock_returned_units(
-                        collection_name=INVENTORY_COLLECTION,
-                        product_id=product_id,
-                        product_name=product_name,
-                        model_no=model_no,
-                        quantity=qty,
-                        serial_numbers=serials,
-                        serial_lots=[{"serial_number": sn, "lot_no": old_lot_map.get(sn, "")} for sn in serials if old_lot_map.get(sn)],
-                    )
+                    try:
+                        inv_db.restock_returned_units(
+                            collection_name=INVENTORY_COLLECTION,
+                            product_id=product_id,
+                            product_name=product_name,
+                            model_no=model_no,
+                            quantity=qty,
+                            serial_numbers=serials,
+                            serial_lots=[{"serial_number": sn, "lot_no": old_lot_map.get(sn, "")} for sn in serials if old_lot_map.get(sn)],
+                        )
+                    except Exception as e:
+                        logging.exception("edit-order restock failed")
+                        raise HTTPException(status_code=400, detail=f"{product_name or product_id}: restock failed: {e}")
 
                 for product_id, product_name, model_no, qty, serials in deductions:
                     if qty <= 0:
@@ -1785,6 +1794,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                                 serial_numbers=serials,
                                 model_no=model_no or None,
                                 product_name=product_name or None,
+                                product_type=type_map.get((product_id, product_name, model_no)) or None,
                             )
                         else:
                             inv_db.allocate_units(
@@ -1793,6 +1803,7 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                                 quantity=qty,
                                 model_no=model_no or None,
                                 product_name=product_name or None,
+                                product_type=type_map.get((product_id, product_name, model_no)) or None,
                             )
                     except Exception as e:
                         raise HTTPException(status_code=400, detail=f"{product_name or product_id}: {e}")
@@ -1881,8 +1892,8 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
     except HTTPException:
         raise
     except Exception as e:
-        logging.error("order cannot be updated")
-        raise HTTPException(status_code=500, detail="order value cannot be updated")
+        logging.exception("order cannot be updated")
+        raise HTTPException(status_code=500, detail=f"order value cannot be updated: {type(e).__name__}: {e}")
 
 
 @app.get("/order/")
