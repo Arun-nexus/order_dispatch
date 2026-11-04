@@ -150,6 +150,20 @@ function sidebarFile(a) {
   return (a.getAttribute('href') || '').split(/[?#]/)[0].split('/').pop();
 }
 
+// Hide a sidebar <li> for good. A plain `li.style.display = 'none'` loses on mobile because the
+// mobile menu css (mobile-fold.css) forces `display:... !important` on the sidebar items, so the
+// links the admin never granted still showed. An inline !important beats any stylesheet rule.
+function hideNavItem(li) {
+  li.classList.add('nav-denied');
+  li.setAttribute('hidden', '');
+  li.style.setProperty('display', 'none', 'important');
+}
+function showNavItem(li) {
+  li.classList.remove('nav-denied');
+  li.removeAttribute('hidden');
+  li.style.removeProperty('display');
+}
+
 function filterSidebarByRole() {
   const role = getRole();
   const allowed = allowedPages(role);
@@ -167,13 +181,15 @@ function filterSidebarByRole() {
     if (file === 'work.html' || file === 'work_report.html') {
       const correct = manager ? 'work.html' : 'work_report.html';
       const permitted = manager || allowed.includes('work_report.html');
-      if (file !== correct || !permitted || seen.has(correct)) { li.style.display = 'none'; return; }
+      if (file !== correct || !permitted || seen.has(correct)) { hideNavItem(li); return; }
+      showNavItem(li);
       seen.add(correct);
       return;
     }
 
     // every other link: hide when not allowed, and hide repeated links to the same page
-    if (!allowed.includes(file) || seen.has(file)) { li.style.display = 'none'; return; }
+    if (!allowed.includes(file) || seen.has(file)) { hideNavItem(li); return; }
+    showNavItem(li);
     seen.add(file);
   });
 }
@@ -241,7 +257,8 @@ async function apiFetch(url, options = {}) {
   st.textContent = `
     .sidebar { overflow-y: auto; overflow-x: hidden; max-height: 100vh; scrollbar-width: thin; }
     .sidebar::-webkit-scrollbar { width: 6px; }
-    .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.35); border-radius: 6px; }`;
+    .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.35); border-radius: 6px; }
+    .sidebar li.nav-denied, .sidebar li[hidden] { display: none !important; }`;
   document.head.appendChild(st);
 })();
 

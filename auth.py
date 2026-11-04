@@ -16,14 +16,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 _ACCOUNTS_COLLECTION = load_params()["account_creation_collection_name"]
 
-# ---------------------------------------------------------------------------
-# Per-user page access (set from the hidden /access-control page).
-# A user whose allowed_pages contains a page also gets the API permissions of
-# the role listed here for that page, ON TOP of their own role. This makes a
-# granted page actually work, not just open. "admin" is never lent out, and
-# admin-only pages (attendance.html, create_account.html) have no entry.
-# Edit this map if a page's data calls need a different role.
-# ---------------------------------------------------------------------------
+
 PAGE_BORROW_ROLES = {
     "main_dashboard.html": "accounts",
     "orders.html": "accounts",

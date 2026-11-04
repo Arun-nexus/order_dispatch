@@ -544,6 +544,10 @@ class CreateAssemblyRequest(BaseModel):
     quantity: int
     parts_used: list[AssemblyPartUsed] = []
     serials: list[AssemblySerialItem]
+    supply_type: str = "normal"          # "normal" | "govt" -> which product sticker layout is used
+    mfg_date: str = ""                   # month & year printed on the sticker, e.g. "11/2026"
+    mrp: str = ""                        # M.R.P printed on the Normal sticker (empty for govt)
+    sticker: Optional[dict] = None       # last edited sticker fields (license no., address, ...)
 
 
 class AssemblyUpdateRequest(BaseModel):
@@ -2528,7 +2532,13 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
         try:
             assembly_manager().update(
                 collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id},
-                update_values={"part_sources": [{"part_name": k[0], "belongs_to": k[1], "lots": v} for k, v in part_lots.items()]})
+                update_values={
+                    "part_sources": [{"part_name": k[0], "belongs_to": k[1], "lots": v} for k, v in part_lots.items()],
+                    "supply_type": "govt" if request.supply_type == "govt" else "normal",
+                    "mfg_date": request.mfg_date,
+                    "mrp": "" if request.supply_type == "govt" else request.mrp,
+                    "sticker": request.sticker,
+                })
         except Exception as src_err:
             logging.error(f"assembly {assembly_id} created but part sources could not be saved: {src_err}")
         logging.info("assembly created successfully")

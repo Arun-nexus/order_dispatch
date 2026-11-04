@@ -7,7 +7,7 @@ function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, tit
 // =========================================================
 // assembly.js
 // Powers pages/assembly.html — cards, table/filtering, and the
-// 3-step "Add Assembly" wizard:
+// 4-step "Add Assembly" wizard:
 //   1) Product details (name, ID, model no., quantity to build)
 //   2) Parts used — pulled from inventory's spare_parts stock (only parts
 //      that already carry hologram numbers show up here) and/or added
@@ -16,6 +16,9 @@ function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, tit
 //   3) Serial numbers only, auto-generated per unit, editable. Hologram
 //      numbers are NOT entered here — the server pulls one per unit from
 //      the hologram-bearing part's stock when the assembly is saved.
+//   4) Sticker — Normal / Govt. supply label (see assembly_sticker.js): editable,
+//      one sticker per serial, 2 per A4 page, download as PDF or Word.
+//      Supply type, mfg month/year and M.R.P are entered in step 1.
 //
 // Edit Assembly (admin + assembly roles only, pending assemblies only):
 //   parts can be added / removed / changed while the assembly is in progress;
@@ -61,6 +64,10 @@ function fromServerShapeAssembly(a) {
     hologramPart: a.hologram_part || '',
     hologramPartBelongs: a.hologram_part_belongs_to || '',
     editHistory: a.edit_history || [],
+    supplyType: a.supply_type || 'normal',
+    mfgDate: a.mfg_date || '',
+    mrp: a.mrp || '',
+    sticker: a.sticker || null,
   };
 }
 
@@ -74,6 +81,10 @@ function toServerShapeAssembly(a) {
       part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source, belongs_to: p.belongsTo || '',
     })),
     serials: (a.serials || []).map((s, i) => ({ serial_number: s, lot_no: String((a.lots || [])[i] || '').trim() })),
+    supply_type: a.supplyType || 'normal',
+    mfg_date: a.mfgDate || '',
+    mrp: a.mrp || '',
+    sticker: a.sticker || null,
   };
 }
 
@@ -421,6 +432,7 @@ function renderTable() {
         <td>
           <button class="icon-btn" data-action="view" data-id="${a.id}" title="View"><i class="fa-solid fa-eye"></i></button>
           <button class="icon-btn" data-action="export" data-id="${a.id}" title="Export Serials"><i class="fa-solid fa-file-excel"></i></button>
+          <button class="icon-btn" data-action="sticker" data-id="${a.id}" title="Stickers (PDF / Word)"><i class="fa-solid fa-tag"></i></button>
           ${a.status === 'pending' && canEditAssembly() ? `<button class="icon-btn" data-action="edit" data-id="${a.id}" title="Edit Assembly"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
           ${a.status === 'pending' ? `<button class="icon-btn" data-action="complete" data-id="${a.id}" title="Submit for Approval"><i class="fa-solid fa-paper-plane"></i></button>` : ''}
           ${isApprovalStatus(a.status) && canApproveAssembly() ? `<button class="icon-btn" data-action="approve" data-id="${a.id}" title="Approve Serials"><i class="fa-solid fa-clipboard-check"></i></button>` : ''}
@@ -431,6 +443,7 @@ function renderTable() {
 
   tbody.querySelectorAll('[data-action="view"]').forEach(b => b.addEventListener('click', () => openViewAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="export"]').forEach(b => b.addEventListener('click', () => exportAssemblySerials(b.dataset.id)));
+  tbody.querySelectorAll('[data-action="sticker"]').forEach(b => b.addEventListener('click', () => openStickerForAssembly(b.dataset.id)));
   tbody.querySelectorAll('[data-action="edit"]').forEach(b => b.addEventListener('click', () => openEditAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="complete"]').forEach(b => b.addEventListener('click', () => markAssemblyCompleted(b.dataset.id)));
   tbody.querySelectorAll('[data-action="approve"]').forEach(b => b.addEventListener('click', () => openApproveAssemblyModal(b.dataset.id)));
@@ -453,6 +466,7 @@ function openViewAssemblyModal(id) {
     <div class="detail"><small>Product</small><p>${a.productName}</p></div>
     <div class="detail"><small>Model Number</small><p>${a.modelNumber || '—'}</p></div>
     <div class="detail"><small>Quantity</small><p>${a.quantity}</p></div>
+    <div class="detail"><small>Supply Type</small><p>${a.supplyType === 'govt' ? 'Govt. Supply' : 'Normal'}${a.mfgDate ? ' · Mfg ' + aesc(a.mfgDate) : ''}${a.supplyType !== 'govt' && a.mrp ? ' · M.R.P ' + aesc(a.mrp) : ''}</p></div>
     ${(a.editHistory || []).length ? (() => {
       const last = a.editHistory[a.editHistory.length - 1];
       return `<div class="detail"><small>Last Edited</small><p>${last.edited_by || '—'} on ${(last.edited_at || '').slice(0, 10)} (${a.editHistory.length} edit${a.editHistory.length > 1 ? 's' : ''})</p></div>`;
@@ -589,6 +603,16 @@ document.getElementById('deleteAssemblyConfirm')?.addEventListener('click', asyn
   }
 });
 
+function openStickerForAssembly(id) {
+  const a = assemblies.find(x => x.id === id);
+  if (!a) return;
+  if (typeof AsmSticker === 'undefined') {
+    showResponseModal('Sticker module missing', 'assembly_sticker.js did not load. Reload the page and try again.', false);
+    return;
+  }
+  AsmSticker.openForAssembly(a);
+}
+
 function exportAssemblySerials(id) {
   const a = assemblies.find(x => x.id === id);
   if (!a) return;
@@ -615,7 +639,7 @@ function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 // =========================================================
 
 function stepDots(active) {
-  const labels = ['Product', 'Parts Used', 'Serial Numbers'];
+  const labels = ['Product', 'Parts Used', 'Serial Numbers', 'Sticker'];
   return `
     <div style="display:flex;gap:8px;margin-bottom:20px;">
       ${labels.map((label, i) => `
@@ -657,6 +681,10 @@ async function openAddAssemblyModal() {
     mode: 'existing',   // 'existing' = pick from inventory, 'new' = type details
     productName: '', productId: DEFAULT_PRODUCT_ID, modelNumber: '', quantity: 1,
     partsUsed: [], serials: [], lots: [],   // lots[i] = lot no. of unit i (compulsory, may differ per unit)
+    supplyType: 'normal',                   // 'normal' | 'govt' -> decides which sticker layout is used
+    mfgMonth: new Date().toISOString().slice(0, 7),   // YYYY-MM
+    mrp: '',
+    sticker: null,                          // editable sticker state, created when step 4 opens
   };
   assemblyStep = 1;
   await Promise.all([loadAvailableParts(), loadInventoryProducts()]);   // refresh stock right before the wizard opens
@@ -668,7 +696,8 @@ async function openAddAssemblyModal() {
 function renderAssemblyStep() {
   if (assemblyStep === 1) return renderAStep1();
   if (assemblyStep === 2) return renderAStep2();
-  return renderAStep3();
+  if (assemblyStep === 3) return renderAStep3();
+  return renderAStep4();
 }
 
 // ---------- STEP 1: product details ----------
@@ -701,6 +730,20 @@ function renderAStep1() {
       `}
       <label style="font-size:13px;color:#64748b;">Quantity to Assemble</label>
       <input type="number" id="a1Quantity" min="1" value="${assemblyDraft.quantity}" required>
+      <label style="font-size:13px;color:#64748b;margin-top:4px;">Supply Type (decides the sticker)</label>
+      <div style="display:flex;gap:8px;">
+        ${[['normal', 'Normal', 'fa-store'], ['govt', 'Govt. Supply', 'fa-landmark']].map(([k, label, ic]) => `
+          <button type="button" data-supply="${k}" class="a1SupplyBtn"
+            style="flex:1;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#64748b;">
+            <i class="fa-solid ${ic}"></i> ${label}
+          </button>`).join('')}
+      </div>
+      <label style="font-size:13px;color:#64748b;">Manufacturing Month &amp; Year (printed on sticker)</label>
+      <input type="month" id="a1MfgMonth" value="${escAttr(assemblyDraft.mfgMonth)}">
+      <div id="a1MrpWrap" style="display:flex;flex-direction:column;gap:10px;">
+        <label style="font-size:13px;color:#64748b;">M.R.P — inclusive of all taxes (printed on Normal sticker)</label>
+        <input id="a1Mrp" placeholder="e.g. Rs. 45,000/-" value="${escAttr(assemblyDraft.mrp)}">
+      </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px;">
         <button type="button" class="cancel-btn" id="aCancelBtn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
         <button type="submit" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Next: Parts Used</button>
@@ -715,11 +758,26 @@ function renderAStep1() {
       showResponseModal('No products', 'No finished products found in inventory yet — use New Product.', false);
       return;
     }
+    readStep1Extras();
     assemblyDraft.mode = btn.dataset.mode;
     assemblyDraft.productName = assemblyDraft.modelNumber = '';
     assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
     renderAStep1();
   }));
+  const paintSupply = () => {
+    box.querySelectorAll('.a1SupplyBtn').forEach(b => {
+      const on = b.dataset.supply === assemblyDraft.supplyType;
+      b.style.borderColor = on ? '#1665ff' : '#e2e8f0';
+      b.style.background = on ? '#eef3fb' : '#fff';
+      b.style.color = on ? '#1665ff' : '#64748b';
+    });
+    box.querySelector('#a1MrpWrap').style.display = assemblyDraft.supplyType === 'govt' ? 'none' : 'flex';
+  };
+  box.querySelectorAll('.a1SupplyBtn').forEach(b => b.addEventListener('click', () => {
+    assemblyDraft.supplyType = b.dataset.supply;
+    paintSupply();
+  }));
+  paintSupply();
   const existingSel = box.querySelector('#a1Existing');
   if (existingSel) existingSel.addEventListener('change', () => {
     const p = inventoryProducts[Number(existingSel.value)];
@@ -736,9 +794,18 @@ function renderAStep1() {
     assemblyDraft.productId = DEFAULT_PRODUCT_ID;
     assemblyDraft.modelNumber = document.getElementById('a1ModelNumber').value.trim();
     assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
+    readStep1Extras();
+    assemblyDraft.sticker = null;   // product / supply details may have changed -> rebuild the sticker in step 4
     assemblyStep = 2;
     renderAssemblyStep();
   });
+}
+
+function readStep1Extras() {
+  const m = document.getElementById('a1MfgMonth');
+  const r = document.getElementById('a1Mrp');
+  if (m) assemblyDraft.mfgMonth = m.value;
+  if (r) assemblyDraft.mrp = r.value.trim();
 }
 
 // ---------- STEP 2: parts used (from inventory spare_parts + local) ----------
@@ -990,8 +1057,8 @@ function renderAStep3() {
     </div>
     <div style="display:flex;justify-content:space-between;gap:10px;margin-top:20px;">
       <button type="button" id="aBackTo2Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Back</button>
-      <button type="button" id="saveAssemblyBtn" style="padding:10px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#1665ff,#4c92ff);color:#fff;cursor:pointer;font-weight:600;">
-        <i class="fa-solid fa-check"></i> Save Assembly
+      <button type="button" id="aNextTo4Btn" style="padding:10px 16px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-weight:600;">
+        Next: Sticker
       </button>
     </div>
   `;
@@ -1027,9 +1094,55 @@ function renderAStep3() {
     assemblyDraft.serials = generateSerialNumbers(assemblyDraft.quantity, assemblyDraft.productId);
     renderSerialRows();
   });
-  box.querySelector('#saveAssemblyBtn').addEventListener('click', finalizeAssembly);
+  box.querySelector('#aNextTo4Btn').addEventListener('click', () => {
+    if (!validateSerialsStep()) return;
+    assemblyStep = 4;
+    renderAssemblyStep();
+  });
 
   renderSerialRows();
+}
+
+// ---------- STEP 4: sticker (Normal / Govt.), editable, PDF + Word download ----------
+function renderAStep4() {
+  if (typeof AsmSticker === 'undefined') {
+    showResponseModal('Sticker module missing', 'assembly_sticker.js did not load. Reload the page and try again.', false);
+    assemblyStep = 3;
+    return renderAssemblyStep();
+  }
+  if (!assemblyDraft.sticker) {
+    assemblyDraft.sticker = AsmSticker.makeState({
+      type: assemblyDraft.supplyType,
+      productName: assemblyDraft.productName,
+      modelNo: assemblyDraft.modelNumber,
+      mfgDate: AsmSticker.monthYear(assemblyDraft.mfgMonth),
+      mrp: assemblyDraft.mrp,
+    });
+  }
+  const state = assemblyDraft.sticker;
+  const box = ASSEMBLY_MODAL();
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h3>Add Assembly</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    ${stepDots(4)}
+    <div id="stkHost"></div>
+    <div class="stk-actions" style="justify-content:space-between;">
+      <button type="button" id="aBackTo3Btn" class="stk-btn ghost">Back</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="button" class="stk-btn pdf" data-stk="pdf"><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
+        <button type="button" class="stk-btn doc" data-stk="docx"><i class="fa-solid fa-file-word"></i> Download Word</button>
+        <button type="button" id="saveAssemblyBtn" class="stk-btn" style="background:linear-gradient(135deg,#1665ff,#4c92ff);">
+          <i class="fa-solid fa-check"></i> Save Assembly
+        </button>
+      </div>
+    </div>`;
+  AsmSticker.renderEditor(box.querySelector('#stkHost'), state, assemblyDraft.serials);
+  AsmSticker.wireDownloadButtons(box, state, assemblyDraft.serials);
+  box.querySelector('.close').addEventListener('click', () => closeModal('assemblyModal'));
+  box.querySelector('#aBackTo3Btn').addEventListener('click', () => { assemblyStep = 3; renderAssemblyStep(); });
+  box.querySelector('#saveAssemblyBtn').addEventListener('click', finalizeAssembly);
 }
 
 function lotBlocksTotal() {
@@ -1110,27 +1223,37 @@ function syncSerialsFromDom() {
 }
 
 // ---------- FINALIZE ----------
-async function finalizeAssembly() {
+function validateSerialsStep() {
   syncSerialsFromDom();
   if ((assemblyDraft.lots || []).some(l => !String(l || '').trim())) applyLotBlocks(false);
 
   if (assemblyDraft.serials.some(s => !s)) {
     showResponseModal('Missing values', 'Every unit needs a serial number.', false);
-    return;
+    return false;
   }
   // Lot No. is compulsory for every unit. Deliberately NO uniqueness / consistency check on lots:
   // one assembly may carry several lot numbers, and the same lot can repeat across units.
   const lotMissing = (assemblyDraft.lots || []).findIndex(l => !String(l || '').trim());
   if (lotMissing !== -1 || (assemblyDraft.lots || []).length !== assemblyDraft.serials.length) {
     showResponseModal('Lot No. required', `Every unit needs a Lot No.${lotMissing !== -1 ? ' Unit ' + (lotMissing + 1) + ' is missing one.' : ''}`, false);
-    return;
+    return false;
   }
   const serialSet = new Set(assemblyDraft.serials);
   if (serialSet.size !== assemblyDraft.serials.length) {
     showResponseModal('Duplicate values', 'Serial numbers must be unique within this batch.', false);
-    return;
+    return false;
   }
+  return true;
+}
 
+async function finalizeAssembly() {
+  // supply type / mfg date / M.R.P that were finally printed on the sticker are what gets saved
+  const st = assemblyDraft.sticker;
+  if (st) {
+    assemblyDraft.supplyType = st.type;
+    assemblyDraft.mfgDate = st.mfgDate;
+    assemblyDraft.mrp = st.type === 'govt' ? '' : st.mrp;
+  }
   try {
     const res = await apiFetch('/assembly/create', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
