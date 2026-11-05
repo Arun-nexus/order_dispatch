@@ -302,6 +302,7 @@ class ServicePartUsed(BaseModel):
     part_name: str
     old_hologram_number: str
     new_hologram_number: str
+    belongs_to: str = ""
 
 
 class ServiceUpdateRequest(BaseModel):
@@ -5712,8 +5713,10 @@ def available_hologram_parts(user: dict = Depends(require_role("admin", "account
             name = entry.get("product_name", "")
             if not name:
                 continue
-            pool.setdefault(name, set()).update(holograms)
-        dataset = [{"part_name": name, "hologram_numbers": sorted(numbers)} for name, numbers in pool.items() if numbers]
+            belongs_to = (entry.get("parent_product_name") or "").strip()
+            pool.setdefault((name, belongs_to), set()).update(holograms)
+        dataset = [{"part_name": name, "belongs_to": belongs_to, "hologram_numbers": sorted(numbers)}
+                   for (name, belongs_to), numbers in pool.items() if numbers]
         dataset.sort(key=lambda p: p["part_name"].lower())
         return {"message": "available hologram-tagged service parts", "dataset": dataset}
     except Exception as e:

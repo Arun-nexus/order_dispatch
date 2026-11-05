@@ -968,7 +968,7 @@ function wireModals() {
       <div class="part-row" style="display:flex;gap:6px;align-items:center;">
         <select class="part-name-select" style="flex:1;">
           <option value="">Select part…</option>
-          ${svcState.hologramPool.map(p => `<option value="${p.part_name}">${p.part_name} (${p.hologram_numbers.length} available)</option>`).join('')}
+          ${svcState.hologramPool.map((p, i) => `<option value="${i}">${esc(p.part_name)}${p.belongs_to ? ' — belongs to: ' + esc(p.belongs_to) : ''} (${p.hologram_numbers.length} available)</option>`).join('')}
         </select>
         <input type="text" class="part-old-hologram-input" placeholder="Old hologram no." style="flex:1;">
         <select class="part-new-hologram-select" style="flex:1;" disabled>
@@ -986,7 +986,7 @@ function wireModals() {
       const nameSelect = row.querySelector('.part-name-select');
       const hologramSelect = row.querySelector('.part-new-hologram-select');
       nameSelect.addEventListener('change', () => {
-        const chosen = svcState.hologramPool.find(p => p.part_name === nameSelect.value);
+        const chosen = nameSelect.value === '' ? null : svcState.hologramPool[Number(nameSelect.value)];
         const numbers = chosen ? chosen.hologram_numbers : [];
         hologramSelect.disabled = !numbers.length;
         hologramSelect.innerHTML = numbers.length
@@ -1024,11 +1024,16 @@ function wireModals() {
 
       let parts_used = [];
       if (spareUsed) {
-        parts_used = [...partsList.querySelectorAll('.part-row')].map(row => ({
-          part_name: row.querySelector('.part-name-select').value.trim(),
+        parts_used = [...partsList.querySelectorAll('.part-row')].map(row => {
+          const pv = row.querySelector('.part-name-select').value;
+          const pe = pv === '' ? null : svcState.hologramPool[Number(pv)];
+          return {
+          part_name: pe ? pe.part_name : '',
+          belongs_to: pe ? (pe.belongs_to || '') : '',
           old_hologram_number: row.querySelector('.part-old-hologram-input').value.trim(),
           new_hologram_number: row.querySelector('.part-new-hologram-select').value.trim()
-        }));
+          };
+        });
         if (service_status === 'completed') {
           if (!parts_used.length || parts_used.some(p => !p.part_name || !p.old_hologram_number || !p.new_hologram_number)) {
             alert('Every spare part needs a part selected, its old hologram number, and a new hologram number chosen from stock.');
