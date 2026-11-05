@@ -427,7 +427,8 @@ class service_detail(mongodbclient):
         if not svc.get("spare_needed"):
             return []
         return [{"part_name": p["part_name"], "old_hologram_number": p["old_hologram_number"],
-                 "new_hologram_number": p.get("new_hologram_number") or ""} for p in (svc.get("faulty_parts") or [])]
+                 "new_hologram_number": p.get("new_hologram_number") or "",
+                 "destination": p.get("destination") or "faulty"} for p in (svc.get("faulty_parts") or [])]
 
     def reject_report(self, collection_name, service_id, reason: str):
         svc = self._get_one(collection_name, service_id)

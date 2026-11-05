@@ -303,6 +303,7 @@ class ServicePartUsed(BaseModel):
     old_hologram_number: str
     new_hologram_number: str
     belongs_to: str = ""
+    destination: str = "faulty"
 
 
 class ServiceUpdateRequest(BaseModel):
@@ -969,8 +970,38 @@ def _faulty_already_filed(part_name: str, old_hologram: str) -> bool:
         return False
     found = inventory_manager().get_data(
         collection_name=INVENTORY_COLLECTION,
-        query={"product_type": "damaged", "product_id": old_hologram, "product_name": part_name})
+        query={"product_type": "damaged", "product_name": part_name,
+               "$or": [{"product_id": old_hologram}, {"hologram_numbers": old_hologram}]})
     return bool(found)
+
+
+def _file_removed_part(part_name: str, old_hologram: str, destination: str = "faulty", warranty_until=None, reason: str = ""):
+    col = mongodbclient().database[INVENTORY_COLLECTION]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if destination == "inventory":
+        lot = col.find_one({"product_name": part_name, "product_type": {"$in": list(_HOLOGRAM_PART_TYPES)}},
+                           sort=[("purchase_date", -1)])
+        if lot:
+            if old_hologram in (lot.get("hologram_numbers") or []):
+                return
+            col.update_one({"_id": lot["_id"]}, {"$inc": {"quantity": 1}, "$addToSet": {"hologram_numbers": old_hologram}})
+            return
+        inventory_manager(product_name=part_name, product_id=f"RET-{uuid.uuid4().hex[:8].upper()}", quantity=1,
+                          purchase_date=today, lot_no="", supplier="", price="", tax_rate=0,
+                          product_type="spare_parts", hologram_numbers=[old_hologram]).add(collection_name=INVENTORY_COLLECTION)
+        return
+    lot = col.find_one({"product_name": part_name, "product_type": "damaged", "warranty_until": warranty_until or None})
+    if lot:
+        have = list(lot.get("hologram_numbers") or [])
+        if not have and lot.get("product_id"):
+            have = [lot["product_id"]]
+        if old_hologram in have:
+            return
+        col.update_one({"_id": lot["_id"]}, {"$inc": {"quantity": 1}, "$set": {"hologram_numbers": have + [old_hologram]}})
+        return
+    inventory_manager(product_name=part_name, product_id=old_hologram, quantity=1, product_type="damaged",
+                      warranty_until=warranty_until, reason=reason,
+                      hologram_numbers=[old_hologram]).add(collection_name=INVENTORY_COLLECTION)
 
 
 def _record_faulty_filed(service_id: str, holograms: list):
@@ -1054,11 +1085,11 @@ def _swap_faulty_part(service_id: str, parts_used: list):
         reason = "" if under_warranty else f"damaged part removed during service {service_id}"
 
         # already filed as faulty (e.g. the manager used "Add to faulty" on the service page) -> don't add it twice
-        if not _faulty_already_filed(part_name, old_hologram):
-            inv_db = inventory_manager(product_name=part_name, product_id=old_hologram,
-                                        quantity=1, product_type="damaged",
-                                        warranty_until=warranty_until, reason=reason)
-            inv_db.add(collection_name=INVENTORY_COLLECTION)
+        destination = (part.get("destination") or "faulty").strip().lower()
+        if destination == "inventory":
+            _file_removed_part(part_name, old_hologram, "inventory")
+        elif not _faulty_already_filed(part_name, old_hologram):
+            _file_removed_part(part_name, old_hologram, "faulty", warranty_until, reason)
         filed_now.append(old_hologram)
 
     if filed_now:
@@ -3829,8 +3860,7 @@ def add_faulty_parts(service_id: str, request: AddFaultyPartsRequest, user: dict
             warranty_until = _damaged_part_warranty(old)
             under_warranty = bool(warranty_until) and warranty_until >= today
             reason = "" if under_warranty else f"damaged part removed during service {service_id}"
-            inventory_manager(product_name=name, product_id=old, quantity=1, product_type="damaged",
-                              warranty_until=warranty_until, reason=reason).add(collection_name=INVENTORY_COLLECTION)
+            _file_removed_part(name, old, "faulty", warranty_until, reason)
             added.append(old)
         _record_faulty_filed(service_id, added + skipped)
         return {"message": "faulty part(s) added to inventory" if added else "already in faulty inventory",
@@ -5690,6 +5720,24 @@ def active_services(user: dict = Depends(get_current_user)):
     except Exception as e:
         logging.error("fetching active services failed")
         raise HTTPException(status_code=500, detail="active services cannot be fetched")
+
+
+@app.get("/service/allocated_parts/{service_id}")
+def service_allocated_parts(service_id: str, user: dict = Depends(require_role("admin", "accounts", "service_manager", "technician", "distributor"))):
+    try:
+        rows = allocation_manager().get_data(collection_name=ALLOCATION_COLLECTION,
+                                             query={"allocation_type": "spare_part", "spare_part.service_id": service_id})
+        parts = []
+        for a in rows:
+            sp = a.get("spare_part") or {}
+            holos = [str(h).strip() for h in (sp.get("hologram_numbers") or []) + (sp.get("manual_holograms") or []) if h and str(h).strip()]
+            qty = max(int(sp.get("quantity") or 0), len(holos), 1)
+            for i in range(qty):
+                parts.append({"part_name": sp.get("part_name", ""), "new_hologram_number": holos[i] if i < len(holos) else ""})
+        return {"message": "parts allocated to this service", "dataset": parts}
+    except Exception:
+        logging.error("allocated parts of service cannot be fetched")
+        raise HTTPException(status_code=500, detail="could not fetch allocated parts")
 
 
 @app.get("/service/available_hologram_parts")

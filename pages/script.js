@@ -527,11 +527,18 @@ function openReasonModal(s) {
   modal.style.display = 'flex';
 }
 
-function openStatusModal(s) {
+async function openStatusModal(s) {
   svcState.activeServiceId = s.service_id;
   const modal = document.getElementById('statusModal');
   if (!modal) return;
-  loadAvailableHologramParts();  // refresh stock right before the technician picks a part
+  loadAvailableHologramParts();
+  let parts = [];
+  try {
+    const res = await apiFetch(`/service/allocated_parts/${encodeURIComponent(s.service_id)}`);
+    const d = await res.json();
+    if (res.ok) parts = d.dataset || [];
+  } catch (err) {}
+  if (window.setStatusAllocParts) window.setStatusAllocParts(parts);
   modal.style.display = 'flex';
 }
 
@@ -1013,6 +1020,34 @@ function wireModals() {
     }));
     renderSpareUsed();
 
+    const allocBox = document.createElement('div');
+    allocBox.className = 'alloc-parts-list';
+    allocBox.style.cssText = 'display:none;flex-direction:column;gap:10px;';
+    partsList.before(allocBox);
+    const toggleBox = statusForm.querySelector('.spare-used-toggle');
+    let allocParts = [];
+    const renderAlloc = () => {
+      const has = allocParts.length > 0;
+      allocBox.style.display = has ? 'flex' : 'none';
+      toggleBox.style.display = has ? 'none' : 'flex';
+      if (!has) { allocBox.innerHTML = ''; spareUsed = false; renderSpareUsed(); return; }
+      spareUsed = true;
+      partsList.style.display = 'none';
+      addPartBtn.style.display = 'none';
+      sparePartsText.style.display = 'none';
+      allocBox.innerHTML = allocParts.map(p => `
+        <div class="alloc-row" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;border:1px solid var(--border);border-radius:8px;padding:8px;">
+          <b style="flex:1 1 100%;">${esc(p.part_name)}</b>
+          <input type="text" class="alloc-new" placeholder="New hologram no." value="${esc(p.new_hologram_number || '')}" ${p.new_hologram_number ? 'readonly' : ''} style="flex:1;min-width:120px;">
+          <input type="text" class="alloc-old" placeholder="Old hologram no." style="flex:1;min-width:120px;">
+          <select class="alloc-dest" style="flex:1 1 100%;">
+            <option value="faulty">Add old part to Faulty</option>
+            <option value="inventory">Add old part to Normal Inventory</option>
+          </select>
+        </div>`).join('');
+    };
+    window.setStatusAllocParts = parts => { allocParts = parts || []; renderAlloc(); };
+
     statusForm.addEventListener('submit', async e => {
       e.preventDefault();
       const select = statusForm.querySelector('select');
@@ -1023,7 +1058,26 @@ function wireModals() {
       const service_status = statusMap[select.value] || select.value.toLowerCase().replace(' ', '_');
 
       let parts_used = [];
-      if (spareUsed) {
+      if (allocParts.length) {
+        if (service_status === 'completed') {
+          parts_used = [...allocBox.querySelectorAll('.alloc-row')].map((row, i) => ({
+            part_name: allocParts[i].part_name,
+            belongs_to: '',
+            old_hologram_number: row.querySelector('.alloc-old').value.trim(),
+            new_hologram_number: row.querySelector('.alloc-new').value.trim(),
+            destination: row.querySelector('.alloc-dest').value
+          }));
+          const olds = parts_used.map(p => p.old_hologram_number);
+          if (parts_used.some(p => !p.old_hologram_number || !p.new_hologram_number)) {
+            alert('Enter the old hologram number (and new hologram number) for every part.');
+            return;
+          }
+          if (new Set(olds).size !== olds.length) {
+            alert('Old hologram numbers must be different for each part.');
+            return;
+          }
+        }
+      } else if (spareUsed) {
         parts_used = [...partsList.querySelectorAll('.part-row')].map(row => {
           const pv = row.querySelector('.part-name-select').value;
           const pe = pv === '' ? null : svcState.hologramPool[Number(pv)];
@@ -1031,7 +1085,8 @@ function wireModals() {
           part_name: pe ? pe.part_name : '',
           belongs_to: pe ? (pe.belongs_to || '') : '',
           old_hologram_number: row.querySelector('.part-old-hologram-input').value.trim(),
-          new_hologram_number: row.querySelector('.part-new-hologram-select').value.trim()
+          new_hologram_number: row.querySelector('.part-new-hologram-select').value.trim(),
+          destination: 'faulty'
           };
         });
         if (service_status === 'completed') {
@@ -1041,7 +1096,8 @@ function wireModals() {
           }
         }
       }
-      const spare_parts = spareUsed ? parts_used.map(p => p.part_name).join(', ') : sparePartsText.value;
+      const spare_parts = allocParts.length ? allocParts.map(p => p.part_name).join(', ') : (spareUsed ? parts_used.map(p => p.part_name).join(', ') : sparePartsText.value);
+      const sendUsed = allocParts.length ? service_status === 'completed' : spareUsed;
 
       if (service_status === 'completed' && !spare_parts.trim()) {
         alert('Spare part used must be written before marking the service as Completed.');
@@ -1060,7 +1116,7 @@ function wireModals() {
         service_status,
         reason: reasonBox ? reasonBox.value : '',
         spare_parts,
-        spare_parts_used: spareUsed,
+        spare_parts_used: sendUsed,
         parts_used,
         service_charges: chargesBox.value !== '' ? Number(chargesBox.value) : null
       };
@@ -1077,7 +1133,8 @@ function wireModals() {
         statusForm.reset();
         spareUsed = false;
         partsList.innerHTML = '';
-        renderSpareUsed();
+        allocParts = [];
+        renderAlloc();
         await loadServices();
         if (data.hologram_mismatch) {
           alert('This hologram number was not associated with that serial number.');
