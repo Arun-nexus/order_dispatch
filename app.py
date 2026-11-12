@@ -95,6 +95,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from chat_router import router as chat_router, init_chat
+app.include_router(chat_router)
+app.add_event_handler("startup", init_chat)
+
 # ---- request timing: logs slow requests and how much of the time was spent in MongoDB ----
 from mongodb.mongodb_connection import db_stats as _db_stats
 
