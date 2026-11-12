@@ -33,6 +33,7 @@ import io
 import time
 import threading
 import contextlib
+from contextlib import asynccontextmanager
 import hashlib
 import json
 from html.parser import HTMLParser
@@ -84,7 +85,20 @@ load_dotenv()
 # If either is empty, no restriction is applied.
 APP_CLIENT_KEY = os.getenv("APP_CLIENT_KEY", "").strip()
 APP_ONLY_ROLES = {r.strip() for r in os.getenv("APP_ONLY_ROLES", "").split(",") if r.strip()}
-app = FastAPI()
+from chat_router import router as chat_router, init_chat
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    init_chat()
+    threading.Thread(target=_warm_up_db, daemon=True).start()
+    threading.Thread(target=_reminder_loop, daemon=True).start()
+    yield
+    # shutdown: nothing to clean up
+
+
+app = FastAPI(lifespan=lifespan)
 params = load_params()
 
 app.add_middleware(
@@ -95,9 +109,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from chat_router import router as chat_router, init_chat
 app.include_router(chat_router)
-app.add_event_handler("startup", init_chat)
 
 # ---- request timing: logs slow requests and how much of the time was spent in MongoDB ----
 from mongodb.mongodb_connection import db_stats as _db_stats
@@ -3006,10 +3018,6 @@ def _warm_up_db():
     ensure_indexes()
 
 
-@app.on_event("startup")
-def _create_indexes_on_startup():
-    threading.Thread(target=_warm_up_db, daemon=True).start()
-    threading.Thread(target=_reminder_loop, daemon=True).start()
 
 
 def purge_stale_damage_images():
