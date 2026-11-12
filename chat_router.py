@@ -154,6 +154,12 @@ class NewUser(BaseModel):
     role: str = "employee"
 
 
+class EditUser(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    password: str | None = None
+
+
 class NewChat(BaseModel):
     name: str
     members: list[str] = []
@@ -209,6 +215,67 @@ async def create_user(b: NewUser, u=Depends(director)):
     p = user_pub(doc)
     await hub.all({"type": "user", "user": p})
     return p
+
+
+def edit_user_sync(uid, u, b):
+    o = oid(uid)
+    target = users.find_one({"_id": o}) if o else None
+    if not target:
+        return None, "User not found", 404
+    upd = {}
+    if b.name is not None:
+        if not b.name.strip():
+            return None, "Name required", 400
+        upd["name"] = b.name.strip()
+    if b.role is not None:
+        if b.role not in ("employee", "director"):
+            return None, "Invalid role", 400
+        if target["role"] == "director" and b.role != "director" and users.count_documents({"role": "director"}) <= 1:
+            return None, "At least one director must remain", 400
+        upd["role"] = b.role
+    if b.password is not None and b.password != "":
+        if len(b.password) < 6:
+            return None, "Password must be at least 6 characters", 400
+        upd["password"] = hash_pw(b.password)
+    if not upd:
+        return None, "Nothing to update", 400
+    users.update_one({"_id": o}, {"$set": upd})
+    return users.find_one({"_id": o}), None, None
+
+
+@router.patch("/users/{uid}")
+async def edit_user(uid: str, b: EditUser, u=Depends(director)):
+    doc, err, code = await asyncio.to_thread(edit_user_sync, uid, u, b)
+    if err:
+        raise HTTPException(code, err)
+    p = user_pub(doc)
+    await hub.all({"type": "user", "user": p})
+    return p
+
+
+def delete_user_sync(uid, u):
+    o = oid(uid)
+    if not o:
+        return None, "User not found", 404
+    if str(o) == str(u["_id"]):
+        return None, "Cannot delete your own account", 400
+    target = users.find_one({"_id": o})
+    if not target:
+        return None, "User not found", 404
+    if target["role"] == "director" and users.count_documents({"role": "director"}) <= 1:
+        return None, "At least one director must remain", 400
+    users.delete_one({"_id": o})
+    chats.update_many({"members": uid}, {"$pull": {"members": uid}})
+    return target, None, None
+
+
+@router.delete("/users/{uid}")
+async def delete_user(uid: str, u=Depends(director)):
+    target, err, code = await asyncio.to_thread(delete_user_sync, uid, u)
+    if err:
+        raise HTTPException(code, err)
+    await hub.all({"type": "user_deleted", "user_id": uid})
+    return {"ok": True}
 
 
 def list_chats(u):
