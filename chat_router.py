@@ -19,6 +19,13 @@ from pymongo.errors import DuplicateKeyError
 
 from mongodb.mongodb_connection import mongodbclient
 
+try:
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+except ImportError:
+    firebase_admin = None
+    messaging = None
+
 SECRET = os.getenv("chat_jwt_secret") or os.getenv("jwt_secret", "change-this-secret")
 EDIT_WINDOW = 300
 MAX_FILE = 25 * 1024 * 1024
@@ -30,6 +37,16 @@ fs = gridfs.GridFS(D)
 users = D["chat_users"]
 chats = D["chats"]
 msgs = D["chat_messages"]
+tokens_col = D["chat_device_tokens"]
+tokens_col.create_index("token", unique=True)
+
+FIREBASE_CRED_PATH = os.getenv("FIREBASE_CRED_PATH", "/app/firebase-service-account.json")
+_fb_app = None
+if firebase_admin and os.path.exists(FIREBASE_CRED_PATH):
+    try:
+        _fb_app = firebase_admin.initialize_app(credentials.Certificate(FIREBASE_CRED_PATH))
+    except Exception:
+        traceback.print_exc()
 
 
 def now():
@@ -171,6 +188,11 @@ class Members(BaseModel):
     remove: list[str] = []
 
 
+class DeviceToken(BaseModel):
+    token: str
+    platform: str = "android"
+
+
 def init_chat():
     users.create_index("username", unique=True)
     msgs.create_index([("chat_id", 1), ("created", 1)])
@@ -215,6 +237,52 @@ async def create_user(b: NewUser, u=Depends(director)):
     p = user_pub(doc)
     await hub.all({"type": "user", "user": p})
     return p
+
+
+@router.post("/device-token")
+async def register_device_token(b: DeviceToken, u=Depends(auth)):
+    await asyncio.to_thread(
+        tokens_col.update_one,
+        {"token": b.token},
+        {"$set": {"user_id": str(u["_id"]), "platform": b.platform, "updated": now()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@router.delete("/device-token/{token}")
+async def unregister_device_token(token: str, u=Depends(auth)):
+    await asyncio.to_thread(tokens_col.delete_one, {"token": token, "user_id": str(u["_id"])})
+    return {"ok": True}
+
+
+def push_to_offline(chat, sender_uid, text, has_files):
+    if not _fb_app:
+        return
+    aud = [m for m in audience(chat) if m != sender_uid and m not in hub.conns]
+    if not aud:
+        return
+    docs = list(tokens_col.find({"user_id": {"$in": aud}}))
+    if not docs:
+        return
+    sender = users.find_one({"_id": oid(sender_uid)})
+    sender_name = sender["name"] if sender else "Someone"
+    body = (text or "").strip() or ("📎 Attachment" if has_files else "New message")
+    fcm_msgs = [
+        messaging.Message(
+            token=d["token"],
+            notification=messaging.Notification(title=sender_name, body=body[:150]),
+            data={"chat_id": str(chat["_id"])},
+        )
+        for d in docs
+    ]
+    try:
+        resp = messaging.send_each(fcm_msgs)
+        bad = [docs[i]["token"] for i, r in enumerate(resp.responses) if not r.success]
+        if bad:
+            tokens_col.delete_many({"token": {"$in": bad}})
+    except Exception:
+        traceback.print_exc()
 
 
 def edit_user_sync(uid, u, b):
@@ -482,6 +550,7 @@ async def post_message(b: Msg, u=Depends(auth)):
     c, m = r
     p = msg_pub(m, c["ttl"])
     await hub.send(await asyncio.to_thread(audience, c), {"type": "message", "message": p})
+    await asyncio.to_thread(push_to_offline, c, str(u["_id"]), m["text"], bool(m["files"]))
     return p
 
 
@@ -492,6 +561,7 @@ async def handle(ws, u, uid, d):
         if r:
             c, m = r
             await hub.send(await asyncio.to_thread(audience, c), {"type": "message", "message": msg_pub(m, c["ttl"])})
+            await asyncio.to_thread(push_to_offline, c, uid, m["text"], bool(m["files"]))
     elif t == "edit":
         r = await asyncio.to_thread(do_edit, u, uid, d)
         if r:
