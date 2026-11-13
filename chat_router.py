@@ -1,12 +1,14 @@
 import os
 import re
 import io
+import json
 import time
 import asyncio
 import hashlib
 import hmac
 import secrets
 import traceback
+from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
 import jwt
@@ -38,14 +40,23 @@ users = D["chat_users"]
 chats = D["chats"]
 msgs = D["chat_messages"]
 tokens_col = D["chat_device_tokens"]
+events = D["chat_events"]
+presence = D["chat_presence"]
+INSTANCE = secrets.token_hex(6)
 tokens_col.create_index("token", unique=True)
 
 FIREBASE_CRED_PATH = os.getenv("FIREBASE_CRED_PATH", "/app/firebase-service-account.json")
 _fb_app = None
-if firebase_admin and os.path.exists(FIREBASE_CRED_PATH):
+_fb_err = None if firebase_admin else "firebase-admin package not installed"
+if firebase_admin:
     try:
-        _fb_app = firebase_admin.initialize_app(credentials.Certificate(FIREBASE_CRED_PATH))
-    except Exception:
+        _fb_json = os.getenv("FIREBASE_CRED_JSON")
+        if _fb_json:
+            _fb_app = firebase_admin.initialize_app(credentials.Certificate(json.loads(_fb_json)))
+        elif os.path.exists(FIREBASE_CRED_PATH):
+            _fb_app = firebase_admin.initialize_app(credentials.Certificate(FIREBASE_CRED_PATH))
+    except Exception as _e:
+        _fb_err = repr(_e)
         traceback.print_exc()
 
 
@@ -144,16 +155,31 @@ class Hub:
     def __init__(self):
         self.conns = {}
 
-    async def send(self, uids, payload):
-        for uid in set(uids):
+    async def local(self, uids, payload):
+        targets = list(self.conns.keys()) if uids is None else set(uids)
+        for uid in targets:
             for ws in list(self.conns.get(uid, [])):
                 try:
                     await ws.send_json(payload)
                 except Exception:
                     self.conns[uid].discard(ws)
 
+    async def publish(self, uids, payload):
+        try:
+            await asyncio.to_thread(events.insert_one, {"origin": INSTANCE, "uids": uids, "payload": payload, "ts": datetime.now(timezone.utc)})
+        except Exception:
+            traceback.print_exc()
+
+    async def send(self, uids, payload):
+        uids = list(set(uids))
+        if not uids:
+            return
+        await self.local(uids, payload)
+        await self.publish(uids, payload)
+
     async def all(self, payload):
-        await self.send(list(self.conns.keys()), payload)
+        await self.local(None, payload)
+        await self.publish(None, payload)
 
 
 hub = Hub()
@@ -196,6 +222,8 @@ class DeviceToken(BaseModel):
 def init_chat():
     users.create_index("username", unique=True)
     msgs.create_index([("chat_id", 1), ("created", 1)])
+    events.create_index("ts", expireAfterSeconds=300)
+    presence.create_index([("uid", 1), ("ts", 1)])
     if users.count_documents({"role": "director"}) == 0:
         users.insert_one({
             "username": os.getenv("chat_admin_user", "admin"), "name": "Admin", "role": "director",
@@ -250,6 +278,13 @@ async def register_device_token(b: DeviceToken, u=Depends(auth)):
     return {"ok": True}
 
 
+@router.get("/push-status")
+async def push_status(u=Depends(director)):
+    n = await asyncio.to_thread(tokens_col.count_documents, {})
+    mine = await asyncio.to_thread(tokens_col.count_documents, {"user_id": str(u["_id"])})
+    return {"firebase_loaded": bool(_fb_app), "error": _fb_err, "tokens_total": n, "tokens_mine": mine}
+
+
 @router.delete("/device-token/{token}")
 async def unregister_device_token(token: str, u=Depends(auth)):
     await asyncio.to_thread(tokens_col.delete_one, {"token": token, "user_id": str(u["_id"])})
@@ -259,7 +294,8 @@ async def unregister_device_token(token: str, u=Depends(auth)):
 def push_to_offline(chat, sender_uid, text, has_files):
     if not _fb_app:
         return
-    aud = [m for m in audience(chat) if m != sender_uid and m not in hub.conns]
+    online = set(presence.distinct("uid", {"ts": {"$gt": now() - 60}}))
+    aud = [m for m in audience(chat) if m != sender_uid and m not in online]
     if not aud:
         return
     docs = list(tokens_col.find({"user_id": {"$in": aud}}))
@@ -581,6 +617,54 @@ async def handle(ws, u, uid, d):
             await hub.send(aud, {"type": "typing", "chat_id": str(c["_id"]), "user": uid})
 
 
+async def _poll_events():
+    seen = {}
+    while True:
+        await asyncio.sleep(0.4)
+        try:
+            floor = ObjectId.from_datetime(datetime.now(timezone.utc) - timedelta(seconds=6))
+            docs = await asyncio.to_thread(lambda: list(events.find({"_id": {"$gt": floor}, "origin": {"$ne": INSTANCE}}).sort("_id", 1)))
+            for d in docs:
+                if d["_id"] in seen:
+                    continue
+                seen[d["_id"]] = time.time()
+                await hub.local(d.get("uids"), d["payload"])
+            cut = time.time() - 30
+            for k in [k for k, v in seen.items() if v < cut]:
+                del seen[k]
+        except Exception:
+            traceback.print_exc()
+
+
+async def _heartbeat():
+    while True:
+        await asyncio.sleep(20)
+        try:
+            await asyncio.to_thread(presence.update_many, {"instance": INSTANCE}, {"$set": {"ts": now()}})
+        except Exception:
+            traceback.print_exc()
+
+
+async def start_chat_background():
+    asyncio.create_task(_poll_events())
+    asyncio.create_task(_heartbeat())
+
+
+def join_presence(uid, cid):
+    others = presence.count_documents({"uid": uid, "ts": {"$gt": now() - 60}})
+    presence.insert_one({"_id": cid, "uid": uid, "instance": INSTANCE, "ts": now()})
+    return others == 0, presence.distinct("uid", {"ts": {"$gt": now() - 60}})
+
+
+def leave_presence(uid, cid):
+    presence.delete_one({"_id": cid})
+    if presence.count_documents({"uid": uid, "ts": {"$gt": now() - 60}}) == 0:
+        ts = now()
+        users.update_one({"_id": ObjectId(uid)}, {"$set": {"last_seen": ts}})
+        return ts
+    return None
+
+
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket, token: str = Query(...)):
     u = await asyncio.to_thread(user_from_token, token)
@@ -588,10 +672,11 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(...)):
         await ws.close(code=4401)
         return
     uid = str(u["_id"])
+    cid = str(ObjectId())
     await ws.accept()
-    first = uid not in hub.conns
     hub.conns.setdefault(uid, set()).add(ws)
-    await ws.send_json({"type": "presence_all", "online": list(hub.conns.keys())})
+    first, online = await asyncio.to_thread(join_presence, uid, cid)
+    await ws.send_json({"type": "presence_all", "online": online})
     if first:
         await hub.all({"type": "presence", "user": uid, "online": True})
     try:
@@ -610,6 +695,6 @@ async def ws_endpoint(ws: WebSocket, token: str = Query(...)):
         hub.conns.get(uid, set()).discard(ws)
         if not hub.conns.get(uid):
             hub.conns.pop(uid, None)
-            ts = now()
-            await asyncio.to_thread(users.update_one, {"_id": u["_id"]}, {"$set": {"last_seen": ts}})
+        ts = await asyncio.to_thread(leave_presence, uid, cid)
+        if ts:
             await hub.all({"type": "presence", "user": uid, "online": False, "last_seen": ts})
