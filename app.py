@@ -5592,6 +5592,188 @@ def create_customer(request: CustomerRequest, user: dict = Depends(require_role(
         raise HTTPException(status_code=500, detail="customer creation failed")
 
 
+# ---------------------------------------------------------------------------
+# Duplicate company merge (admin only). Run with dry_run=true first.
+# ---------------------------------------------------------------------------
+_GSTIN_RE = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]{3}$")
+_MERGE_BACKUP_COLLECTION = "customers_merge_backup"
+_MERGE_REF_COLLECTIONS = (ORDERS_COLLECTION, ALLOCATION_COLLECTION, REQUESTS_COLLECTION, SHIPMENT_COLLECTION)
+_MERGE_REF_FIELDS = ("customer.customer_id", "customer_id")
+
+
+class CustomerMergeRequest(BaseModel):
+    dry_run: bool = True            # True = only report what would be merged
+    include_blank_gst: bool = True  # also merge same name + same address when GST is blank/invalid
+
+
+def _norm_text(s) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", str(s or "").lower())).strip()
+
+
+def _valid_gst(c: dict) -> str:
+    g = customer_manager.normalize_gst(c.get("gst_number"))
+    return g if _GSTIN_RE.match(g) else ""
+
+
+def _ledger_size(c: dict) -> int:
+    return len(c.get("purchases") or []) + len(c.get("returns") or []) + len(c.get("debits") or [])
+
+
+def _customer_merge_plan(rows: list, include_blank_gst: bool = True):
+    by_gst, rest = {}, []
+    for c in rows:
+        g = _valid_gst(c)
+        (by_gst.setdefault(g, []) if g else rest).append(c)
+    groups = [("gst", k, v) for k, v in by_gst.items() if len(v) > 1]
+
+    if include_blank_gst:
+        by_name = {}
+        for c in rest:
+            n = _norm_text(c.get("company_name"))
+            if n:
+                by_name.setdefault((n, _norm_text(c.get("company_address"))), []).append(c)
+        groups += [("name", f"{k[0]} | {k[1]}", v) for k, v in by_name.items() if len(v) > 1]
+
+    # same name but NOT safe to auto-merge (different GST / address) -> only reported
+    group_of = {c["customer_id"]: i for i, (_, _, v) in enumerate(groups) for c in v}
+    by_nm = {}
+    for c in rows:
+        n = _norm_text(c.get("company_name"))
+        if n:
+            by_nm.setdefault(n, []).append(c)
+    review = []
+    for n, v in by_nm.items():
+        if len(v) > 1 and len({group_of.get(c["customer_id"], c["customer_id"]) for c in v}) > 1:
+            review.append({"name": n, "records": [
+                {"customer_id": c["customer_id"], "company_name": c.get("company_name"),
+                 "gst_number": c.get("gst_number"), "address": c.get("company_address"),
+                 "created_by": c.get("created_by")} for c in v]})
+    return groups, review
+
+
+def _pick_primary(members: list) -> dict:
+    # most ledger data first, then valid GST, then oldest
+    return sorted(members, key=lambda c: (-_ledger_size(c), 0 if _valid_gst(c) else 1, c.get("created_date") or ""))[0]
+
+
+def _merged_values(primary: dict, others: list) -> dict:
+    values = {}
+
+    def union(field, key=None):
+        out = list(primary.get(field) or [])
+        seen = {key(x) if key else json.dumps(x, sort_keys=True, default=str) for x in out}
+        added = False
+        for o in others:
+            for x in (o.get(field) or []):
+                k = key(x) if key else json.dumps(x, sort_keys=True, default=str)
+                if k not in seen:
+                    seen.add(k)
+                    out.append(x)
+                    added = True
+        if added:
+            values[field] = out
+
+    union("purchases", key=lambda p: p.get("purchase_id") or json.dumps(p, sort_keys=True, default=str))
+    union("returns")
+    union("debits")
+
+    members = [primary] + others
+    values["credit_limit"] = max(float(m.get("credit_limit") or 0) for m in members)   # limits are not added up
+    values["credit_used"] = sum(float(m.get("credit_used") or 0) for m in members)
+
+    # creators of the removed records keep access to the merged company
+    shared = list(primary.get("shared_with") or [])
+    for o in others:
+        for u in [o.get("created_by")] + list(o.get("shared_with") or []):
+            if u and u != primary.get("created_by") and u not in shared:
+                shared.append(u)
+    values["shared_with"] = shared
+
+    for f in ("company_address", "contractor_person", "contractor_number", "contractor_email"):
+        if not str(primary.get(f) or "").strip():
+            for o in others:
+                if str(o.get(f) or "").strip():
+                    values[f] = o[f]
+                    break
+    g = _valid_gst(primary) or next((_valid_gst(o) for o in others if _valid_gst(o)), "")
+    if g:
+        values["gst_number"] = g
+    values["merged_from"] = list(primary.get("merged_from") or []) + [o["customer_id"] for o in others]
+    return values
+
+
+def _count_customer_refs(db, cid: str) -> dict:
+    out = {}
+    for col in _MERGE_REF_COLLECTIONS:
+        n = 0
+        for f in _MERGE_REF_FIELDS:
+            n += len(db.get_data(collection_name=col, query={f: cid}, projection={"_id": 1}) or [])
+        out[col] = n
+    return out
+
+
+@app.post("/customer/merge_duplicates")
+def merge_duplicate_customers(request: CustomerMergeRequest, user: dict = Depends(require_role("admin"))):
+    """Same GST (or, with include_blank_gst, same name + address when GST is blank/invalid) -> one company.
+    Ledger (purchases / credits / debits) is combined into the primary, orders / allocations / requests /
+    shipments are re-pointed to it, the removed records are copied to `customers_merge_backup`, then deleted."""
+    try:
+        db = customer_manager()
+        rows = [c for c in db.get_data(collection_name=CUSTOMER_COLLECTION, query={}) if c.get("customer_id")]
+        groups, review = _customer_merge_plan(rows, request.include_blank_gst)
+
+        report, merged_total, skipped = [], 0, []
+        for kind, key, members in groups:
+            primary = _pick_primary(members)
+            others = [c for c in members if c["customer_id"] != primary["customer_id"]]
+            entry = {
+                "matched_by": kind, "key": key,
+                "primary": {"customer_id": primary["customer_id"], "company_name": primary.get("company_name")},
+                "merged": [{"customer_id": o["customer_id"], "company_name": o.get("company_name"),
+                            "created_by": o.get("created_by"), "refs": _count_customer_refs(db, o["customer_id"])}
+                           for o in others],
+            }
+            if request.dry_run:
+                report.append(entry)
+                continue
+
+            pid = primary["customer_id"]
+            try:
+                db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": pid},
+                          update_values=_merged_values(primary, others))
+                for o in others:
+                    oid = o["customer_id"]
+                    for col in _MERGE_REF_COLLECTIONS:
+                        for f in _MERGE_REF_FIELDS:
+                            db.update(collection_name=col, query={f: oid}, update_values={f: pid}, many=True)
+                    left = _count_customer_refs(db, oid)
+                    if any(left.values()):
+                        skipped.append({"customer_id": oid, "reason": "references could not be re-pointed", "left": left})
+                        continue
+                    backup = {k: v for k, v in o.items() if k != "_id"}
+                    super(customer_manager, db).add(
+                        collection_name=_MERGE_BACKUP_COLLECTION,
+                        dictionary={"merged_into": pid, "merged_by": user["username"],
+                                    "merged_at": datetime.now(timezone.utc).isoformat(), "record": backup})
+                    db.delete(collection_name=CUSTOMER_COLLECTION, query={"customer_id": oid})
+                    merged_total += 1
+                report.append(entry)
+            except Exception as ge:
+                logging.error(f"merge of group {key} failed: {ge}")
+                skipped.append({"group": key, "reason": str(ge)})
+
+        logging.info(f"customer merge finished dry_run={request.dry_run} removed={merged_total}")
+        return {"message": "dry run - nothing changed" if request.dry_run else "duplicate companies merged",
+                "dry_run": request.dry_run, "groups": len(groups),
+                "records_removed": merged_total if not request.dry_run else sum(len(g["merged"]) for g in report),
+                "report": report, "skipped": skipped, "needs_review": review}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("customer merge failed!")
+        raise HTTPException(status_code=500, detail="customer merge failed")
+
+
 @app.post("/customer/update/{customer_id}")
 def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
