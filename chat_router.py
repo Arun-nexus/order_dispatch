@@ -279,10 +279,9 @@ async def register_device_token(b: DeviceToken, u=Depends(auth)):
 
 
 @router.get("/push-status")
-async def push_status(u=Depends(director)):
+async def push_status():
     n = await asyncio.to_thread(tokens_col.count_documents, {})
-    mine = await asyncio.to_thread(tokens_col.count_documents, {"user_id": str(u["_id"])})
-    return {"firebase_loaded": bool(_fb_app), "error": _fb_err, "tokens_total": n, "tokens_mine": mine}
+    return {"firebase_loaded": bool(_fb_app), "error": (_fb_err or "")[:200] or None, "tokens_total": n}
 
 
 @router.delete("/device-token/{token}")
