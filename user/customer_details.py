@@ -2,6 +2,7 @@ from mongodb.mongodb_connection import mongodbclient
 from logger import logging
 from datetime import datetime, timezone
 import uuid
+import re
 
 
 class customer_manager(mongodbclient):
@@ -14,10 +15,41 @@ class customer_manager(mongodbclient):
         self.customer_id = str(uuid.uuid4())
         self.company_name = company_name
         self.company_address = company_address
-        self.gst_number = gst_number
+        self.gst_number = self.normalize_gst(gst_number) or gst_number   # saved UPPERCASE, no spaces
         self.contractor_person = contractor_person
         self.contractor_number = contractor_number
         self.contractor_email = contractor_email
+
+    @staticmethod
+    def normalize_gst(gst):
+        return re.sub(r"\s+", "", str(gst or "")).upper()
+
+    def find_by_gst(self, collection_name, gst_number):
+        """Returns the existing company with this GST, or None. A blank GST never matches."""
+        g = self.normalize_gst(gst_number)
+        if not g:
+            return None
+        # tolerant of old rows saved with spaces / lowercase
+        pattern = r"^\s*" + r"\s*".join(re.escape(ch) for ch in g) + r"\s*$"
+        rows = self.get_data(collection_name=collection_name,
+                             query={"gst_number": {"$regex": pattern, "$options": "i"}})
+        return rows[0] if rows else None
+
+    def grant_access(self, collection_name, customer_id, username):
+        """Adds username to the company's shared_with list (no duplicate company is created)."""
+        try:
+            rows = self.get_data(collection_name=collection_name, query={"customer_id": customer_id})
+            if not rows:
+                return False
+            shared = list(rows[0].get("shared_with") or [])
+            if username not in shared:
+                shared.append(username)
+                self.update(collection_name=collection_name, query={"customer_id": customer_id},
+                            update_values={"shared_with": shared})
+            return True
+        except Exception as e:
+            logging.error("granting customer access failed!")
+            raise Exception(e)
 
     def add(self, collection_name):
         try:

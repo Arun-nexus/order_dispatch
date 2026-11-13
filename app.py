@@ -1288,6 +1288,46 @@ def _rollback_stock(inventory_db, deducted):
             logging.error(f"stock rollback failed for {item.get('product_id')}: {rb_err}")
 
 
+def _has_customer_access(c: dict, username: str) -> bool:
+    """creator, or a distributor the company was shared with (same GST registered by someone else)"""
+    return c.get("created_by") == username or username in (c.get("shared_with") or [])
+
+
+def _get_or_create_customer(customer_db, details: dict, creator_username: str = None):
+    """Order / demo-unit / convert flows. Same GST -> reuse the existing company (and give the
+    creator access to it); otherwise create a new one. Returns (customer_snapshot, created)."""
+    details = details or {}
+    gst = customer_manager.normalize_gst(details.get("gst_number"))
+    existing = customer_db.find_by_gst(CUSTOMER_COLLECTION, gst) if gst else None
+    if existing:
+        if creator_username and not _has_customer_access(existing, creator_username):
+            customer_db.grant_access(CUSTOMER_COLLECTION, existing["customer_id"], creator_username)
+        return {k: v for k, v in existing.items() if k != "_id"}, False
+
+    nc = customer_manager(
+        company_name=details.get("company_name"),
+        company_address=details.get("company_address"),
+        gst_number=details.get("gst_number"),
+        contractor_person=details.get("contractor_person") or "",
+        contractor_number=details.get("contractor_number") or "",
+        contractor_email=details.get("contractor_email") or "",
+    )
+    nc.add(collection_name=CUSTOMER_COLLECTION)
+    if creator_username:
+        customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": nc.customer_id},
+                                update_values={"created_by": creator_username})
+    return {
+        "customer_id": nc.customer_id,
+        "company_name": nc.company_name,
+        "company_address": nc.company_address,
+        "gst_number": nc.gst_number,
+        "contractor_person": nc.contractor_person,
+        "contractor_number": nc.contractor_number,
+        "contractor_email": nc.contractor_email,
+        "created_by": creator_username,
+    }, True
+
+
 def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None, warranty_years: int = 1, warranty_charge: float = 0):
     """Validates payment details, resolves/creates the customer, deducts stock + serials,
     and creates the order record. Shared by the direct /order/create_order/ endpoint and by
@@ -1308,29 +1348,8 @@ def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: 
     else:
         if not customer_snapshot.get("company_name"):
             raise HTTPException(status_code=400, detail="customer details are required")
-        new_customer = customer_manager(
-            company_name=customer_snapshot.get("company_name"),
-            company_address=customer_snapshot.get("company_address"),
-            gst_number=customer_snapshot.get("gst_number"),
-            contractor_person=customer_snapshot.get("contractor_person"),
-            contractor_number=customer_snapshot.get("contractor_number"),
-            contractor_email=customer_snapshot.get("contractor_email"),
-        )
-        new_customer.add(collection_name=CUSTOMER_COLLECTION)
         creator_username = (creator or {}).get("raised_by") or (creator or {}).get("username")
-        if creator_username:
-            customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
-                                     update_values={"created_by": creator_username})
-        customer_snapshot = {
-            "customer_id": new_customer.customer_id,
-            "company_name": new_customer.company_name,
-            "company_address": new_customer.company_address,
-            "gst_number": new_customer.gst_number,
-            "contractor_person": new_customer.contractor_person,
-            "contractor_number": new_customer.contractor_number,
-            "contractor_email": new_customer.contractor_email,
-            "created_by": creator_username,
-        }
+        customer_snapshot, _ = _get_or_create_customer(customer_db, customer_snapshot, creator_username)
 
     inventory_db = inventory_manager()
     qty_by_variant = {}
@@ -2097,6 +2116,8 @@ def _sync_shipment_ledger(shipment: dict, user: dict, contact: dict = None):
     contact = contact or {}
     rows = db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
     match = next((c for c in rows if shipment.get("customer_id") and c.get("customer_id") == shipment["customer_id"]), None)
+    if match is None:
+        match = db.find_by_gst(CUSTOMER_COLLECTION, contact.get("gst_number"))
     if match is None:
         match = next((c for c in rows if (c.get("company_name") or "").strip().lower() == name.lower()), None)
     if match is None:
@@ -4827,7 +4848,7 @@ def _record_purchase_on_customer(request, user):
             return None
 
         db = customer_manager()
-        match = next((c for c in db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
+        match = db.find_by_gst(CUSTOMER_COLLECTION, request.supplier_gst) or next((c for c in db.get_data(collection_name=CUSTOMER_COLLECTION, query={})
                       if (c.get("company_name") or "").strip().lower() == name.lower()), None)
         created = False
         if match is None:
@@ -5486,7 +5507,10 @@ def customers(user: dict = Depends(get_current_user)):
             acc_db = login()
             team = acc_db.get_data(ACCOUNTS_COLLECTION, query={"role": "distributor", "manager": user["username"]})
             visible_usernames = [user["username"]] + [m["username"] for m in team]
-            dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={"created_by": {"$in": visible_usernames}})
+            dataset = db.get_data(collection_name=CUSTOMER_COLLECTION, query={"$or": [
+                {"created_by": {"$in": visible_usernames}},
+                {"shared_with": user["username"]},
+            ]})
         else:
             dataset = []
         logging.info("customer dataset was fetched successfully")
@@ -5504,7 +5528,7 @@ def search_customer(term: str = "", user: dict = Depends(get_current_user)):
         if user["role"] == "distributor":
             # a distributor should only see customers they themselves created —
             # not customers created by other salespeople on their team
-            dataset = [c for c in dataset if c.get("created_by") == user["username"]]
+            dataset = [c for c in dataset if _has_customer_access(c, user["username"])]
         return {"message": "customer search results", "dataset": dataset}
     except Exception as e:
         logging.error("customer search failed")
@@ -5514,6 +5538,22 @@ def search_customer(term: str = "", user: dict = Depends(get_current_user)):
 @app.post("/customer/create")
 def create_customer(request: CustomerRequest, user: dict = Depends(require_role("admin", "accounts", "distributor", "inventory_manager"))):
     try:
+        gst = customer_manager.normalize_gst(request.gst_number)
+        existing = customer_manager().find_by_gst(CUSTOMER_COLLECTION, gst) if gst else None
+        if existing:
+            if user["role"] != "distributor":
+                raise HTTPException(status_code=409,
+                                    detail=f"company with GST {gst} already exists ({existing.get('company_name')})")
+            if _has_customer_access(existing, user["username"]):
+                raise HTTPException(status_code=409, detail="this company is already in your list")
+            # registered by another distributor -> no new record, just give this distributor access
+            customer_manager().grant_access(CUSTOMER_COLLECTION, existing["customer_id"], user["username"])
+            snap = {k: v for k, v in existing.items() if k != "_id"}
+            snap["shared_with"] = list(snap.get("shared_with") or []) + [user["username"]]
+            logging.info("existing customer shared with distributor instead of creating a duplicate")
+            return {"message": "company already registered - added to your list", "already_exists": True,
+                    "customer_id": existing["customer_id"], "customer": snap}
+
         new_customer = customer_manager(
             company_name=request.company_name,
             company_address=request.company_address,
@@ -5545,6 +5585,8 @@ def create_customer(request: CustomerRequest, user: dict = Depends(require_role(
                 "created_by": user["username"],
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error("customer creation failed!")
         raise HTTPException(status_code=500, detail="customer creation failed")
@@ -5554,6 +5596,13 @@ def create_customer(request: CustomerRequest, user: dict = Depends(require_role(
 def update_customer(customer_id: str, request: CustomerUpdateRequest, user: dict = Depends(require_role("admin", "accounts"))):
     try:
         db = customer_manager()
+        if request.updated_values.get("gst_number"):
+            new_gst = customer_manager.normalize_gst(request.updated_values["gst_number"])
+            clash = db.find_by_gst(CUSTOMER_COLLECTION, new_gst)
+            if clash and clash.get("customer_id") != customer_id:
+                raise HTTPException(status_code=409,
+                                    detail=f"company with GST {new_gst} already exists ({clash.get('company_name')})")
+            request.updated_values["gst_number"] = new_gst
         result = db.update(collection_name=CUSTOMER_COLLECTION, query={"customer_id": customer_id},
                             update_values=request.updated_values)
         if result.matched_count == 0:
@@ -5923,27 +5972,7 @@ def _fulfill_demo_unit(customer_id: str, customer: dict, items: list, allocated_
     else:
         if not customer_snapshot.get("company_name"):
             raise HTTPException(status_code=400, detail="customer details are required")
-        new_customer = customer_manager(
-            company_name=customer_snapshot.get("company_name"),
-            company_address=customer_snapshot.get("company_address"),
-            gst_number=customer_snapshot.get("gst_number"),
-            contractor_person=customer_snapshot.get("contractor_person"),
-            contractor_number=customer_snapshot.get("contractor_number"),
-            contractor_email=customer_snapshot.get("contractor_email"),
-        )
-        new_customer.add(collection_name=CUSTOMER_COLLECTION)
-        customer_db.update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
-                                 update_values={"created_by": allocated_by})
-        customer_snapshot = {
-            "customer_id": new_customer.customer_id,
-            "company_name": new_customer.company_name,
-            "company_address": new_customer.company_address,
-            "gst_number": new_customer.gst_number,
-            "contractor_person": new_customer.contractor_person,
-            "contractor_number": new_customer.contractor_number,
-            "contractor_email": new_customer.contractor_email,
-            "created_by": allocated_by,
-        }
+        customer_snapshot, _ = _get_or_create_customer(customer_db, customer_snapshot, allocated_by)
 
     inventory_db = inventory_manager()
     need_legacy = {}
@@ -6357,7 +6386,7 @@ def convert_demo_to_order(allocation_id: str, request: ConvertToOrderRequest, us
             if not rows:
                 raise HTTPException(status_code=404, detail="selected company not found")
             picked = rows[0]
-            if picked.get("created_by") not in (user["username"], alloc.get("allocated_by")):
+            if not (_has_customer_access(picked, user["username"]) or picked.get("created_by") == alloc.get("allocated_by")):
                 raise HTTPException(status_code=403, detail="this company does not belong to you")
             customer = {
                 "customer_id": picked["customer_id"],
@@ -6489,25 +6518,7 @@ def _convert_demo_to_order(alloc: dict, details: dict, raised_by: str, approver:
     if existing:
         customer_snapshot = {k: v for k, v in existing[0].items() if k != "_id"}
     else:
-        new_customer = customer_manager(
-            company_name=cust.get("company_name"),
-            company_address=cust.get("company_address"),
-            gst_number=cust.get("gst_number"),
-            contractor_person="",
-            contractor_number="",
-            contractor_email="",
-        )
-        new_customer.add(collection_name=CUSTOMER_COLLECTION)
-        customer_manager().update_data(collection_name=CUSTOMER_COLLECTION, query={"customer_id": new_customer.customer_id},
-                                        update_values={"created_by": raised_by})
-        customer_snapshot = {
-            "customer_id": new_customer.customer_id,
-            "company_name": new_customer.company_name,
-            "company_address": new_customer.company_address,
-            "gst_number": new_customer.gst_number,
-            "contractor_person": "", "contractor_number": "", "contractor_email": "",
-            "created_by": raised_by,
-        }
+        customer_snapshot, _ = _get_or_create_customer(customer_manager(), cust, raised_by)
 
     price = details.get("price", 0)
     tax_rate = details.get("tax_rate", 0)
