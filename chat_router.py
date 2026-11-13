@@ -47,6 +47,7 @@ tokens_col.create_index("token", unique=True)
 
 FIREBASE_CRED_PATH = os.getenv("FIREBASE_CRED_PATH", "/app/firebase-service-account.json")
 _fb_app = None
+_last_push = None
 _fb_err = None if firebase_admin else "firebase-admin package not installed"
 if firebase_admin:
     try:
@@ -281,7 +282,7 @@ async def register_device_token(b: DeviceToken, u=Depends(auth)):
 @router.get("/push-status")
 async def push_status():
     n = await asyncio.to_thread(tokens_col.count_documents, {})
-    return {"firebase_loaded": bool(_fb_app), "error": (_fb_err or "")[:200] or None, "tokens_total": n}
+    return {"firebase_loaded": bool(_fb_app), "error": (_fb_err or "")[:200] or None, "tokens_total": n, "last_push": _last_push}
 
 
 @router.delete("/device-token/{token}")
@@ -312,11 +313,15 @@ def push_to_offline(chat, sender_uid, text, has_files):
         for d in docs
     ]
     try:
+        global _last_push
         resp = messaging.send_each(fcm_msgs)
-        bad = [docs[i]["token"] for i, r in enumerate(resp.responses) if not r.success]
+        errs = [repr(r.exception)[:200] for r in resp.responses if not r.success]
+        _last_push = {"sent": resp.success_count, "failed": len(errs), "errors": errs[:3], "at": now()}
+        bad = [docs[i]["token"] for i, r in enumerate(resp.responses) if not r.success and isinstance(r.exception, messaging.UnregisteredError)]
         if bad:
             tokens_col.delete_many({"token": {"$in": bad}})
-    except Exception:
+    except Exception as e:
+        _last_push = {"error": repr(e)[:200], "at": now()}
         traceback.print_exc()
 
 
