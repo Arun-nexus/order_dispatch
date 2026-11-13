@@ -1537,6 +1537,34 @@ function openViewModal(p) {
     ? cell('Part Name', e(p.product_name ?? '')) + cell('Belongs To (Product)', e(p.parent_product_name || ''))
     : cell('Product Name', e(p.product_name ?? '')) + cell('Product ID', e(p.product_id || '')) + cell('Model No.', e(p.model_no || ''));
 
+  const bv = Array.isArray(p.batches_view) ? p.batches_view : [];
+  const batchRows = bv.map(b => {
+    let wcell = '—';
+    if (b.warranty_until) {
+      const over = b.warranty_status === 'over warranty';
+      wcell = `<span class="stock ${over ? 'low' : 'high'}">${over ? 'Over Warranty' : `${b.warranty_days_left} day(s) left`}</span> <span class="iv-sub">until ${e(dateTxt(b.warranty_until))}</span>`;
+    }
+    const dim = Number(b.in_stock) === 0 ? 'opacity:.5;' : '';
+    return `<tr style="${dim}border-top:1px solid #e2e8f0;">
+      <td style="padding:8px;">${b.received_date ? e(dateTxt(b.received_date)) : '<span class="iv-sub">Date not recorded</span>'}</td>
+      <td style="padding:8px;text-align:right;">${b.quantity ?? '—'}</td>
+      <td style="padding:8px;text-align:right;font-weight:600;">${b.in_stock}</td>
+      <td style="padding:8px;">${wcell}</td>
+    </tr>`;
+  }).join('');
+  const batchSection = bv.length ? `
+    <div class="iv-title">Stock Batches — arrival date &amp; warranty left</div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="text-align:left;color:#64748b;">
+          <th style="padding:8px;">Arrived on</th><th style="padding:8px;text-align:right;">Qty arrived</th>
+          <th style="padding:8px;text-align:right;">In stock now</th><th style="padding:8px;">Warranty</th>
+        </tr></thead>
+        <tbody>${batchRows}</tbody>
+      </table>
+    </div>
+    <div class="iv-sub" style="margin-top:4px;">Stock is counted oldest-first, so what is left in stock belongs to the newest batches.</div>` : '';
+
   const SHOW = 300;
   const chips = (arr) => arr.slice(0, SHOW).map(s => `<span class="iv-chip">${e(s)}</span>`).join('') + (arr.length > SHOW ? `<span class="iv-sub">+${arr.length - SHOW} more</span>` : '');
 
@@ -1569,6 +1597,8 @@ function openViewModal(p) {
       ${cell('Added By', e(p.created_by || ''))}
       ${p.updated_by ? cell('Last Updated By', e(p.updated_by)) : ''}
     </div>
+
+    ${batchSection}
 
     ${part ? `
       <div class="iv-title">Hologram Numbers (${holograms.length})</div>
@@ -1604,6 +1634,9 @@ function openEditModal(p) {
   form.elements['quantity'].value = p.quantity ?? '';
   form.elements['price'].value = p.price ?? '';
   form.elements['tax_rate'].value = p.tax_rate ?? '';
+  invState.editOrigQuantity = Number(p.quantity) || 0;
+  form.elements['batch_received_date'].value = '';
+  form.elements['batch_warranty_until'].value = '';
 
   const typeSelect = document.getElementById('editProductType');
   if (typeSelect) {
@@ -1627,6 +1660,9 @@ function openEditModal(p) {
   quantityInput.addEventListener('input', renderEditSerialsUI);
   quantityInput.removeEventListener('input', syncEditHologramQuantity);
   quantityInput.addEventListener('input', syncEditHologramQuantity);
+  quantityInput.removeEventListener('input', syncEditBatchBox);
+  quantityInput.addEventListener('input', syncEditBatchBox);
+  syncEditBatchBox();
 
   if (typeSelect) {
     typeSelect.removeEventListener('change', renderEditSerialsUI);
@@ -1654,6 +1690,18 @@ function toggleTypeSpecificFields(type) {
   if (nameInput) nameInput.placeholder = isPart ? 'Part Name' : 'Product Name';
   if (parentInput) parentInput.style.display = isPart ? 'block' : 'none';
   if (idModelWrap) idModelWrap.style.display = isPart ? 'none' : 'flex';
+}
+
+// Raising the quantity in the edit form asks for the date the extra units arrived
+// (each arrival is stored as its own batch with its own warranty).
+function syncEditBatchBox() {
+  const form = document.querySelector('#editModal form');
+  const wrap = document.getElementById('editBatchWrap');
+  if (!form || !wrap) return;
+  const added = (Number(form.elements['quantity'].value) || 0) - (Number(invState.editOrigQuantity) || 0);
+  wrap.style.display = added > 0 ? 'flex' : 'none';
+  const lbl = document.getElementById('editBatchQty');
+  if (lbl) lbl.textContent = added > 0 ? added : 0;
 }
 
 function onEditTypeChangeForTypeFields() {
@@ -2641,6 +2689,14 @@ function wireModals() {
     const form = e.target;
     const targetQuantity = Number(form.elements['quantity'].value);
 
+    const addedQty = targetQuantity - (Number(invState.editOrigQuantity) || 0);
+    const batch_received_date = form.elements['batch_received_date'].value;
+    const batch_warranty_until = form.elements['batch_warranty_until'].value;
+    if (addedQty > 0 && !batch_received_date) {
+      showResponseModal('Arrival date needed', `You are adding ${addedQty} unit(s) — please enter the date these units arrived.`, false);
+      return;
+    }
+
     const new_serial_numbers = [...e.target.querySelectorAll('.new-serial-input')].map(i => i.value.trim().toLowerCase());
     const remove_serial_numbers = [...invState.editRemovedSerials];
     const faulty_serial_numbers = [...invState.editFaultySerials];
@@ -2706,7 +2762,11 @@ function wireModals() {
       const res = await apiFetch(`/inventory/update/${invState.activeId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers })
+        body: JSON.stringify({
+          updated_values, new_serial_numbers, remove_serial_numbers, faulty_serial_numbers,
+          batch_received_date: addedQty > 0 ? batch_received_date : null,
+          batch_warranty_until: addedQty > 0 && batch_warranty_until ? batch_warranty_until : null
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'update failed');

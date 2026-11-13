@@ -389,6 +389,19 @@
         <input name="invoice_no" placeholder="Invoice No. (required for parts / accessories)">
         <input name="purchase_date" type="date">
         <input name="quantity" type="number" placeholder="Quantity">
+
+        <!-- shown only when the quantity is raised: those extra units need their own arrival date -->
+        <div id="editBatchWrap"
+          style="display:none;flex-direction:column;gap:6px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;padding:12px;">
+          <label style="font-size:13px;font-weight:600;color:#1e3a8a;">These <span id="editBatchQty">0</span> extra
+            unit(s) arrived on *</label>
+          <input name="batch_received_date" type="date">
+          <label style="font-size:12px;color:#475569;">Warranty until (optional)</label>
+          <input name="batch_warranty_until" type="date">
+          <small style="font-size:11px;color:#64748b;">Leave warranty blank to reuse this product's existing warranty period
+            from the arrival date.</small>
+        </div>
+
         <input name="price" placeholder="Price">
         <input name="tax_rate" type="number" placeholder="Tax Rate (%)">
 

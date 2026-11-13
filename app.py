@@ -496,6 +496,10 @@ class InventoryUpdateRequest(BaseModel):
     remove_hologram_numbers: list[str] = []
     source_product_type: Optional[str] = None  # type of the lot being edited (product / damaged / ...)
     model_no: Optional[str] = None
+    # required when the edit RAISES the quantity: the date the extra units arrived (YYYY-MM-DD) and,
+    # optionally, their warranty-until date (else the lot's existing warranty period is applied)
+    batch_received_date: Optional[str] = None
+    batch_warranty_until: Optional[str] = None
 
 
 class ShipmentPart(BaseModel):
@@ -4551,6 +4555,7 @@ def inventory_detail(product_id: str = "", model_no: str = "", product_type: str
                 except ValueError:
                     item["warranty_days_left"] = None
 
+        item["batches_view"] = inventory_manager.batches_view(item)
         return {"message": "product detail", "product": item}
     except HTTPException:
         raise
@@ -5208,6 +5213,31 @@ def _update_inventory_impl(item_id: str, request: InventoryUpdateRequest, user: 
         # track who last touched this lot — same idea as an order's creator,
         # shown on the inventory table/view so edits are attributable
         updated_values["updated_by"] = user["username"]
+
+        # ---- stock batch: raising the quantity needs the date those units arrived ----
+        updated_values.pop("batches", None)          # only ever written by the server
+        _old_qty = int(existing[0].get("quantity", 0) or 0)
+        if updated_values.get("quantity") not in (None, ""):
+            try:
+                _new_qty = int(updated_values["quantity"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="quantity must be a number")
+            if _new_qty > _old_qty:
+                _recv = inventory_manager._ymd(request.batch_received_date)
+                if not _recv:
+                    raise HTTPException(status_code=400, detail=f"you are adding {_new_qty - _old_qty} unit(s) - enter the date these units arrived")
+                # +1 day tolerance so an Indian 'today' is never rejected by the UTC clock
+                if datetime.strptime(_recv, "%Y-%m-%d") > datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1):
+                    raise HTTPException(status_code=400, detail="received date cannot be in the future")
+                _bw = (request.batch_warranty_until or "").strip()
+                if _bw:
+                    _bw = inventory_manager._ymd(_bw)
+                    if not _bw:
+                        raise HTTPException(status_code=400, detail="warranty until must be a valid date")
+                    if _bw < _recv:
+                        raise HTTPException(status_code=400, detail="warranty until cannot be before the received date")
+                updated_values["batches"] = inventory_manager.batches_after_increase(
+                    existing[0], _new_qty - _old_qty, _recv, _bw or None, user["username"], source="edit")
         raw_effective_type = updated_values.get("product_type", current_type)
         # normalize (lowercase + strip) so a stray case/whitespace mismatch — or a
         # request that omits product_type — can never make an accessories/spare_parts/

@@ -3,6 +3,7 @@ from logger import logging
 from bson import ObjectId
 import uuid
 import re
+from datetime import datetime, timedelta, timezone
 
 
 class inventory_manager(mongodbclient):
@@ -47,6 +48,88 @@ class inventory_manager(mongodbclient):
         # username of whoever raised this add/update — set on create, and
         # refreshed as updated_by whenever an existing lot is merged into
         self.created_by = created_by
+
+    # ------------------------------------------------------------------
+    # Stock batches: every time units are added to an existing lot we keep
+    # WHEN they arrived and the warranty that goes with them, so one lot can
+    # hold e.g. 10 units from 1 Jan and 5 units from 20 Mar, each with its own
+    # warranty left. Lots that never had a batch recorded are treated as a
+    # single batch built from the lot's own purchase_date / warranty_until.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _ymd(value):
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})", str(value or "").strip())
+        return m.group(1) if m else None
+
+    @staticmethod
+    def _period_days(received, warranty_until):
+        r, w = inventory_manager._ymd(received), inventory_manager._ymd(warranty_until)
+        if not r or not w:
+            return None
+        try:
+            d = (datetime.strptime(w, "%Y-%m-%d") - datetime.strptime(r, "%Y-%m-%d")).days
+        except ValueError:
+            return None
+        return d if d >= 0 else None
+
+    @staticmethod
+    def batches_after_increase(lot, added_qty, received_date, warranty_until=None, added_by=None, source="edit"):
+        """Returns the lot's new `batches` list after `added_qty` units that arrived on `received_date`
+        are added. If warranty_until isn't given it is worked out from the lot's existing warranty
+        period (warranty_until - received date of the latest batch) applied to the new arrival date."""
+        ymd = inventory_manager._ymd
+        batches = [dict(b) for b in (lot.get("batches") or [])]
+        old_qty = int(lot.get("quantity", 0) or 0)
+        if not batches and old_qty > 0:
+            batches.append({"batch_id": uuid.uuid4().hex, "quantity": old_qty,
+                            "received_date": ymd(lot.get("purchase_date")),
+                            "warranty_until": ymd(lot.get("warranty_until")),
+                            "added_by": lot.get("created_by"), "added_on": None, "source": "initial"})
+        received = ymd(received_date)
+        w = ymd(warranty_until)
+        if not w and received:
+            ref = batches[-1] if batches else {"received_date": lot.get("purchase_date"),
+                                                 "warranty_until": lot.get("warranty_until")}
+            days = inventory_manager._period_days(ref.get("received_date"), ref.get("warranty_until"))
+            if days is not None:
+                w = (datetime.strptime(received, "%Y-%m-%d") + timedelta(days=days)).strftime("%Y-%m-%d")
+        batches.append({"batch_id": uuid.uuid4().hex, "quantity": int(added_qty),
+                        "received_date": received, "warranty_until": w,
+                        "added_by": added_by, "added_on": datetime.now(timezone.utc).isoformat(),
+                        "source": source})
+        return batches
+
+    @staticmethod
+    def batches_view(lot):
+        """Per-batch picture for the View screen: how much arrived, how much of it is still in stock
+        (stock leaves oldest-first, so what is left is assigned newest batch first) and the warranty left."""
+        ymd = inventory_manager._ymd
+        qty = int(lot.get("quantity", 0) or 0)
+        batches = [dict(b) for b in (lot.get("batches") or [])]
+        if not batches and qty > 0:
+            batches = [{"batch_id": "initial", "quantity": qty, "received_date": ymd(lot.get("purchase_date")),
+                        "warranty_until": ymd(lot.get("warranty_until")), "source": "initial"}]
+        remaining, out = qty, []
+        for b in reversed(batches):
+            take = min(int(b.get("quantity", 0) or 0), remaining)
+            remaining -= take
+            out.append({**b, "in_stock": take})
+        out.reverse()
+        if remaining > 0:   # units added through other paths (assembly, shipment...) with no date recorded
+            out.insert(0, {"batch_id": "untracked", "quantity": None, "in_stock": remaining,
+                           "received_date": None, "warranty_until": None, "source": "untracked"})
+        today = datetime.now(timezone.utc).replace(tzinfo=None).date()
+        for b in out:
+            w = ymd(b.get("warranty_until"))
+            b["warranty_until"] = w
+            if w:
+                try:
+                    left = (datetime.strptime(w, "%Y-%m-%d").date() - today).days
+                except ValueError:
+                    left = None
+                b["warranty_days_left"] = left
+                b["warranty_status"] = None if left is None else ("under warranty" if left >= 0 else "over warranty")
+        return out
 
     def add(self, collection_name):
         try:
@@ -170,6 +253,10 @@ class inventory_manager(mongodbclient):
                 }
                 if self.serial_lots:
                     update_values["serial_lots"] = (entry.get("serial_lots") or []) + self.serial_lots
+                if int(self.quantity or 0) > 0:
+                    update_values["batches"] = self.batches_after_increase(
+                        entry, int(self.quantity or 0), self.purchase_date, self.warranty_until,
+                        self.created_by, source="restock")
                 self.update_data(
                     collection_name=collection_name,
                     query={"_id": ObjectId(entry["_id"])},
@@ -214,7 +301,10 @@ class inventory_manager(mongodbclient):
                     query={"_id": ObjectId(entry["_id"])},
                     update_values={"quantity": int(entry.get("quantity", 0) or 0) + int(self.quantity or 0),
                                    "hologram_numbers": holograms,
-                                   "updated_by": self.created_by}
+                                   "updated_by": self.created_by,
+                                   **({"batches": self.batches_after_increase(
+                                       entry, int(self.quantity or 0), self.purchase_date, warranty_until,
+                                       self.created_by, source="restock")} if int(self.quantity or 0) > 0 else {})}
                 )
                 return {"mode": "merged", "product_id": entry.get("product_id"), "quantity_added": self.quantity}
 
