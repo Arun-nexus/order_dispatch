@@ -78,11 +78,6 @@ def compute_warranty_until(received_date: str, warranty_text: str):
 
 load_dotenv()
 
-# Desktop-app-only roles: these roles can log in only from the packaged desktop app
-# (which sends "key=<APP_CLIENT_KEY>" inside its User-Agent). Configure in .env:
-#   APP_CLIENT_KEY=<random secret, same string as in the desktop app>
-#   APP_ONLY_ROLES=technician,distributor
-# If either is empty, no restriction is applied.
 APP_CLIENT_KEY = os.getenv("APP_CLIENT_KEY", "").strip()
 APP_ONLY_ROLES = {r.strip() for r in os.getenv("APP_ONLY_ROLES", "").split(",") if r.strip()}
 from chat_router import router as chat_router, init_chat
@@ -90,12 +85,12 @@ from chat_router import router as chat_router, init_chat
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
+
     init_chat()
     threading.Thread(target=_warm_up_db, daemon=True).start()
     threading.Thread(target=_reminder_loop, daemon=True).start()
     yield
-    # shutdown: nothing to clean up
+
 
 
 app = FastAPI(lifespan=lifespan)
@@ -111,7 +106,7 @@ app.add_middleware(
 
 app.include_router(chat_router)
 
-# ---- request timing: logs slow requests and how much of the time was spent in MongoDB ----
+
 from mongodb.mongodb_connection import db_stats as _db_stats
 
 @app.middleware("http")
@@ -130,8 +125,6 @@ async def timing_middleware(request: Request, call_next):
             f"(db_calls={stats['calls']}, db_ms={stats['ms']:.0f})")
     return response
 
-# resolve everything relative to THIS file's own folder, not whatever
-# directory uvicorn happens to be launched from
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 ACCOUNTS_COLLECTION = params["account_creation_collection_name"]
@@ -149,10 +142,6 @@ ASSEMBLY_COLLECTION = params.get("assembly_collection_name", "assemblies")
 ATTENDANCE_COLLECTION = params.get("attendance_collection_name", "attendance")
 ATTENDANCE_SETTINGS_COLLECTION = params.get("attendance_settings_collection_name", "attendance_settings")
 
-# ---- Damaged-product report settings ----
-# Image is emailed out immediately when reported, then wiped from Mongo after
-# DAMAGE_IMAGE_RETENTION_DAYS to keep the database light. The issue text and
-# who/when metadata are kept forever - only the (large) base64 image is purged.
 DAMAGE_IMAGE_RETENTION_DAYS = int(os.getenv("DAMAGE_IMAGE_RETENTION_DAYS", "2"))
 GMAIL_SENDER_EMAIL = os.getenv("GMAIL_SENDER_EMAIL", "")
 GMAIL_SENDER_APP_PASSWORD = os.getenv("GMAIL_SENDER_APP_PASSWORD", "")
@@ -202,28 +191,23 @@ class OrderItem(BaseModel):
     product_id: str
     product_name: str
     model_no: str = ""
-    product_type: str = ""        # optional: product / accessories / spare_parts ... (part of the stock identity)
+    product_type: str = ""       
     quantity: int
     price: float
     tax_rate: float = 0
-    # manually reviewed/chosen serial numbers, one per unit, in order — when
-    # given (must have exactly `quantity` entries), these exact serials are
-    # deducted instead of auto-allocating oldest-lot-first. Left empty (the
-    # default) to keep the old fully-automatic behavior.
     serial_numbers: list[str] = []
 
 
 class CreateOrderRequest(BaseModel):
-    customer_id: str = ""          # set when an existing customer was picked
-    customer: dict = {}            # denormalized snapshot: company_name, company_address,
-                                    # gst_number, contractor_person, contractor_number, contractor_email
+    customer_id: str = ""          
+    customer: dict = {}            
     items: list[OrderItem]
     payment_mode: str
-    payment_details: dict = {}     # credit_days / cheque_number+cheque_date / dd_number+dd_date etc.
+    payment_details: dict = {}    
     discount: float = 0
-    warranty_years: int = 1        # standard warranty is 1 year; > 1 means extended
-    warranty_charge: float = 0     # additional charge for the extended warranty (0 for standard)
-    reference: str = ""            # username of the reference person; required by /order/create_order/
+    warranty_years: int = 1       
+    warranty_charge: float = 0    
+    reference: str = ""           
 
 
 class CustomerRequest(BaseModel):
@@ -259,7 +243,7 @@ class AllocationItem(BaseModel):
     product_name: str
     quantity: int
     model_no: str = ""
-    product_type: str = ""        # optional: part of the stock identity (name + model + type)
+    product_type: str = ""       
     serial_numbers: list[str] = []
 
 
@@ -267,20 +251,18 @@ class SparePartAllocation(BaseModel):
     service_id: str
     part_name: str
     quantity: int = 1
-    # optional: which inventory item was picked. With hologram_numbers those exact units are
-    # deducted; with only lot_id the given quantity is deducted from that lot.
     product_id: str = ""
     model_no: str = ""
     product_type: str = ""
     lot_id: str = ""
     hologram_numbers: list[str] = []
     holograms: list[dict] = []
-    request_id: str = ""  # spare_part request this allocation fulfils
-    manual_holograms: list[str] = []  # hologram numbers typed for stock that has none on file
+    request_id: str = ""  
+    manual_holograms: list[str] = []  
 
 
 class CreateAllocationRequest(BaseModel):
-    allocated_to: str = ""  # username of a registered system user
+    allocated_to: str = ""  
     items: list[AllocationItem] = []
     spare_part: SparePartAllocation | None = None
     company_name: str = ""
@@ -300,7 +282,7 @@ class OrderStatusRequest(BaseModel):
 
 
 class LateThresholdRequest(BaseModel):
-    late_time: str  # "HH:MM", 24-hour format — anyone clocking in after this is marked late
+    late_time: str  
 
 
 class DispatchConfirmRequest(BaseModel):
@@ -310,8 +292,8 @@ class DispatchConfirmRequest(BaseModel):
     mode_of_delivery: Optional[str] = None
     dispatched_through: Optional[str] = None
     ship_to_different: bool = False
-    ship_to_address: Optional[dict]= None   # {company_name, address} — only used when ship_to_different is True
-    image: Optional[str] = None   # optional base64 data URI, e.g. packaging/handover photo
+    ship_to_address: Optional[dict]= None   
+    image: Optional[str] = None   
 
 
 class ServicePartUsed(BaseModel):
@@ -387,7 +369,6 @@ class ServiceSendBackRequest(BaseModel):
 
 
 class ServiceEditRequest(BaseModel):
-    # every field optional: only the fields the admin actually changed are sent
     company_name: Optional[str] = None
     product_name: Optional[str] = None
     model_no: Optional[str] = None
@@ -424,9 +405,6 @@ class InstallationAssignRequest(BaseModel):
 
 
 class DemoItem(AllocationItem):
-    """One line of a demo assignment. product_type picks the stock family:
-    product / accessories -> serial_numbers (optional, else oldest-first auto pick)
-    spare_parts / service_parts -> hologram_numbers (optional, else auto pick)."""
     parent_product_name: str = ""
     hologram_numbers: list[str] = []
 
@@ -434,7 +412,6 @@ class DemoItem(AllocationItem):
 class AssignDemoRequest(BaseModel):
     technician_id: str
     items: list[DemoItem]
-    # optional company the demo is going to: company_name, company_address, gst_number, contractor_person, contractor_number
     customer: dict = {}
     remarks: str = ""
 
@@ -471,33 +448,30 @@ class InventoryRequest(BaseModel):
     supplier_address: str = ""
     invoice_no: str = ""
     serial_numbers: list[str] = []
-    product_type: str = "product"  # "product" | "spare_parts" | "service_parts" | "damaged" | "accessories"
-    parent_product_name: str = ""     # spare_parts / service_parts: which product the part belongs to
-    part_category: str = ""           # service_parts: "purchase" | "warranty"
-    warranty_until: str = ""          # YYYY-MM-DD, parts + damaged
-    reason: str = ""                  # damaged: reason of damage
-    hologram_numbers: list[str] = []  # spare_parts / service_parts, optional, one per unit
-    # supplier ledger: "paid" | "credit" | "" (blank = nothing recorded on the customer ledger)
+    product_type: str = "product"  
+    parent_product_name: str = ""   
+    part_category: str = ""        
+    warranty_until: str = ""       
+    reason: str = ""                  
+    hologram_numbers: list[str] = [] 
     payment_mode: str = ""
     supplier_gst: str = ""
     supplier_contact_person: str = ""
     supplier_contact_number: str = ""
     supplier_contact_email: str = ""
-    paid_amount: float = 0            # payment_mode "partial": amount paid now (INR)
-    credit_days: int = 0              # payment_mode "partial" / "credit": days to pay the rest
+    paid_amount: float = 0            
+    credit_days: int = 0              
 
 
 class InventoryUpdateRequest(BaseModel):
     updated_values: dict
     new_serial_numbers: list[str] = []
     remove_serial_numbers: list[str] = []
-    faulty_serial_numbers: list[str] = []     # pulled off this lot and pushed into the "damaged" category instead of just discarded
-    new_hologram_numbers: list[str] = []      # serial-wise hologram numbers to add (spare_parts / service_parts only)
+    faulty_serial_numbers: list[str] = []     
+    new_hologram_numbers: list[str] = []      
     remove_hologram_numbers: list[str] = []
-    source_product_type: Optional[str] = None  # type of the lot being edited (product / damaged / ...)
+    source_product_type: Optional[str] = None 
     model_no: Optional[str] = None
-    # required when the edit RAISES the quantity: the date the extra units arrived (YYYY-MM-DD) and,
-    # optionally, their warranty-until date (else the lot's existing warranty period is applied)
     batch_received_date: Optional[str] = None
     batch_warranty_until: Optional[str] = None
 
@@ -505,14 +479,14 @@ class InventoryUpdateRequest(BaseModel):
 class ShipmentPart(BaseModel):
     part_name: str
     quantity: int = 0
-    status: str = "assembly"      # "assembly" (-> inventory spare_parts) | "purchase" | "warranty" (both -> inventory service_parts)
+    status: str = "assembly"     
 
 
 class ShipmentProduct(BaseModel):
     product_name: str
     quantity: int = 0
     price: float = 0
-    warranty: str = ""            # e.g. "12 months" - optional
+    warranty: str = ""           
     parts: list[ShipmentPart] = []
 
 
@@ -521,16 +495,16 @@ class CreateShipmentRequest(BaseModel):
     company_address: str = ""
     invoice_no: str = ""
     dispatch_date: str
-    received_date: str = ""       # optional - can be added later via mark_received
+    received_date: str = ""      
     products: list[ShipmentProduct]
     customer_id: str = ""
     gst_number: str = ""
     contractor_person: str = ""
     contractor_number: str = ""
     contractor_email: str = ""
-    payment_mode: str = "paid"    # "paid" | "partial" | "credit"
-    paid_amount: float = 0        # partial only: amount paid now (shipment currency)
-    credit_days: int = 0          # partial / credit: days within which the rest is paid
+    payment_mode: str = "paid"   
+    paid_amount: float = 0       
+    credit_days: int = 0          
     currency: str = "INR"
     exchange_rate: float = 1
 
@@ -546,14 +520,12 @@ class ShipmentUpdateRequest(BaseModel):
 class AssemblyPartUsed(BaseModel):
     part_name: str
     quantity: int = 0
-    source: str = "inventory"     # "inventory" (deduct from inventory's spare_parts stock) | "local" (sourced outside, no deduction)
-    belongs_to: str = ""          # product the part belongs to (auto-filled from inventory for source="inventory")
-
+    source: str = "inventory"
+    belongs_to: str = ""          
 
 class AssemblySerialItem(BaseModel):
     serial_number: str
-    lot_no: str = ""      # compulsory per unit (checked in create_assembly); lots may repeat or differ within a batch
-
+    lot_no: str = ""     
 
 class ApproveAssemblyRequest(BaseModel):
     serial_numbers: List[str]
@@ -566,11 +538,10 @@ class CreateAssemblyRequest(BaseModel):
     quantity: int
     parts_used: list[AssemblyPartUsed] = []
     serials: list[AssemblySerialItem]
-    supply_type: str = "normal"          # "normal" | "govt" -> which product sticker layout is used
-    mfg_date: str = ""                   # month & year printed on the sticker, e.g. "11/2026"
-    mrp: str = ""                        # M.R.P printed on the Normal sticker (empty for govt)
-    sticker: Optional[dict] = None       # last edited sticker fields (license no., address, ...)
-
+    supply_type: str = "normal"           
+    mfg_date: str = ""                    
+    mrp: str = ""                        
+    sticker: Optional[dict] = None       
 
 class AssemblyUpdateRequest(BaseModel):
     updated_values: dict
@@ -805,18 +776,12 @@ def update_account(username: str, updated_values: UpdateAccountRequest, user: di
         raise HTTPException(status_code=500, detail="account details updation was unsuccessful")
 
 
-# ---------------------------------------------------------------------------
-# Page-access control (hidden admin page, not linked in any sidebar)
-#   Open  /access-control  in the browser after logging in as admin.
-#   A user with allowed_pages set can open ONLY those pages (and sees only
-#   those in the sidebar). allowed_pages = None -> the role's default pages.
-# ---------------------------------------------------------------------------
 ACCESS_PAGE_RE = re.compile(r"^[a-z0-9_]+\.html$")
 ACCESS_NON_GRANTABLE = {"access_control.html"}
 
 
 class AccessUpdateRequest(BaseModel):
-    allowed_pages: Optional[List[str]] = None   # None / [] = back to the role's default pages
+    allowed_pages: Optional[List[str]] = None   
 
 
 @app.get("/access-control")
@@ -954,9 +919,7 @@ def _validate_order_payment(payment_mode: str, payment_details: dict, grand_tota
 
 
 def _raise_media_review_request(service_id: str, raised_by: str):
-    """Creates a 'media_review' request so admin/accounts get a bell notification
-    to download the uploaded video. Approving it confirms the download and clears
-    the video from the database; rejecting it discards the video without keeping it."""
+
     try:
         req = request_manager(
             request_type="media_review",
@@ -969,11 +932,7 @@ def _raise_media_review_request(service_id: str, raised_by: str):
 
 
 def _damaged_part_warranty(old_hologram: str):
-    """Looks up which shipment lot the removed part (identified by its old
-    hologram number) came from - i.e. the spare_parts/service_parts
-    inventory entry whose hologram_numbers list contains this hologram - and
-    returns that lot's warranty_until (or None if the hologram isn't found
-    on any lot, or the lot was never covered by a warranty)."""
+
     inv_db = inventory_manager()
     entries = inv_db.get_data(
         collection_name=INVENTORY_COLLECTION,
@@ -985,7 +944,7 @@ def _damaged_part_warranty(old_hologram: str):
 
 
 def _faulty_already_filed(part_name: str, old_hologram: str) -> bool:
-    """True when this removed part (name + old hologram number) already sits in the Damaged inventory."""
+
     if not old_hologram:
         return False
     found = inventory_manager().get_data(
@@ -1025,7 +984,7 @@ def _file_removed_part(part_name: str, old_hologram: str, destination: str = "fa
 
 
 def _record_faulty_filed(service_id: str, holograms: list):
-    """Remember on the service which old hologram numbers were filed as faulty (shown on the Allocated Parts card)."""
+
     try:
         svc_db = service_detail()
         svc = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
@@ -1038,26 +997,7 @@ def _record_faulty_filed(service_id: str, holograms: list):
 
 
 def _swap_faulty_part(service_id: str, parts_used: list):
-    """When a service is closed with spare part(s) used: for each part,
-    checks the entered old hologram number against the hologram currently
-    on file for the product's serial number in the assembly record (a
-    mismatch is only a warning, never blocks), rolls the assembly record's
-    hologram forward to that part's new hologram number, and adds the
-    removed part into inventory as a damaged product (name = part name,
-    product_id = its old hologram number).
 
-    Before filing it as damaged, the shipment lot the part originally came
-    from (matched via its old hologram number) is looked up so we know
-    whether that lot's warranty is still valid:
-      - still under warranty -> warranty_until is carried onto the damaged
-        entry, so /inventory/'s dynamic warranty_status calc marks it
-        "under warranty" (and how many days are left) automatically
-      - warranty expired, or no shipment lot/warranty found at all -> marked
-        "over warranty", and this service's service_id is recorded in the
-        damaged entry's `reason` field for traceability
-
-    Returns True if any part's old hologram number did not match what's on
-    file (or couldn't be verified)."""
     svc_db = service_detail()
     svc = svc_db.get_service_data(collection_name=SERVICE_COLLECTION, query={"service_id": service_id})
     if not svc:
@@ -1098,13 +1038,9 @@ def _swap_faulty_part(service_id: str, parts_used: list):
 
         warranty_until = _damaged_part_warranty(old_hologram)
         under_warranty = bool(warranty_until) and warranty_until >= today
-        # only when the part is already out of warranty (or its shipment lot
-        # couldn't be traced at all) do we stamp the damage reason with this
-        # service's service_id - an in-warranty part doesn't need that
-        # trail, its warranty_until on the entry already tells the story
+     
         reason = "" if under_warranty else f"damaged part removed during service {service_id}"
 
-        # already filed as faulty (e.g. the manager used "Add to faulty" on the service page) -> don't add it twice
         destination = (part.get("destination") or "faulty").strip().lower()
         if destination == "inventory":
             _file_removed_part(part_name, old_hologram, "inventory")
@@ -1123,24 +1059,17 @@ def _swap_faulty_part(service_id: str, parts_used: list):
     return mismatch
 
 
-# ---- never hand out a serial number that is already sold ----
-# Inventory lots can still list a serial that a live order / demo allocation already holds
-# (stale lot data, a restock that was never cleaned up, the same serial in two lots ...).
-# These helpers cross-check inventory serials against orders + allocations before auto-picking.
 _ORDER_STATUSES_NOT_HOLDING_STOCK = ["cancelled", "returned"]
-# Inventory is the source of truth: a serial that sits in an inventory lot is sellable / demo-able.
-# Set to True to also hide serials that an old order / un-returned allocation still mentions.
 ENFORCE_SOLD_SERIAL_CROSSCHECK = False
 
 
 def _unsold_serials(serials):
-    """Returns the serials (original order kept) that are NOT held by a live order or a live
-    (not returned) allocation. Serials of returned orders that were restocked count as free."""
+
     serials = [s for s in (serials or []) if s]
     if not serials or not ENFORCE_SOLD_SERIAL_CROSSCHECK:
         return serials
     db = mongodbclient()
-    taken = set()   # lower-cased / trimmed: stored serials are not consistently the same case
+    taken = set() 
     for o in db.get_data(collection_name=ORDERS_COLLECTION,
                          query={"items.serial_numbers": {"$in": serials},
                                 "status": {"$nin": _ORDER_STATUSES_NOT_HOLDING_STOCK}}):
@@ -1159,17 +1088,13 @@ def _unsold_serials(serials):
 
 
 def _item_ident(item):
-    """(product_name, model_no, product_type) - what makes two stock lines "the same product".
-    product_id is deliberately NOT part of it: inventory products carry a blank / single-space id."""
+
     g = item.get if isinstance(item, dict) else (lambda k, d=None: getattr(item, k, d))
     return ((g("product_name") or "").strip(), (g("model_no") or "").strip(), (g("product_type") or "").strip())
 
 
 def _sellable_quantity(inventory_db, product_id: str, model_no=None, product_name=None, product_type=None):
-    """How many units of this product can really be handed out right now.
-    Returns (sellable, skipped_sold_serials). Serialised stock: serials not held by a live order /
-    allocation, plus units of the lot that have no serial on file (a lot may hold more units than
-    serials). Fully un-serialised stock: the plain quantity."""
+
     kw = dict(model_no=model_no or None, product_name=product_name or None, product_type=product_type or None)
     candidates = inventory_db.list_available_serials(INVENTORY_COLLECTION, product_id, **kw)
     if not candidates:
@@ -1187,12 +1112,7 @@ def _stock_short_detail(name: str, sellable: int, skipped: int, variant_note: st
 
 
 def _auto_pick_units(inventory_db, product_id: str, quantity: int, model_no=None, product_name=None, product_type=None):
-    """Auto-allocation that skips already-sold serials. The product is identified by product name +
-    model no + product type (product_id only when no name is given). Serialised stock: the oldest
-    UNSOLD serials are picked first; if the lot holds more units than serials on file, the rest are
-    taken as un-serialised units (so the returned serial list may be shorter than `quantity`).
-    Un-serialised stock (accessories / spare parts with no serial on file) keeps using
-    the plain quantity allocator, since there is nothing to cross-check."""
+
     kw = dict(model_no=model_no or None, product_name=product_name or None, product_type=product_type or None)
     candidates = inventory_db.list_available_serials(INVENTORY_COLLECTION, product_id, **kw)
     if not candidates:
@@ -1202,13 +1122,11 @@ def _auto_pick_units(inventory_db, product_id: str, quantity: int, model_no=None
     if len(clean) >= quantity:
         return inventory_db.allocate_specific_serials(collection_name=INVENTORY_COLLECTION, product_id=product_id,
                                                       serial_numbers=clean[:quantity], **kw)
-    # not enough clean serials - the lot may simply hold more units than serials on file
     unserialised = inventory_db.unserialised_quantity(INVENTORY_COLLECTION, product_id, **kw)
     sellable = len(clean) + unserialised
     if sellable < quantity:
         raise HTTPException(status_code=400,
                             detail=_stock_short_detail(product_name or product_id, sellable, len(candidates) - len(clean)))
-    # un-serialised units first (can't half-fail after serials are gone), then the clean serials
     inventory_db.allocate_unserialised_units(INVENTORY_COLLECTION, product_id, quantity - len(clean), **kw)
     if not clean:
         return []
@@ -1227,7 +1145,6 @@ _HOLOGRAM_PART_TYPES = ("spare_parts", "service_parts")
 
 
 def _is_part_item(item) -> bool:
-    """True for stock that is tracked by hologram number (spare / service parts)."""
     g = item.get if isinstance(item, dict) else (lambda k, d=None: getattr(item, k, d))
     return (g("product_type") or "") in _HOLOGRAM_PART_TYPES
 

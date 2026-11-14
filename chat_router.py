@@ -88,7 +88,7 @@ def user_pub(u):
 
 
 def token_for(u):
-    return jwt.encode({"sub": str(u["_id"]), "exp": now() + 7 * 86400}, SECRET, algorithm="HS256")
+    return jwt.encode({"sub": str(u["_id"]), "exp": now() + 3650 * 86400}, SECRET, algorithm="HS256")
 
 
 def user_from_token(t):
@@ -120,7 +120,7 @@ def msg_pub(m, ttl):
     return {
         "id": str(m["_id"]), "chat_id": m["chat_id"], "sender": m["sender"], "text": m["text"],
         "files": m.get("files", []), "mentions": m.get("mentions", []), "created": m["created"],
-        "edited": m.get("edited"), "seen": m.get("seen", {}), "expires": (m["created"] + ttl) if ttl else None,
+        "edited": m.get("edited"), "reply": m.get("reply"), "seen": m.get("seen", {}), "expires": (m["created"] + ttl) if ttl else None,
     }
 
 
@@ -542,7 +542,13 @@ def do_send(u, uid, d):
     if not c or not (text or files):
         return None
     mentions = [m for m in (d.get("mentions") or []) if m in c["members"]]
-    doc = {"chat_id": str(c["_id"]), "sender": uid, "text": text, "files": files, "mentions": mentions, "created": now(), "seen": {uid: now()}}
+    reply = None
+    rid = oid(d.get("reply_to"))
+    if rid:
+        rm = msgs.find_one({"_id": rid, "chat_id": str(c["_id"])})
+        if rm:
+            reply = {"id": str(rm["_id"]), "sender": rm["sender"], "text": rm["text"][:150], "file": bool(rm.get("files"))}
+    doc = {"chat_id": str(c["_id"]), "sender": uid, "text": text, "files": files, "mentions": mentions, "reply": reply, "created": now(), "seen": {uid: now()}}
     msgs.insert_one(doc)
     return c, doc
 
@@ -580,6 +586,7 @@ class Msg(BaseModel):
     text: str = ""
     mentions: list[str] = []
     files: list[dict] = []
+    reply_to: str | None = None
 
 
 @router.post("/messages")
