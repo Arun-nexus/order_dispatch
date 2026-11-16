@@ -50,6 +50,16 @@ class inventory_manager(mongodbclient):
         self.created_by = created_by
 
     # ------------------------------------------------------------------
+    # Zero-quantity rule: when a lot's quantity reaches 0, a plain "product"
+    # lot (or an old lot with no product_type) is KEPT as a 0-quantity row so
+    # it shows as out of stock. Every other type (spare_parts, service_parts,
+    # accessories, damaged/faulty) is AUTO-DELETED at 0.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _keeps_zero_row(product_type):
+        return (product_type or "product") == "product"
+
+    # ------------------------------------------------------------------
     # Stock batches: every time units are added to an existing lot we keep
     # WHEN they arrived and the warranty that goes with them, so one lot can
     # hold e.g. 10 units from 1 Jan and 5 units from 20 Mar, each with its own
@@ -178,7 +188,8 @@ class inventory_manager(mongodbclient):
         Category-change-by-serial: if a serial number being added here is
         already on file under a *different* product_type entry anywhere in
         inventory, that unit is pulled out of its old entry (1 unit + that
-        serial removed, entry kept at 0 if it hits zero) and lands in the
+        serial removed; the old entry is kept at 0 if it is a "product" lot,
+        auto-deleted if it is any other type) and lands in the
         product_type being added now. This is how a unit gets flagged
         faulty (product_type="damaged") when it's re-added as damaged even
         though it was previously a product/spare_parts/service_parts/
@@ -218,12 +229,9 @@ class inventory_manager(mongodbclient):
                     owner_serials = owner.get("serial_numbers") or []
                     remaining_serials = [s for s in owner_serials if s != serial]
                     new_owner_quantity = max(int(owner.get("quantity", 0) or 0) - 1, 0)
-                    # keep the old entry even when it drops to 0 (never auto-deleted)
-                    self.update_data(
-                        collection_name=collection_name,
-                        query={"_id": ObjectId(owner["_id"])},
-                        update_values={"serial_numbers": remaining_serials, "quantity": new_owner_quantity}
-                    )
+                    # "product" lots stay at 0; every other type is auto-deleted at 0
+                    self._decrement_or_delete(collection_name, owner["_id"], new_owner_quantity,
+                                              {"serial_numbers": remaining_serials})
                     logging.info(
                         f"serial {serial} moved out of '{owner.get('product_type', 'product')}' "
                         f"into '{self.product_type}'"
@@ -415,14 +423,26 @@ class inventory_manager(mongodbclient):
 
     def update(self, collection_name, query, update_values, many=False):
         try:
-            # a quantity of 0 (or below) is kept as a 0-quantity row - the entry is NOT deleted
-            # automatically. Only the explicit "delete product" action removes an inventory row.
+            # a quantity of 0 (or below) is stored as 0. What happens to the row then depends on its
+            # type: a "product" lot is KEPT as a 0-quantity (out of stock) row, every other type
+            # (spare_parts, service_parts, accessories, damaged) is auto-deleted. The type used is the
+            # one being saved in this same update, else the one already on the lot.
             new_quantity = update_values.get("quantity")
+            doomed = []
             if new_quantity is not None and int(new_quantity or 0) <= 0:
                 update_values = dict(update_values, quantity=0)
+                for d in self.get_data(collection_name=collection_name, query=query):
+                    final_type = update_values.get("product_type") or d.get("product_type")
+                    if not self._keeps_zero_row(final_type):
+                        doomed.append(d["_id"])
 
             data = super().update_data(collection_name=collection_name, query=query,
                                          update_values=update_values, many=many)
+
+            for _id in doomed:
+                super().delete_data(collection_name=collection_name, query={"_id": ObjectId(str(_id))})
+                logging.info(f"entry {_id} reached quantity 0 — auto-deleted")
+
             logging.info("value was updated to the inventory!")
             return data
         except Exception as e:
@@ -433,18 +453,29 @@ class inventory_manager(mongodbclient):
         """
         Shared by every allocate/consume path below: applies a quantity
         decrement to the entry at entry_id. When the resulting quantity is 0
-        (or less) the entry is KEPT as a 0-quantity row (never auto-deleted) -
-        it is simply not eligible for allocation (every allocator filters
-        quantity > 0) and shows as out of stock. extra_update_values (e.g. an
-        updated serial_numbers/hologram_numbers list) are applied alongside.
+        (or less):
+          - "product" lots (or lots with no type) are KEPT as a 0-quantity row
+            - not eligible for allocation (every allocator filters quantity > 0)
+            and shown as out of stock;
+          - every other type (spare_parts, service_parts, accessories, damaged)
+            is AUTO-DELETED.
+        extra_update_values (e.g. an updated serial_numbers/hologram_numbers
+        list) are applied alongside when the row is kept.
         """
         new_quantity = max(int(new_quantity or 0), 0)
+        if new_quantity == 0:
+            docs = self.get_data(collection_name=collection_name, query={"_id": ObjectId(str(entry_id))})
+            ptype = docs[0].get("product_type") if docs else "product"
+            if not self._keeps_zero_row(ptype):
+                super().delete_data(collection_name=collection_name, query={"_id": ObjectId(str(entry_id))})
+                logging.info(f"quantity reached 0 for entry {entry_id} ({ptype}) — auto-deleted")
+                return
         update_values = {"quantity": new_quantity}
         if extra_update_values:
             update_values.update(extra_update_values)
         if new_quantity == 0 and "serial_numbers" in update_values:
             update_values["serial_numbers"] = []   # nothing left in stock -> no stray serials
-        self.update_data(collection_name=collection_name, query={"_id": ObjectId(entry_id)},
+        self.update_data(collection_name=collection_name, query={"_id": ObjectId(str(entry_id))},
                           update_values=update_values)
         if new_quantity == 0:
             logging.info(f"quantity reached 0 for entry {entry_id} — kept in inventory as out of stock")
@@ -595,8 +626,8 @@ class inventory_manager(mongodbclient):
         assembly is edited and fewer parts are needed than were first deducted.
 
         The units go back into the newest existing lot for that product_name +
-        product_type. Used-up lots stay as 0-quantity rows, so they are reused;
-        a fresh lot is only created when none exists at all.
+        product_type. Spare/service part lots that were used up are auto-deleted
+        at 0, so if none exists any more a fresh lot is created.
         """
         try:
             quantity = int(quantity or 0)
@@ -864,7 +895,7 @@ class inventory_manager(mongodbclient):
             allocated = []
             for serial in serial_numbers:
                 # only lots that still have stock left in THIS call (a lot emptied by an earlier
-                # serial is already deleted - it must not be matched / decremented again)
+                # serial is already deleted / at 0 - it must not be matched / decremented again)
                 match = next((e for e in entries
                               if int(e.get("quantity", 0) or 0) > 0 and serial in (e.get("serial_numbers") or [])), None)
                 if not match:

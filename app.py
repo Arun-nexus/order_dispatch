@@ -7235,26 +7235,6 @@ def create_allocation(request: CreateAllocationRequest, user: dict = Depends(req
                 variant_note = f" (model {item.model_no})" if item.model_no else ""
                 raise HTTPException(status_code=400, detail=f"insufficient stock for {item.product_name}{variant_note}: only {available} available")
 
-        # No more partial returns: every allocated unit becomes its own
-        # allocation document (quantity=1, one serial number each) instead of
-        # bundling the whole quantity into a single row. A cart of ProductA x2
-        # therefore creates two separate rows on the Allocated page, each
-        # independently returnable.
-        #
-        # allocate_serials() (strict) requires every unit to already have a
-        # serial number on file — but accessories/spare_parts are legitimately
-        # allowed to be stocked with NO serial numbers at all (see
-        # /inventory/create), even though get_available_quantity() above
-        # correctly counts their quantity as available. That mismatch meant
-        # allocating any such product here failed with "insufficient stock"
-        # right after the precheck said stock WAS available — allocation
-        # would never go through. allocate_units() is the tolerant version
-        # used everywhere else in this file (order fulfillment, order edits):
-        # it decrements quantity regardless of serial coverage and returns
-        # whatever serials it did find, which may be fewer than requested
-        # (or none). We still create one allocation row per unit as before —
-        # rows for units with no serial on file just carry an empty
-        # serial_numbers list instead of failing the whole allocation.
         created_allocation_ids = []
         for item in request.items:
             if item.serial_numbers:
