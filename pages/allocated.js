@@ -401,9 +401,13 @@ function openRequestDetailsModal(r) {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     ${body}
-    <div class="detail"><small>Requested On</small><p>${fmtReqDateTime(r.created_at)}</p></div>`;
+    <div class="detail"><small>Requested On</small><p>${fmtReqDateTime(r.created_at)}</p></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #e2e8f0;">
+      <button type="button" class="req-print-btn" style="border:none;background:#1665ff;color:#fff;padding:9px 18px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;"><i class="fa-solid fa-print"></i> Print</button>
+    </div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelector('.req-print-btn').addEventListener('click', () => printRequestDetails(r, heading, content));
   content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async e => {
     e.preventDefault();
     const f = d.attachments[Number(link.dataset.i)];
@@ -433,6 +437,47 @@ function openRequestDetailsModal(r) {
       })
       .catch(() => { proofBox.textContent = 'Proof could not be loaded.'; });
   }
+}
+
+function printRequestDetails(r, heading, content) {
+  const clone = content.cloneNode(true);
+  clone.querySelectorAll('.req-print-btn, .close, button').forEach(el => el.remove());
+  clone.querySelectorAll('.attach-link').forEach(el => { const s = document.createElement('span'); s.style.display = 'block'; s.textContent = el.textContent; el.replaceWith(s); });
+  clone.querySelectorAll('h3').forEach(el => el.remove());
+  const status = String(r.status || '').replace(/_/g, ' ');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(heading)}</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; font-size: 13px; margin: 0; }
+  .p-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #1665ff; padding-bottom: 8px; margin-bottom: 14px; }
+  .p-head h1 { font-size: 20px; margin: 0 0 2px; }
+  .p-head .co { font-size: 12px; color: #64748b; }
+  .p-head .meta { text-align: right; font-size: 11px; color: #475569; line-height: 1.5; }
+  .detail { margin-bottom: 8px; page-break-inside: avoid; }
+  .detail small { display: block; font-size: 11px; color: #64748b; }
+  .detail p { margin: 1px 0 0; font-size: 13px; font-weight: 600; }
+  .p-body > div[style*="border"] { border: 1px solid #cbd5e1 !important; border-radius: 6px !important; page-break-inside: avoid; }
+  img { max-width: 100%; max-height: 220px; }
+</style></head><body>
+  <div class="p-head">
+    <div><h1>${esc(heading)}</h1><div class="co">Acer Biomedical</div></div>
+    <div class="meta">Request ID: ${esc(r.request_id || '-')}<br>Status: ${esc(status || '-')}<br>Printed: ${new Date().toLocaleString('en-GB')}</div>
+  </div>
+  <div class="p-body">${clone.innerHTML}</div>
+</body></html>`;
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(frame);
+  const doc = frame.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  const go = () => {
+    try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) { alert('Could not open print dialog'); }
+    setTimeout(() => frame.remove(), 2000);
+  };
+  const imgs = Array.from(doc.images);
+  if (!imgs.length) setTimeout(go, 150);
+  else Promise.all(imgs.map(im => im.complete ? 0 : new Promise(res => { im.onload = im.onerror = res; }))).then(() => setTimeout(go, 100));
 }
 
 function rowRequestId(e) {
