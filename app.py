@@ -4701,6 +4701,58 @@ def serial_history(serial_number: str, kind: str = "serial", user: dict = Depend
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _can_see_full_record(_full):
+    """_full() returns None for roles that may not see full records; use it as the permission check."""
+    return _full({}) is not None
+
+
+def _part_record_for_hologram(entry, hologram):
+    """
+    Part-oriented record for a hologram number found in an inventory lot. Spare / service /
+    damaged parts don't have a model no., invoice, price or tax, so those lot fields are left
+    out and the details that matter for a part are shown instead: what it is, which product it
+    belongs to, warranty, how many units of the lot are hologram-tagged, and the lot's other
+    hologram numbers (clickable in the Record page).
+    """
+    holos = [str(h) for h in (entry.get("hologram_numbers") or [])]
+    qty = int(entry.get("quantity") or 0)
+    others = [h for h in holos if h.strip().lower() != hologram]
+
+    warranty_until = entry.get("warranty_until")
+    warranty_status = warranty_days_left = None
+    if warranty_until:
+        today_dt = datetime.now(timezone.utc)
+        warranty_status = "Over warranty" if str(warranty_until) < today_dt.strftime("%Y-%m-%d") else "Under warranty"
+        if warranty_status == "Under warranty":
+            try:
+                warranty_days_left = (datetime.strptime(str(warranty_until), "%Y-%m-%d") - today_dt.replace(tzinfo=None)).days
+            except ValueError:
+                warranty_days_left = None
+
+    rec = {
+        "hologram_number": hologram,
+        "part_name": entry.get("product_name"),
+        "belongs_to_product": entry.get("parent_product_name"),
+        "part_type": productTypeLabelPy(entry.get("product_type")),
+    }
+    if entry.get("product_type") == "service_parts" and entry.get("part_category"):
+        rec["part_category"] = str(entry.get("part_category")).title()
+    rec["tagging_status"] = f"{len(holos)} of {qty} unit(s) tagged" if entry.get("product_type") != "damaged" else f"{len(holos)} unit(s) in this lot"
+    rec["warranty_until"] = warranty_until
+    rec["warranty_status"] = warranty_status
+    rec["warranty_days_left"] = warranty_days_left
+    rec["supplier"] = entry.get("supplier")
+    rec["supplier_address"] = entry.get("supplier_address")
+    rec["shipment_received_date"] = entry.get("purchase_date")
+    if entry.get("product_type") == "damaged":
+        rec["reason_of_damage"] = entry.get("reason_of_damage") or entry.get("reason")
+        rec["damage_status"] = entry.get("damage_status") or "Damaged"
+    rec["added_by"] = entry.get("created_by")
+    rec["last_updated_by"] = entry.get("updated_by")
+    rec["other_holograms_in_this_lot"] = others[:300]
+    return _record_for_view({k: v for k, v in rec.items() if v not in (None, "", [])})
+
+
 def _hologram_events(rx, hologram, _full):
     """
     Timeline events for one hologram number. Only touches the places a hologram
@@ -4718,7 +4770,7 @@ def _hologram_events(rx, hologram, _full):
     events = []
 
     for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"hologram_numbers": rx},
-                                              projection={"serial_numbers": 0, "hologram_numbers": 0}):
+                                              projection={"serial_numbers": 0}):
         events.append({
             "type": "inventory",
             "label": f"In stock — {productTypeLabelPy(entry.get('product_type'))}",
@@ -4733,7 +4785,7 @@ def _hologram_events(rx, hologram, _full):
                 "product_type": entry.get("product_type"),
                 "reason": entry.get("reason") or None,
             },
-            "full": _full(entry),
+            "full": _part_record_for_hologram(entry, hologram) if _can_see_full_record(_full) else None,
         })
 
     asm_q = {"$or": [{"serials.hologram_number": rx}, {"serials.previous_hologram_number": rx}]}
