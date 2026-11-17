@@ -1476,6 +1476,8 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
         remark = (updated.pop("remark", "") or "").strip()
         if is_edit and not remark:
             raise HTTPException(status_code=400, detail="a remark is required when editing an order")
+        if not is_edit and remark:
+            updated["remark"] = remark
 
         # Cancelling an order releases the stock/serials it reserved at creation
         # time (_fulfill_order deducts inventory immediately, before delivery)

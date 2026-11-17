@@ -1043,7 +1043,9 @@ function openViewOrderModal(o) {
   const notes = [
     o.status === 'cancelled' ? cell('Cancellation Reason', e(o.cancel_reason || '')) : '',
     o.status === 'returned' ? cell('Return Reason', e(o.return_reason || '')) : '',
-    o.status === 'placed' && o.remark ? cell('Remark', e(o.remark)) : ''
+    o.order_remarks ? cell('Order Remarks', e(o.order_remarks)) : '',
+    o.status === 'placed' && o.remark ? cell('Remark', e(o.remark)) : '',
+    (o.edit_history || []).length ? cell('Last Edit Remark', e(o.edit_history[o.edit_history.length - 1].remark || '')) : ''
   ].join('');
 
   content.innerHTML = `
