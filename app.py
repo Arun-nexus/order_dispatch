@@ -2929,13 +2929,14 @@ def run_in_background(name: str, fn, min_interval: int = 1800):
 def ensure_indexes():
     """Idempotent — creates indexes on the fields the list/lookup queries filter by."""
     wanted = {
-        ALLOCATION_COLLECTION: ["allocation_id", "allocated_by", "allocation_type", "return_status"],
-        ORDERS_COLLECTION: ["order_id", "status", "creator.raised_by"],
+        ALLOCATION_COLLECTION: ["allocation_id", "allocated_by", "allocation_type", "return_status", "items.serial_numbers", "items.hologram_numbers", "spare_part.hologram_numbers", "spare_part.manual_holograms"],
+        ORDERS_COLLECTION: ["order_id", "status", "creator.raised_by", "items.serial_numbers"],
         REQUESTS_COLLECTION: ["request_id", "raised_by", "status"],
-        INVENTORY_COLLECTION: ["product_id", "product_type"],
+        INVENTORY_COLLECTION: ["product_id", "product_type", "serial_numbers", "hologram_numbers"],
+        ASSEMBLY_COLLECTION: ["serials.serial_number", "serials.hologram_number", "serials.previous_hologram_number"],
         ACCOUNTS_COLLECTION: ["username", "role"],
         CUSTOMER_COLLECTION: ["customer_id"],
-        SERVICE_COLLECTION: ["service_id"],
+        SERVICE_COLLECTION: ["service_id", "serial_no", "faulty_filed", "faulty_parts.old_hologram_number", "parts_used.old_hologram_number", "parts_used.new_hologram_number"],
         INSTALLATION_COLLECTION: ["installation_id", "technician_id", "status"],
         NOTIFICATIONS_COLLECTION: ["username"],
         MESSAGES_COLLECTION: ["to_username", "from_username", "message_id"],
@@ -4499,8 +4500,12 @@ def _record_for_view(doc):
 
 
 @app.get("/inventory/serial_history/{serial_number}")
-def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
+def serial_history(serial_number: str, kind: str = "serial", user: dict = Depends(get_current_user)):
     """
+    kind="serial" (default) looks the value up as a serial number; kind="hologram"
+    looks it up as a hologram number instead and runs only the hologram queries
+    (see _hologram_events), so picking one category never adds work for the other.
+
     Full lifetime trail for one serial number, stitched together from every
     collection that could mention it — inventory (current stock), assembly
     (when/how it was built), orders (sold + any return), and allocations
@@ -4543,6 +4548,15 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
 
         def _full(doc):
             return _record_for_view(doc) if _can_see_full else None
+
+        if (kind or "serial").strip().lower() == "hologram":
+            events = _hologram_events(rx, serial_number, _full)
+            events.sort(key=lambda e: str(e.get("date") or ""))
+            for e in events:
+                if e.get("date") is not None and not isinstance(e["date"], str):
+                    e["date"] = str(e["date"])
+            logging.info(f"hologram history fetched for {serial_number}: {len(events)} event(s)")
+            return {"message": "hologram history", "kind": "hologram", "serial_number": serial_number, "events": events}
 
         # ---- Currently in inventory (and under which category) ----
         inv_db = inventory_manager()
@@ -4678,13 +4692,113 @@ def serial_history(serial_number: str, user: dict = Depends(get_current_user)):
                 e["date"] = str(e["date"])
 
         logging.info(f"serial history fetched for {serial_number}: {len(events)} event(s)")
-        return {"message": "serial history", "serial_number": serial_number, "events": events}
+        return {"message": "serial history", "kind": "serial", "serial_number": serial_number, "events": events}
 
     except HTTPException:
         raise
     except Exception as e:
         logging.error(f"serial history lookup failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _hologram_events(rx, hologram, _full):
+    """
+    Timeline events for one hologram number. Only touches the places a hologram
+    can live: inventory lots (spare/service/damaged parts keep them per unit),
+    assembly serials (current + previous hologram after a swap), services
+    (faulty parts reported/filed, parts swapped in) and allocations (spare
+    parts / items handed out). Each query is a single indexed lookup.
+    """
+    def _same(v):
+        return str(v or "").strip().lower() == hologram
+
+    def _has(lst):
+        return any(_same(x) for x in (lst or []))
+
+    events = []
+
+    for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"hologram_numbers": rx},
+                                              projection={"serial_numbers": 0, "hologram_numbers": 0}):
+        events.append({
+            "type": "inventory",
+            "label": f"In stock — {productTypeLabelPy(entry.get('product_type'))}",
+            "date": entry.get("purchase_date"),
+            "details": {
+                "hologram_number": hologram,
+                "product_name": entry.get("product_name"),
+                "belongs_to": entry.get("parent_product_name"),
+                "product_id": entry.get("product_id"),
+                "supplier": entry.get("supplier"),
+                "lot_no": entry.get("lot_no"),
+                "product_type": entry.get("product_type"),
+                "reason": entry.get("reason") or None,
+            },
+            "full": _full(entry),
+        })
+
+    asm_q = {"$or": [{"serials.hologram_number": rx}, {"serials.previous_hologram_number": rx}]}
+    for asm in assembly_manager().get_data(collection_name=ASSEMBLY_COLLECTION, query=asm_q):
+        for s_ in asm.get("serials", []):
+            cur, prev = _same(s_.get("hologram_number")), _same(s_.get("previous_hologram_number"))
+            if not (cur or prev):
+                continue
+            events.append({
+                "type": "assembly",
+                "label": "Fitted in assembled unit" if cur else "Replaced in assembled unit (old hologram)",
+                "date": asm.get("completed_at") or asm.get("assembly_date") or asm.get("created_at"),
+                "details": {
+                    "assembly_id": asm.get("assembly_id"),
+                    "product_name": asm.get("product_name"),
+                    "serial_number": s_.get("serial_number"),
+                    "hologram_number": s_.get("hologram_number"),
+                    "previous_hologram_number": s_.get("previous_hologram_number"),
+                    "status": asm.get("status"),
+                },
+                "full": _full(asm),
+            })
+
+    svc_q = {"$or": [{"faulty_parts.old_hologram_number": rx}, {"faulty_filed": rx},
+                     {"parts_used.old_hologram_number": rx}, {"parts_used.new_hologram_number": rx}]}
+    for s in service_detail(product_id="", serial_no="").get_service_data(collection_name=SERVICE_COLLECTION, query=svc_q):
+        role = "reported faulty"
+        for p in (s.get("parts_used") or []):
+            if _same(p.get("new_hologram_number")):
+                role = "fitted as replacement"
+                break
+            if _same(p.get("old_hologram_number")):
+                role = "removed during service"
+        events.append({
+            "type": "service",
+            "label": f"Service — part {role}",
+            "date": s.get("created_at") or s.get("purchase_date"),
+            "details": {
+                "service_id": s.get("service_id"),
+                "serial_no": s.get("serial_no"),
+                "issue": s.get("issue"),
+                "status": s.get("service_status"),
+            },
+            "full": _full(s),
+        })
+
+    alloc_q = {"$or": [{"spare_part.hologram_numbers": rx}, {"spare_part.manual_holograms": rx},
+                       {"items.hologram_numbers": rx}]}
+    for a in allocation_manager().get_data(collection_name=ALLOCATION_COLLECTION, query=alloc_q):
+        sp = a.get("spare_part") or {}
+        item = next((it for it in a.get("items", []) if _has(it.get("hologram_numbers"))), {})
+        events.append({
+            "type": "allocation",
+            "label": "Allocated (spare part)" if a.get("allocation_type") == "spare_part" else "Allocated",
+            "date": a.get("allotment_date"),
+            "details": {
+                "allocation_id": a.get("allocation_id"),
+                "product_name": sp.get("part_name") or item.get("product_name"),
+                "service_id": sp.get("service_id"),
+                "allocated_by": a.get("allocated_by"),
+                "return_status": a.get("return_status"),
+            },
+            "full": _full(a),
+        })
+    return events
 
 
 def productTypeLabelPy(product_type):

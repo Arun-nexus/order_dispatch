@@ -86,6 +86,12 @@ function wireSerialRecordModal() {
 
   // last search result, so an event can be opened in full and "Back" needs no new request
   const current = { events: [], serial: '' };
+  // which category the search runs against: 'serial' or 'hologram' (kept while the modal stays open)
+  let kind = 'serial';
+  const KIND_META = {
+    serial:   { title: 'Serial Number', placeholder: 'Enter serial number', hint: 'Search a serial number to see its full lifetime record — when it was added to inventory, assembled, sold/demoed, returned, and every service raised against it.' },
+    hologram: { title: 'Hologram Number', placeholder: 'Enter hologram number', hint: 'Search a hologram number to see where that part/unit has been — stock lots, assembled units, services and allocations.' },
+  };
 
   // one delegated listener for: open event details / back to timeline / jump to another serial
   modal.addEventListener('click', e => {
@@ -94,37 +100,73 @@ function wireSerialRecordModal() {
     const chip = e.target.closest('.sr-serial');
     if (chip && box.contains(chip)) {
       const sn = chip.dataset.serial || '';
+      // a hologram chip jumps to a hologram search, a serial chip to a serial search
+      setKind(chip.dataset.kind === 'hologram' ? 'hologram' : 'serial');
       const input = modal.querySelector('#serialRecordInput');
       if (input) input.value = sn;
       runSerialSearch(sn);
       return;
     }
+    const tab = e.target.closest('.sr-kind');
+    if (tab) {
+      setKind(tab.dataset.kind);
+      const input = modal.querySelector('#serialRecordInput');
+      if (input) input.focus();
+      return;
+    }
     if (e.target.closest('.sr-back')) {
-      box.innerHTML = renderSerialTimeline(current.events, current.serial);
+      box.innerHTML = renderSerialTimeline(current.events, current.serial, current.kind);
       return;
     }
     const evEl = e.target.closest('.sr-ev');
     if (evEl && box.contains(evEl)) {
       const ev = current.events[Number(evEl.dataset.evIdx)];
-      if (ev) { box.innerHTML = renderSerialEventDetail(ev, current.serial); box.scrollIntoView({ block: 'nearest' }); }
+      if (ev) { box.innerHTML = renderSerialEventDetail(ev, current.serial, current.kind); box.scrollIntoView({ block: 'nearest' }); }
     }
   });
 
-  function renderSearchForm(prefill) {
+  // switch category: updates toggle, heading, hint and placeholder, and clears the old result
+  function setKind(next) {
+    kind = next === 'hologram' ? 'hologram' : 'serial';
+    const meta = KIND_META[kind];
+    modal.querySelectorAll('.sr-kind').forEach(b => {
+      const on = b.dataset.kind === kind;
+      b.style.background = on ? 'var(--primary)' : 'transparent';
+      b.style.color = on ? '#fff' : 'var(--text-secondary)';
+    });
+    const title = modal.querySelector('#serialRecordTitle');
+    if (title) title.textContent = `Record — ${meta.title} History`;
+    const hint = modal.querySelector('#serialRecordHint');
+    if (hint) hint.textContent = meta.hint;
+    const input = modal.querySelector('#serialRecordInput');
+    if (input) input.placeholder = meta.placeholder;
+    const box = modal.querySelector('#serialRecordResults');
+    if (box) box.innerHTML = '';
+    current.events = []; current.serial = '';
+  }
+
+  function renderSearchForm(prefill, prefillKind) {
+    if (prefillKind) kind = prefillKind === 'hologram' ? 'hologram' : 'serial';
     const content = modal.querySelector('.modal-content');
+    const tabStyle = 'flex:1;padding:8px 10px;border:none;cursor:pointer;font-size:13px;border-radius:6px;';
     content.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3>Record — Serial Number History</h3>
+        <h3 id="serialRecordTitle">Record — ${KIND_META[kind].title} History</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <p style="color:var(--text-muted);font-size:13px;margin-bottom:10px;">Search a serial number to see its full lifetime record — when it was added to inventory, assembled, sold/demoed, returned, and every service raised against it.</p>
+      <div style="display:flex;gap:4px;padding:4px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;">
+        <button type="button" class="sr-kind" data-kind="serial" style="${tabStyle}"><i class="fa-solid fa-barcode"></i> Serial Number</button>
+        <button type="button" class="sr-kind" data-kind="hologram" style="${tabStyle}"><i class="fa-solid fa-certificate"></i> Hologram Number</button>
+      </div>
+      <p id="serialRecordHint" style="color:var(--text-muted);font-size:13px;margin-bottom:10px;">${KIND_META[kind].hint}</p>
       <div style="display:flex;gap:8px;">
-        <input id="serialRecordInput" placeholder="Enter serial number" value="${prefill ? escapeHtmlInv(prefill) : ''}" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;">
+        <input id="serialRecordInput" placeholder="${KIND_META[kind].placeholder}" value="${prefill ? escapeHtmlInv(prefill) : ''}" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:8px;">
         <button type="button" id="serialRecordSearchBtn" style="padding:10px 16px;border:none;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;">Search</button>
       </div>
       <div id="serialRecordResults" style="margin-top:16px;"></div>`;
 
     content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+    const _keep = kind; setKind(_keep);   // paint the active toggle
     const input = content.querySelector('#serialRecordInput');
     const search = () => runSerialSearch(input.value.trim());
     content.querySelector('#serialRecordSearchBtn').addEventListener('click', search);
@@ -135,27 +177,28 @@ function wireSerialRecordModal() {
 
   async function runSerialSearch(serial) {
     const resultsBox = modal.querySelector('#serialRecordResults');
-    if (!serial) { resultsBox.innerHTML = '<p style="color:var(--danger);font-size:13px;">Enter a serial number to search.</p>'; return; }
+    if (!serial) { resultsBox.innerHTML = `<p style="color:var(--danger);font-size:13px;">Enter a ${kind === 'hologram' ? 'hologram' : 'serial'} number to search.</p>`; return; }
     resultsBox.innerHTML = '<p style="color:var(--text-light);font-size:13px;">Searching...</p>';
     // serials are stored lowercase (see wireEditSerialFileUpload / the add-product
     // wizard) — lowercase here too so a serial typed in a different case still matches.
     // server matches case-insensitively (stored serials are not all lowercase)
     const normalizedSerial = serial.trim();
     try {
-      const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(normalizedSerial)}`);
+      const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(normalizedSerial)}?kind=${kind}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'search failed');
       current.events = data.events || [];
       current.serial = serial;
-      resultsBox.innerHTML = renderSerialTimeline(current.events, serial);
+      current.kind = kind;
+      resultsBox.innerHTML = renderSerialTimeline(current.events, serial, kind);
     } catch (err) {
       if (err.message === 'unauthorized' || err.message === 'forbidden') return;
       resultsBox.innerHTML = `<p style="color:var(--danger);font-size:13px;">${escapeHtmlInv(err.message)}</p>`;
     }
   }
 
-  function openSerialRecordModal(prefill) {
-    renderSearchForm(prefill);
+  function openSerialRecordModal(prefill, prefillKind) {
+    renderSearchForm(prefill, prefillKind);
     modal.style.display = 'flex';
   }
 
@@ -196,15 +239,17 @@ function serialEventDetailLine(ev) {
     case 'allocation_return':
       return `Allocation #${(d.allocation_id || '').slice(0, 8)} — by ${d.returned_by ?? '-'}${d.faulty ? ' — Faulty' + (d.issue ? ': ' + d.issue : '') : ' — OK'}`;
     case 'service':
+      if (d.serial_no && !d.issue && !d.status) return `Service #${(d.service_id || '').slice(0, 8)} — Unit ${d.serial_no}`;
       return `Service #${(d.service_id || '').slice(0, 8)} — ${d.issue ?? ''} — Status: ${d.status ?? ''}`;
     default:
       return '';
   }
 }
 
-function renderSerialTimeline(events, serial) {
+function renderSerialTimeline(events, serial, kind) {
+  const what = kind === 'hologram' ? 'hologram number' : 'serial number';
   if (!events.length) {
-    return `<p style="color:var(--text-light);font-size:13px;text-align:center;padding:16px;">No record found for serial number <strong>${escapeHtmlInv(serial)}</strong>.</p>`;
+    return `<p style="color:var(--text-light);font-size:13px;text-align:center;padding:16px;">No record found for ${what} <strong>${escapeHtmlInv(serial)}</strong>.</p>`;
   }
   return `
     <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">Lifetime record for <strong>${escapeHtmlInv(serial)}</strong> (${events.length} event${events.length > 1 ? 's' : ''})</div>
@@ -227,15 +272,18 @@ const srIsEmpty = v => v === null || v === undefined || v === ''
   || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
 const srLabel = k => String(k).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-function srSerialChip(sn, hl) {
+function srSerialChip(sn, hl, kind) {
   const on = hl && String(sn).trim().toLowerCase() === String(hl).trim().toLowerCase();
-  return `<span class="iv-chip sr-serial" data-serial="${escapeHtmlInv(sn)}" title="Open this serial's history" style="cursor:pointer;${on ? 'background:var(--primary);color:#fff;' : ''}">${escapeHtmlInv(sn)}</span>`;
+  return `<span class="iv-chip sr-serial" data-kind="${kind || 'serial'}" data-serial="${escapeHtmlInv(sn)}" title="Open this number's history" style="cursor:pointer;${on ? 'background:var(--primary);color:#fff;' : ''}">${escapeHtmlInv(sn)}</span>`;
 }
 
-function srScalar(key, v, hl) {
+// hologram keys (hologram_number, old_hologram_number, ...) are clickable and open a hologram search
+const srKindOf = k => (/hologram/i.test(k) ? 'hologram' : /serial/i.test(k) ? 'serial' : '');
+
+function srScalar(key, v, hl, hlKind) {
   if (srIsEmpty(v)) return '—';
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
-  if (/serial/i.test(key) && typeof v !== 'object') return srSerialChip(v, hl);   // serial_no etc. is clickable too
+  if (srKindOf(key) && typeof v !== 'object') return srSerialChip(v, srKindOf(key) === (hlKind || 'serial') ? hl : '', srKindOf(key));   // serial_no / hologram_number etc. are clickable too
   if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
     const d = new Date(v);
     if (!isNaN(d)) return escapeHtmlInv(d.toLocaleString('en-GB'));
@@ -243,7 +291,7 @@ function srScalar(key, v, hl) {
   return escapeHtmlInv(v);
 }
 
-function srRenderObject(obj, hl) {
+function srRenderObject(obj, hl, hlKind) {
   const scalars = [], blocks = [];
   Object.entries(obj || {}).forEach(([k, v]) => {
     if (k === '_id') return;
@@ -252,26 +300,26 @@ function srRenderObject(obj, hl) {
   let html = '';
   if (scalars.length) {
     html += `<div class="iv-grid">${scalars.map(([k, v]) => `
-      <div class="iv-cell"><small>${escapeHtmlInv(srLabel(k))}</small><p>${srScalar(k, v, hl)}</p></div>`).join('')}</div>`;
+      <div class="iv-cell"><small>${escapeHtmlInv(srLabel(k))}</small><p>${srScalar(k, v, hl, hlKind)}</p></div>`).join('')}</div>`;
   }
   blocks.forEach(([k, v]) => {
     html += `<div class="iv-title">${escapeHtmlInv(srLabel(k))}${Array.isArray(v) ? ` (${v.length})` : ''}</div>`;
     if (Array.isArray(v)) {
       if (v.every(x => x === null || typeof x !== 'object')) {
-        html += `<div class="iv-chips">${v.map(x => /serial/i.test(k) ? srSerialChip(x, hl) : `<span class="iv-chip">${escapeHtmlInv(x)}</span>`).join('')}</div>`;
+        html += `<div class="iv-chips">${v.map(x => srKindOf(k) ? srSerialChip(x, srKindOf(k) === (hlKind || 'serial') ? hl : '', srKindOf(k)) : `<span class="iv-chip">${escapeHtmlInv(x)}</span>`).join('')}</div>`;
       } else {
         html += v.map(x => (x !== null && typeof x === 'object')
-          ? `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">${srRenderObject(x, hl)}</div>`
+          ? `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">${srRenderObject(x, hl, hlKind)}</div>`
           : `<div class="iv-chip" style="margin-bottom:6px;">${escapeHtmlInv(x)}</div>`).join('');
       }
     } else {
-      html += `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px;">${srRenderObject(v, hl)}</div>`;
+      html += `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:12px;">${srRenderObject(v, hl, hlKind)}</div>`;
     }
   });
   return html || '<p style="color:var(--text-light);font-size:13px;">Nothing recorded.</p>';
 }
 
-function renderSerialEventDetail(ev, serial) {
+function renderSerialEventDetail(ev, serial, kind) {
   ensureInvStyles();
   const full = ev.full || ev.details || {};
   return `
@@ -280,8 +328,8 @@ function renderSerialEventDetail(ev, serial) {
       <strong style="font-size:15px;"><i class="fa-solid ${SERIAL_EVENT_ICONS[ev.type] || 'fa-circle-dot'}" style="margin-right:6px;color:var(--primary);"></i>${escapeHtmlInv(ev.label)}</strong>
       <small style="color:var(--text-light);">${ev.date ? new Date(ev.date).toLocaleDateString('en-GB') : '-'}</small>
     </div>
-    <p class="iv-hint">${ev.full ? 'Complete record' : 'Summary'} for <strong>${escapeHtmlInv(serial)}</strong>${ev.full ? ' — click any serial number to open its own history.' : '.'}</p>
-    <div style="max-height:60vh;overflow-y:auto;padding-right:4px;">${srRenderObject(full, serial)}</div>`;
+    <p class="iv-hint">${ev.full ? 'Complete record' : 'Summary'} for ${kind === 'hologram' ? 'hologram ' : ''}<strong>${escapeHtmlInv(serial)}</strong>${ev.full ? ' — click any serial or hologram number to open its own history.' : '.'}</p>
+    <div style="max-height:60vh;overflow-y:auto;padding-right:4px;">${srRenderObject(full, serial, kind)}</div>`;
 }
 
 function exportLowStockToExcel(lowItems) {
