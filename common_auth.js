@@ -688,7 +688,10 @@ function openRequestPopup(r) {
     <div style="background:#fff;border-radius:14px;padding:22px;width:min(480px,94vw);max-height:90vh;overflow-y:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <h3 style="margin:0;">${labels[r.request_type] || 'Request'}</h3>
-        <button class="rq-close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="rq-print" title="Print" style="width:30px;height:30px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#475569;cursor:pointer;font-size:13px;padding:0;"><i class="fa-solid fa-print"></i></button>
+          <button class="rq-close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
+        </div>
       </div>
       ${itemRows ? `<small style="color:#94a3b8;">Products</small>${itemRows}` : ''}
       ${rows.join('')}
@@ -701,6 +704,7 @@ function openRequestPopup(r) {
   const remarks = () => (q('#rqRemarks')?.value || '').trim();
   overlay.addEventListener('click', e => { if (e.target === overlay) closeRequestPopup(); });
   q('.rq-close').addEventListener('click', closeRequestPopup);
+  q('.rq-print').addEventListener('click', () => { if (window.acerPrintBox) window.acerPrintBox(overlay.firstElementChild, labels[r.request_type] || 'Request'); });
 
   q('.rq-approve')?.addEventListener('click', () => {
     if (r.request_type === 'convert_to_order') {
@@ -1258,13 +1262,97 @@ function initMessaging() {
     const bar = document.createElement('div');
     bar.className = 'ab-bar';
     bar.innerHTML = `<div class="ab-bar-inner">
+      <button type="button" class="ab-print" title="Print"><i class="fa-solid fa-print"></i></button>
       <button type="button" class="ab-smaller" title="Smaller"><i class="fa-solid fa-compress"></i></button>
       <button type="button" class="ab-larger" title="Larger / full screen"><i class="fa-solid fa-expand"></i></button></div>`;
     bar.querySelector('.ab-smaller').addEventListener('click', e => { e.stopPropagation(); setLevel(box, levelOf(box) - 1, true); });
     bar.querySelector('.ab-larger').addEventListener('click', e => { e.stopPropagation(); setLevel(box, levelOf(box) + 1, true); });
+    bar.querySelector('.ab-print').addEventListener('click', e => { e.stopPropagation(); abPrintBox(box); });
     box.insertBefore(bar, box.firstChild);
     setLevel(box, levelOf(box), false);   // sync disabled state
   }
+
+  function abEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  function abPrintBox(box, titleOverride) {
+    if (!box) return;
+    const clone = box.cloneNode(true);
+    const origs = box.querySelectorAll('input, textarea, select');
+    const copies = clone.querySelectorAll('input, textarea, select');
+    origs.forEach((o, i) => {
+      const c = copies[i];
+      if (!c) return;
+      const tag = o.tagName;
+      let rep = null;
+      if (tag === 'SELECT') {
+        const opt = o.options[o.selectedIndex];
+        rep = document.createElement('span'); rep.textContent = opt ? opt.text : '';
+      } else if (tag === 'TEXTAREA') {
+        if (!o.value.trim()) { c.remove(); return; }
+        rep = document.createElement('div'); rep.style.whiteSpace = 'pre-wrap'; rep.textContent = o.value;
+      } else if (o.type === 'checkbox' || o.type === 'radio') {
+        rep = document.createElement('span'); rep.textContent = o.checked ? '\u2611' : '\u2610';
+      } else if (['hidden', 'password', 'file', 'button', 'submit'].includes(o.type)) {
+        c.remove(); return;
+      } else {
+        if (!String(o.value || '').trim()) { c.remove(); return; }
+        rep = document.createElement('span'); rep.textContent = o.value;
+      }
+      rep.style.fontWeight = '600';
+      c.replaceWith(rep);
+    });
+    clone.querySelectorAll('.ab-bar, button, .close, script, style').forEach(el => el.remove());
+    clone.querySelectorAll('a').forEach(el => { const s = document.createElement('span'); s.innerHTML = el.innerHTML; el.replaceWith(s); });
+
+    let meta = '';
+    const metaEl = clone.querySelector('.print-only-meta');
+    if (metaEl) { meta = metaEl.innerHTML; metaEl.remove(); }
+
+    let title = titleOverride || '';
+    const h = clone.querySelector('h1, h2, h3, h4');
+    if (h) { if (!title) title = h.textContent.trim(); h.remove(); }
+    if (!title) title = (document.title || 'Details').split('|')[0].trim();
+
+    const user = (typeof getUsername === 'function' && getUsername()) || '';
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${abEsc(title)}</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; max-height: none !important; overflow: visible !important; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; font-size: 13px; margin: 0; }
+  .p-head { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #1665ff; padding-bottom: 8px; margin-bottom: 14px; }
+  .p-head h1 { font-size: 20px; margin: 0 0 2px; }
+  .p-head .co { font-size: 12px; color: #64748b; }
+  .p-head .meta { text-align: right; font-size: 11px; color: #475569; line-height: 1.5; }
+  .detail { margin-bottom: 8px; page-break-inside: avoid; }
+  .detail small { display: block; font-size: 11px; color: #64748b; }
+  .detail p { margin: 1px 0 0; font-size: 13px; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 12px; text-align: left; }
+  tr { page-break-inside: avoid; }
+  img { max-width: 100%; max-height: 220px !important; }
+  .p-body > div[style*="border"] { page-break-inside: avoid; }
+</style></head><body>
+  <div class="p-head">
+    <div><h1>${abEsc(title)}</h1><div class="co">Acer Biomedical</div></div>
+    <div class="meta">${meta ? meta + '<br>' : ''}${user ? 'Printed by: ' + abEsc(user) + '<br>' : ''}Printed: ${abEsc(new Date().toLocaleString('en-GB'))}</div>
+  </div>
+  <div class="p-body">${clone.innerHTML}</div>
+</body></html>`;
+
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+    const go = () => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (err) { /* ignore */ }
+      setTimeout(() => frame.remove(), 2000);
+    };
+    const imgs = Array.from(doc.images);
+    if (!imgs.length) setTimeout(go, 150);
+    else Promise.all(imgs.map(im => im.complete ? 0 : new Promise(res => { im.onload = im.onerror = res; }))).then(() => setTimeout(go, 100));
+  }
+  window.acerPrintBox = abPrintBox;
 
   function enhance(box, key) {
     if (!box || box.dataset.abReady === '1') return;
