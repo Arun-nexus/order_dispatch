@@ -1585,19 +1585,50 @@ function openViewModal(p) {
     ? cell('Part Name', e(p.product_name ?? '')) + cell('Belongs To (Product)', e(p.parent_product_name || ''))
     : cell('Product Name', e(p.product_name ?? '')) + cell('Product ID', e(p.product_id || '')) + cell('Model No.', e(p.model_no || ''));
 
+  const SHOW = 300;
+  const chips = (arr) => arr.slice(0, SHOW).map(s => `<span class="iv-chip">${e(s)}</span>`).join('') + (arr.length > SHOW ? `<span class="iv-sub">+${arr.length - SHOW} more</span>` : '');
+
   const bv = Array.isArray(p.batches_view) ? p.batches_view : [];
-  const batchRows = bv.map(b => {
+
+  // Serial numbers of each batch. Best case the backend sends them inside the
+  // batch (b.serial_numbers). If not, we split the serial list in the order the
+  // batches were added — only safe while nothing was removed/marked faulty, i.e.
+  // when total batch quantity == number of serials on file. Otherwise null =
+  // "not available" (we don't guess).
+  const totalBatchQty = bv.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+  const canSplitSerials = serials.length > 0 && totalBatchQty === serials.length;
+  let serialCursor = 0;
+  const batchSerials = bv.map(b => {
+    if (Array.isArray(b.serial_numbers)) return b.serial_numbers;
+    if (!canSplitSerials) return null;
+    const n = Number(b.quantity) || 0;
+    const part = serials.slice(serialCursor, serialCursor + n);
+    serialCursor += n;
+    return part;
+  });
+
+  const batchRows = bv.map((b, bi) => {
     let wcell = '—';
     if (b.warranty_until) {
       const over = b.warranty_status === 'over warranty';
       wcell = `<span class="stock ${over ? 'low' : 'high'}">${over ? 'Over Warranty' : `${b.warranty_days_left} day(s) left`}</span> <span class="iv-sub">until ${e(dateTxt(b.warranty_until))}</span>`;
     }
     const dim = Number(b.in_stock) === 0 ? 'opacity:.5;' : '';
-    return `<tr style="${dim}border-top:1px solid #e2e8f0;">
-      <td style="padding:8px;">${b.received_date ? e(dateTxt(b.received_date)) : '<span class="iv-sub">Date not recorded</span>'}</td>
+    const dateLabel = b.received_date ? e(dateTxt(b.received_date)) : 'Date not recorded';
+    const bs = batchSerials[bi];
+    const detailHtml = bs === null
+      ? '<span class="iv-sub">Serial-wise detail of this batch is not available.</span>'
+      : bs.length
+        ? `<div class="iv-sub" style="margin-bottom:4px;">${bs.length} serial number(s) arrived in this batch:</div><div class="iv-chips">${chips(bs)}</div>`
+        : '<span class="iv-sub">No serial numbers recorded for this batch.</span>';
+    return `<tr class="iv-batch-row" data-bi="${bi}" style="${dim}border-top:1px solid #e2e8f0;">
+      <td style="padding:8px;"><a href="#" class="iv-batch-link" data-bi="${bi}" title="Click to see serial numbers of this batch" style="color:var(--primary);font-weight:600;text-decoration:underline;cursor:pointer;">${dateLabel} <span class="iv-batch-arrow">▸</span></a></td>
       <td style="padding:8px;text-align:right;">${b.quantity ?? '—'}</td>
       <td style="padding:8px;text-align:right;font-weight:600;">${b.in_stock}</td>
       <td style="padding:8px;">${wcell}</td>
+    </tr>
+    <tr class="iv-batch-detail" data-bi="${bi}" style="display:none;background:var(--bg-light);">
+      <td colspan="4" style="padding:10px 12px;">${detailHtml}</td>
     </tr>`;
   }).join('');
   const batchSection = bv.length ? `
@@ -1611,10 +1642,7 @@ function openViewModal(p) {
         <tbody>${batchRows}</tbody>
       </table>
     </div>
-    <div class="iv-sub" style="margin-top:4px;">Stock is counted oldest-first, so what is left in stock belongs to the newest batches.</div>` : '';
-
-  const SHOW = 300;
-  const chips = (arr) => arr.slice(0, SHOW).map(s => `<span class="iv-chip">${e(s)}</span>`).join('') + (arr.length > SHOW ? `<span class="iv-sub">+${arr.length - SHOW} more</span>` : '');
+    <div class="iv-sub" style="margin-top:4px;">Click an arrival date to see which serial numbers came in that batch. Stock is counted oldest-first, so what is left in stock belongs to the newest batches.</div>` : '';
 
   content.innerHTML = `
     <div class="iv-head">
@@ -1656,6 +1684,16 @@ function openViewModal(p) {
     <div class="iv-chips">${serials.length ? chips(serials) : '<span class="iv-sub">None on file</span>'}</div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  // click on an arrival date -> expand/collapse that batch's serial numbers
+  content.querySelectorAll('.iv-batch-link').forEach(a => a.addEventListener('click', ev => {
+    ev.preventDefault();
+    const row = content.querySelector(`.iv-batch-detail[data-bi="${a.dataset.bi}"]`);
+    if (!row) return;
+    const open = row.style.display === 'none';
+    row.style.display = open ? 'table-row' : 'none';
+    const arrow = a.querySelector('.iv-batch-arrow');
+    if (arrow) arrow.textContent = open ? '▾' : '▸';
+  }));
   modal.onclick = ev => { if (ev.target === modal) modal.style.display = 'none'; };
   modal.style.display = 'flex';
 }
