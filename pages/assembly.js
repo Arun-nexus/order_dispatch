@@ -20,7 +20,11 @@ function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, tit
 //      one sticker per serial, 2 per A4 page, download as PDF or Word.
 //      Supply type, mfg month/year and M.R.P are entered in step 1.
 //
-// Edit Assembly (admin + assembly roles only, pending assemblies only):
+// Add from Shipment (step 2): pick parts of a received shipment (multi-select, remove the ones not needed),
+//   upload hologram numbers for them on the spot (POST /assembly/add_part_holograms); the parts are
+//   deducted from inventory spare_parts stock like any inventory part (GET /assembly/shipment_parts).
+//
+// Edit Assembly (admin + assembly roles only, any status — name/model lock once units are approved):
 //   parts can be added / removed / changed while the assembly is in progress;
 //   the backend deducts or restocks inventory spare_parts by the difference.
 //
@@ -56,7 +60,7 @@ function fromServerShapeAssembly(a) {
     productId: a.product_id,
     modelNumber: a.model_number,
     quantity: a.quantity,
-    partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source, belongsTo: partBelongs(p) })),
+    partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source, belongsTo: partBelongs(p), shipmentId: p.shipment_id || '' })),
     serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number, lot: s.lot_no || '' })),
     status: a.status,
     approvedSerials: a.approved_serials || [],
@@ -79,6 +83,7 @@ function toServerShapeAssembly(a) {
     quantity: Number(a.quantity) || 0,
     parts_used: (a.partsUsed || []).map(p => ({
       part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source, belongs_to: p.belongsTo || '',
+      shipment_id: p.shipmentId || '',
     })),
     serials: (a.serials || []).map((s, i) => ({ serial_number: s, lot_no: String((a.lots || [])[i] || '').trim() })),
     supply_type: a.supplyType || 'normal',
@@ -376,6 +381,7 @@ const PART_SEP = '||';
 function partKey(name, belongs) { return (name || '') + PART_SEP + (belongs || ''); }
 
 function sourceLabel(p) {
+  if (p.shipmentId) return 'From shipment (inventory stock)';
   return p.source === 'local' ? 'Local parts' : 'Inventory (spare parts)';
 }
 
@@ -433,7 +439,7 @@ function renderTable() {
           <button class="icon-btn" data-action="view" data-id="${a.id}" title="View"><i class="fa-solid fa-eye"></i></button>
           <button class="icon-btn" data-action="export" data-id="${a.id}" title="Export Serials"><i class="fa-solid fa-file-excel"></i></button>
           <button class="icon-btn" data-action="sticker" data-id="${a.id}" title="Stickers (PDF / Word)"><i class="fa-solid fa-tag"></i></button>
-          ${a.status === 'pending' && canEditAssembly() ? `<button class="icon-btn" data-action="edit" data-id="${a.id}" title="Edit Assembly"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
+          ${canEditAssembly() ? `<button class="icon-btn" data-action="edit" data-id="${a.id}" title="Edit Assembly"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
           ${a.status === 'pending' ? `<button class="icon-btn" data-action="complete" data-id="${a.id}" title="Submit for Approval"><i class="fa-solid fa-paper-plane"></i></button>` : ''}
           ${isApprovalStatus(a.status) && canApproveAssembly() ? `<button class="icon-btn" data-action="approve" data-id="${a.id}" title="Approve Serials"><i class="fa-solid fa-clipboard-check"></i></button>` : ''}
           <button class="icon-btn" data-action="delete" data-id="${a.id}" title="Delete"><i class="fa-solid fa-trash"></i></button>
@@ -820,7 +826,8 @@ function renderAStep2() {
     <p style="font-size:13px;color:#64748b;margin-bottom:4px;">Add every part this batch needs. Parts pulled from inventory are deducted from its spare parts stock when you save; local parts are not.</p>
     <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <i class="fa-solid fa-circle-info"></i>
-      Only hologram-tagged parts show up here. Exactly one inventory part's quantity must equal the assembly quantity
+      Only hologram-tagged parts show up in the inventory list. Use <strong>Add from Shipment</strong> to pick parts of a received shipment
+      and upload their hologram numbers right there. Exactly one inventory part's quantity must equal the assembly quantity
       (${assemblyDraft.quantity}) — that part's hologram numbers get assigned to the finished units.
     </p>
     <div id="partsUsedRows" style="display:flex;flex-direction:column;gap:8px;"></div>
@@ -828,6 +835,10 @@ function renderAStep2() {
       <button type="button" id="addInvPartBtn" ${availableParts.length ? '' : 'disabled'}
         style="flex:1;padding:10px 12px;border:1px dashed #1665ff;border-radius:8px;background:#f0f6ff;cursor:pointer;font-size:13px;color:#1665ff;${availableParts.length ? '' : 'opacity:.5;cursor:not-allowed;'}">
         <i class="fa-solid fa-boxes-stacked"></i> Add Part from Inventory
+      </button>
+      <button type="button" id="addShipmentPartBtn"
+        style="flex:1;padding:10px 12px;border:1px dashed #0f766e;border-radius:8px;background:#ecfdf5;cursor:pointer;font-size:13px;color:#0f766e;">
+        <i class="fa-solid fa-truck-ramp-box"></i> Add from Shipment
       </button>
       <button type="button" id="addLocalPartBtn"
         style="flex:1;padding:10px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:13px;color:#334155;">
@@ -853,6 +864,7 @@ function renderAStep2() {
     assemblyDraft.partsUsed.push({ name: first.part_name, quantity: assemblyDraft.quantity, source: 'inventory', belongsTo: partBelongs(first) });
     renderPartsUsedRows();
   });
+  box.querySelector('#addShipmentPartBtn').addEventListener('click', openShipmentPicker);
   box.querySelector('#addLocalPartBtn').addEventListener('click', () => {
     syncPartsUsedFromDom();
     assemblyDraft.partsUsed.push({ name: '', quantity: '', source: 'local', belongsTo: '' });
@@ -901,6 +913,19 @@ function renderPartsUsedRows() {
   const wrap = document.getElementById('partsUsedRows');
 
   wrap.innerHTML = assemblyDraft.partsUsed.map((p, i) => {
+    if (p.shipmentId) {
+      // picked via "Add from Shipment": name / product are fixed, only the quantity can change or the row be removed
+      return `
+      <div style="display:flex;gap:8px;align-items:center;" data-part-row="${i}">
+        <span style="font-size:11px;font-weight:600;color:#0f766e;width:70px;flex-shrink:0;" title="Picked from a received shipment — deducted from inventory stock">SHIPMENT</span>
+        <span class="partUsedName partUsedFixed" style="flex:2;font-size:13px;background:#ecfdf5;border-radius:6px;padding:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escAttr(p.name)}">${aesc(p.name)}${p.shipmentLabel ? ` <small style="color:#0f766e;">· ${aesc(p.shipmentLabel)}</small>` : ''}</span>
+        <span class="partBelongs" style="flex:1.2;font-size:12px;color:#475569;background:#f1f5f9;border-radius:6px;padding:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Belongs to">${aesc(p.belongsTo || '—')}</span>
+        <input type="number" min="0" class="partUsedQty" placeholder="Qty" value="${p.quantity}" style="flex:1;">
+        <button type="button" class="removePartUsedBtn" data-index="${i}" title="Remove this part" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:36px;height:36px;cursor:pointer;">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>`;
+    }
     let nameField;
     if (p.source === 'inventory') {
       // a part this assembly already uses may have dropped out of the available
@@ -951,7 +976,9 @@ function syncPartsUsedFromDom() {
     const i = Number(row.dataset.partRow);
     const nameEl = row.querySelector('.partUsedName');
     const part = assemblyDraft.partsUsed[i];
-    if (nameEl.tagName === 'SELECT') {
+    if (nameEl.classList.contains('partUsedFixed')) {
+      // shipment row: name + belongs-to are fixed, only the quantity below is read
+    } else if (nameEl.tagName === 'SELECT') {
       // inventory row: option value is "partName||belongsTo"
       const [n, b] = nameEl.value.split(PART_SEP);
       part.name = (n || '').trim();
@@ -963,6 +990,243 @@ function syncPartsUsedFromDom() {
     }
     part.quantity = row.querySelector('.partUsedQty').value;
   });
+}
+
+// ---------- ADD FROM SHIPMENT (wizard step 2) ----------
+// Pick a received shipment, tick the parts this batch needs (untick / ✕ the ones it doesn't),
+// optionally upload hologram numbers per part, then add them. A received shipment's assembly parts
+// already live in inventory spare_parts, so the rows are added as inventory parts (tagged with the
+// shipment) and are deducted from inventory stock exactly like "Add Part from Inventory".
+let shipmentParts = [];   // GET /assembly/shipment_parts
+let shipPick = null;      // picker state while the popup is open
+
+async function loadShipmentParts() {
+  try {
+    const res = await apiFetch('/assembly/shipment_parts');
+    if (!res.ok) return false;
+    shipmentParts = (await res.json()).dataset || [];
+    return true;
+  } catch (err) {
+    console.warn('assembly: could not load shipment parts', err.message);
+    return false;
+  }
+}
+
+function ensureShipmentPickModal() {
+  let m = document.getElementById('shipmentPickModal');
+  if (m) return m;
+  m = document.createElement('div');
+  m.id = 'shipmentPickModal';
+  m.className = 'modal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);justify-content:center;align-items:center;z-index:1001;';
+  m.innerHTML = '<div class="modal-content" style="background:#fff;border-radius:16px;padding:26px;width:min(1050px,96vw);max-height:92vh;overflow-y:auto;"></div>';
+  document.body.appendChild(m);
+  return m;
+}
+
+function shipLabel(sh) { return sh.invoice_no || String(sh.shipment_id || '').slice(0, 8); }
+
+function pickerSelectShipment(id) {
+  const sh = shipmentParts.find(x => x.shipment_id === id);
+  shipPick.shipmentId = id;
+  shipPick.pasteOpen = {};
+  shipPick.rows = ((sh && sh.parts) || []).map(p => ({
+    part_name: p.part_name, belongs_to: p.belongs_to || '', shipment_quantity: p.shipment_quantity,
+    in_stock: p.in_stock, hologram_on_file: p.hologram_on_file,
+    qty: p.in_stock > 0 ? Math.min(Number(assemblyDraft.quantity) || 1, p.in_stock) : '',
+    checked: p.in_stock > 0,
+  }));
+}
+
+async function openShipmentPicker() {
+  syncPartsUsedFromDom();
+  const ok = await loadShipmentParts();
+  if (!shipmentParts.length) {
+    showResponseModal('No shipment parts',
+      ok ? 'No received shipment has parts marked for assembly. Parts reach inventory only after a shipment is marked received.'
+         : 'Could not load shipments right now. Please try again.', false);
+    return;
+  }
+  shipPick = { shipmentId: '', rows: [], pasteOpen: {}, msg: null };
+  pickerSelectShipment(shipmentParts[0].shipment_id);
+  renderShipmentPicker();
+  ensureShipmentPickModal().style.display = 'flex';
+}
+
+function closeShipmentPicker() {
+  const m = document.getElementById('shipmentPickModal');
+  if (m) m.style.display = 'none';
+  shipPick = null;
+}
+
+function renderShipmentPicker() {
+  const m = ensureShipmentPickModal();
+  const box = m.querySelector('.modal-content');
+  const rows = shipPick.rows;
+  const th = 'text-align:left;padding:8px;font-size:12px;color:#64748b;white-space:nowrap;';
+  const td = 'padding:8px;vertical-align:middle;';
+  const msg = shipPick.msg
+    ? `<div style="margin:10px 0;padding:9px 12px;border-radius:8px;font-size:13px;${shipPick.msg.ok ? 'background:#ecfdf5;color:#065f46;' : 'background:#fef2f2;color:#b91c1c;'}">${aesc(shipPick.msg.text)}</div>` : '';
+
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3>Add Parts from Shipment</h3>
+      <button type="button" class="spClose" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+    </div>
+    <label style="font-size:13px;color:#64748b;">Received shipment</label>
+    <select id="spShipment" style="width:100%;margin:4px 0 12px;">
+      ${shipmentParts.map(sh => `<option value="${escAttr(sh.shipment_id)}" ${sh.shipment_id === shipPick.shipmentId ? 'selected' : ''}>${aesc(shipLabel(sh))} · ${aesc(sh.company_name)} · received ${aesc(sh.received_date || '-')}</option>`).join('')}
+    </select>
+    <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:8px;">
+      <i class="fa-solid fa-circle-info"></i>
+      Tick the parts this batch needs and remove (✕) the ones it doesn't. These parts are already in inventory, so the quantity you enter is
+      deducted from inventory stock when the assembly is saved ("In stock" counts this part across all shipments).
+      Hologram numbers uploaded here are added to the part in inventory immediately. Only the part that supplies the unit hologram numbers needs them.
+    </p>
+    ${msg}
+    ${rows.length ? `
+    <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr>
+          <th style="${th}"><input type="checkbox" id="spAll" title="Select / unselect all" ${rows.every(r => r.checked || r.in_stock <= 0) ? 'checked' : ''}></th>
+          <th style="${th}">Part</th><th style="${th}">Belongs to</th><th style="${th}">In shipment</th>
+          <th style="${th}">In stock</th><th style="${th}">Holograms on file</th><th style="${th}">Qty to use</th>
+          <th style="${th}">Hologram numbers</th><th style="${th}"></th>
+        </tr></thead>
+        <tbody>
+          ${rows.map((r, i) => `
+          <tr style="border-top:1px solid #eef1f6;${r.in_stock <= 0 ? 'opacity:.55;' : ''}">
+            <td style="${td}"><input type="checkbox" class="spCheck" data-i="${i}" ${r.checked ? 'checked' : ''} ${r.in_stock <= 0 ? 'disabled' : ''}></td>
+            <td style="${td}"><strong>${aesc(r.part_name)}</strong></td>
+            <td style="${td}">${aesc(r.belongs_to || '—')}</td>
+            <td style="${td}">${r.shipment_quantity}</td>
+            <td style="${td}">${r.in_stock}${r.in_stock <= 0 ? ' <small style="color:#dc2626;">(none left)</small>' : ''}</td>
+            <td style="${td}">${r.hologram_on_file}</td>
+            <td style="${td}"><input type="number" min="0" max="${r.in_stock}" class="spQty" data-i="${i}" value="${r.qty}" style="width:80px;" ${r.in_stock <= 0 ? 'disabled' : ''}></td>
+            <td style="${td}white-space:nowrap;">
+              <label style="cursor:pointer;display:inline-block;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;font-size:12px;">
+                <i class="fa-solid fa-file-arrow-up"></i> Upload
+                <input type="file" class="spFile" data-i="${i}" accept=".xlsx,.xls,.csv" style="display:none;">
+              </label>
+              <button type="button" class="spPasteBtn" data-i="${i}" style="padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:none;font-size:12px;cursor:pointer;">Type / paste</button>
+            </td>
+            <td style="${td}"><button type="button" class="spRemove" data-i="${i}" title="Remove from this list" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:32px;height:32px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button></td>
+          </tr>
+          ${shipPick.pasteOpen[i] ? `
+          <tr><td colspan="9" style="padding:0 8px 10px;">
+            <textarea class="spPasteText" data-i="${i}" rows="3" placeholder="Hologram numbers — one per line or comma separated" style="width:100%;"></textarea>
+            <button type="button" class="spPasteAdd" data-i="${i}" style="margin-top:6px;padding:7px 12px;border:none;border-radius:8px;background:#0f766e;color:#fff;cursor:pointer;font-size:12px;">Add these hologram numbers</button>
+          </td></tr>` : ''}`).join('')}
+        </tbody>
+      </table>
+    </div>` : '<p style="color:#94a3b8;font-size:13px;">All parts were removed — pick the shipment again to bring them back.</p>'}
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
+      <button type="button" class="spClose" style="padding:10px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+      <button type="button" id="spConfirm" style="padding:10px 16px;border:none;border-radius:8px;background:#0f766e;color:#fff;cursor:pointer;font-weight:600;">
+        <i class="fa-solid fa-check"></i> Add Selected Parts
+      </button>
+    </div>`;
+
+  box.querySelectorAll('.spClose').forEach(b => b.addEventListener('click', closeShipmentPicker));
+  box.querySelector('#spShipment').addEventListener('change', e => { pickerSelectShipment(e.target.value); shipPick.msg = null; renderShipmentPicker(); });
+  const all = box.querySelector('#spAll');
+  if (all) all.addEventListener('change', e => { rows.forEach(r => { if (r.in_stock > 0) r.checked = e.target.checked; }); renderShipmentPicker(); });
+  box.querySelectorAll('.spCheck').forEach(c => c.addEventListener('change', () => { rows[Number(c.dataset.i)].checked = c.checked; }));
+  box.querySelectorAll('.spQty').forEach(q => q.addEventListener('input', () => { rows[Number(q.dataset.i)].qty = q.value; }));
+  box.querySelectorAll('.spRemove').forEach(b => b.addEventListener('click', () => {
+    rows.splice(Number(b.dataset.i), 1); shipPick.pasteOpen = {}; renderShipmentPicker();
+  }));
+  box.querySelectorAll('.spPasteBtn').forEach(b => b.addEventListener('click', () => {
+    const i = Number(b.dataset.i); shipPick.pasteOpen[i] = !shipPick.pasteOpen[i]; renderShipmentPicker();
+  }));
+  box.querySelectorAll('.spPasteAdd').forEach(b => b.addEventListener('click', () => {
+    const i = Number(b.dataset.i);
+    const txt = box.querySelector(`.spPasteText[data-i="${i}"]`).value;
+    pickerAddHolograms(i, txt.split(/[\s,;]+/));
+  }));
+  box.querySelectorAll('.spFile').forEach(f => f.addEventListener('change', () => {
+    const file = f.files[0];
+    if (!file) return;
+    const i = Number(f.dataset.i);
+    parseHologramsFromFile(file, nums => pickerAddHolograms(i, nums),
+      err => { shipPick.msg = { text: err, ok: false }; renderShipmentPicker(); });
+  }));
+  box.querySelector('#spConfirm').addEventListener('click', confirmShipmentPick);
+}
+
+// reads every non-empty cell of every sheet (xlsx / xls / csv) — same idea as the serial upload on the inventory page
+function parseHologramsFromFile(file, onDone, onError) {
+  if (typeof XLSX === 'undefined') { onError('Excel reader is not loaded — refresh the page and try again.'); return; }
+  const reader = new FileReader();
+  reader.onerror = () => onError('Could not read the file.');
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const out = [];
+      wb.SheetNames.forEach(sn => {
+        XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: false, defval: '' }).forEach(row => row.forEach(cell => {
+          const v = String(cell == null ? '' : cell).trim();
+          if (v && !/^hologram(\s*(no\.?|number))?s?$/i.test(v)) out.push(v);
+        }));
+      });
+      onDone([...new Set(out)]);
+    } catch (err) {
+      onError('Could not read this file — use .xlsx, .xls or .csv.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function pickerAddHolograms(i, numbers) {
+  if (!shipPick) return;
+  const r = shipPick.rows[i];
+  const clean = [...new Set((numbers || []).map(x => String(x).trim()).filter(Boolean))];
+  if (!r) return;
+  if (!clean.length) { shipPick.msg = { text: 'No hologram numbers found.', ok: false }; renderShipmentPicker(); return; }
+  try {
+    const res = await apiFetch('/assembly/add_part_holograms', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ part_name: r.part_name, belongs_to: r.belongs_to, hologram_numbers: clean }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'could not add hologram numbers');
+    // rows of the same part share one inventory stock pool
+    shipPick.rows.forEach(x => { if (x.part_name === r.part_name && x.belongs_to === r.belongs_to) x.hologram_on_file = data.hologram_on_file; });
+    const bits = [`${data.added} hologram number(s) added to ${r.part_name}`];
+    if (data.skipped_duplicates) bits.push(`${data.skipped_duplicates} already on file`);
+    if ((data.leftover || []).length) bits.push(`${data.leftover.length} not added — no untagged unit of this part is left in stock`);
+    shipPick.msg = { text: bits.join(' · ') + '.', ok: !(data.leftover || []).length };
+    shipPick.pasteOpen = {};
+    renderShipmentPicker();
+    loadAvailableParts();
+  } catch (err) {
+    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
+      shipPick.msg = { text: err.message, ok: false };
+      renderShipmentPicker();
+    }
+  }
+}
+
+function confirmShipmentPick() {
+  const sh = shipmentParts.find(x => x.shipment_id === shipPick.shipmentId);
+  const picked = shipPick.rows.filter(r => r.checked && r.in_stock > 0);
+  const fail = text => { shipPick.msg = { text, ok: false }; renderShipmentPicker(); };
+  if (!sh || !picked.length) return fail('Tick at least one part to add.');
+  for (const r of picked) {
+    const q = Number(r.qty);
+    if (!q || q <= 0) return fail(`Enter the quantity to use for ${r.part_name}.`);
+    if (q > r.in_stock) return fail(`Only ${r.in_stock} of ${r.part_name} are in stock.`);
+  }
+  syncPartsUsedFromDom();
+  picked.forEach(r => {
+    const q = Number(r.qty);
+    const same = p => p.shipmentId === sh.shipment_id && p.name === r.part_name && (p.belongsTo || '') === r.belongs_to;
+    const ex = assemblyDraft.partsUsed.find(same);
+    if (ex) ex.quantity = q;
+    else assemblyDraft.partsUsed.push({ name: r.part_name, quantity: q, source: 'inventory', belongsTo: r.belongs_to, shipmentId: sh.shipment_id, shipmentLabel: shipLabel(sh) });
+  });
+  closeShipmentPicker();
+  renderPartsUsedRows();
 }
 
 // ---------- STEP 3: serial + hologram numbers ----------
@@ -1275,7 +1539,7 @@ async function finalizeAssembly() {
 }
 
 // =========================================================
-// EDIT ASSEMBLY — admin + assembly roles only, pending assemblies only
+// EDIT ASSEMBLY — admin + assembly roles only, any status
 // While an assembly is being built, parts can be added, removed or changed.
 // The backend (POST /assembly/edit/{id}) deducts from / restocks inventory
 // spare parts by the difference. Unit quantity and serials stay as they are.
@@ -1288,6 +1552,7 @@ function canEditAssembly() {
 let editingAssemblyId = null;
 let editingHologramPart = '';
 let editingHologramBelongs = '';
+let editingIdentityLocked = false;   // true once any unit of this assembly is approved into inventory
 
 function escAttr(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -1300,10 +1565,10 @@ async function openEditAssemblyModal(id) {
   }
   const a = assemblies.find(x => x.id === id);
   if (!a) return;
-  if (a.status !== 'pending') {
-    showResponseModal('Cannot edit', 'Completed assemblies cannot be edited — their units are already in inventory.', false);
-    return;
-  }
+  // Parts can be edited in every status. Product name / model are locked once any
+  // unit has been approved, because those units are already in inventory under the
+  // old name/model and editing here would not change them.
+  editingIdentityLocked = (a.approvedSerials || []).length > 0;
 
   await loadAvailableParts();   // fresh stock numbers for the dropdowns
   editingAssemblyId = id;
@@ -1322,7 +1587,7 @@ async function openEditAssemblyModal(id) {
   assemblyDraft = {
     productName: a.productName || '', productId: DEFAULT_PRODUCT_ID, modelNumber: a.modelNumber || '',
     quantity: a.quantity,
-    partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, belongsTo: p.belongsTo || '', source: p.source === 'local' ? 'local' : 'inventory' })),
+    partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, belongsTo: p.belongsTo || '', source: p.source === 'local' ? 'local' : 'inventory', shipmentId: p.shipmentId || '' })),
     serials: [],
   };
   renderEditAssemblyModal();
@@ -1337,8 +1602,9 @@ function renderEditAssemblyModal() {
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      <input id="eProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}">
-      <input id="eModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}">
+      <input id="eProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" ${editingIdentityLocked ? 'disabled' : ''}>
+      <input id="eModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}" ${editingIdentityLocked ? 'disabled' : ''}>
+      ${editingIdentityLocked ? '<p style="font-size:12px;color:#b45309;background:#fff4e0;border-radius:8px;padding:8px 10px;margin:0;"><i class="fa-solid fa-lock"></i> Some units of this assembly are already in inventory, so product name and model can no longer be changed. Parts can still be edited.</p>' : ''}
       <label style="font-size:13px;color:#64748b;">Quantity to Assemble (cannot be changed)</label>
       <input type="number" value="${assemblyDraft.quantity}" disabled>
     </div>
@@ -1417,10 +1683,13 @@ async function saveAssemblyEdit() {
     const res = await apiFetch(`/assembly/edit/${editingAssemblyId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        product_name: productName,
-        product_id: DEFAULT_PRODUCT_ID,
-        model_number: document.getElementById('eModelNumber').value.trim(),
-        parts_used: parts.map(p => ({ part_name: p.name, quantity: Number(p.quantity), source: p.source })),
+        // once units are in inventory, name/model are not sent (backend keeps them as they are)
+        ...(editingIdentityLocked ? {} : {
+          product_name: productName,
+          product_id: DEFAULT_PRODUCT_ID,
+          model_number: document.getElementById('eModelNumber').value.trim(),
+        }),
+        parts_used: parts.map(p => ({ part_name: p.name, quantity: Number(p.quantity), source: p.source, belongs_to: p.belongsTo || '', shipment_id: p.shipmentId || '' })),
       }),
     });
     const data = await res.json();

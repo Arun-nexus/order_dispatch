@@ -522,6 +522,13 @@ class AssemblyPartUsed(BaseModel):
     quantity: int = 0
     source: str = "inventory"
     belongs_to: str = ""          
+    shipment_id: str = ""         # set when picked via "Add from Shipment" (stock is still deducted from inventory)
+
+
+class PartHologramsRequest(BaseModel):
+    part_name: str
+    belongs_to: str = ""
+    hologram_numbers: list[str]
 
 class AssemblySerialItem(BaseModel):
     serial_number: str
@@ -2384,6 +2391,117 @@ def available_parts_for_assembly(user: dict = Depends(require_role("inventory_ma
         raise HTTPException(status_code=500, detail="available parts cannot be fetched")
 
 
+@app.get("/assembly/shipment_parts")
+def shipment_parts_for_assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
+    """
+    Received shipments and the parts in them that were marked "assembly" — the picker behind
+    "Add from Shipment" on the assembly wizard. A received shipment's assembly parts already sit in
+    inventory spare_parts (see sync_shipment_parts_to_inventory), keyed by (part_name, belongs_to =
+    the shipment product's name). So every row also carries what inventory holds for that part right
+    now (in_stock, hologram_on_file) — that pooled stock is what an assembly deducts from.
+    """
+    try:
+        stock: dict = {}
+        for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "spare_parts"}):
+            name = (entry.get("product_name") or "").strip()
+            if not name:
+                continue
+            pn = (entry.get("parent_product_name") or "").strip()
+            agg = stock.setdefault((name, pn), {"quantity": 0, "holograms": 0})
+            agg["quantity"] += int(entry.get("quantity", 0) or 0)
+            agg["holograms"] += len(entry.get("hologram_numbers") or [])
+
+        result = []
+        for sh in shipment_manager().get_data(collection_name=SHIPMENT_COLLECTION, query={}):
+            if not sh.get("received_date"):          # parts only reach inventory once the shipment is received
+                continue
+            merged: dict = {}
+            for product in sh.get("products") or []:
+                pn = (product.get("product_name") or "").strip()
+                for part in product.get("parts") or []:
+                    name = (part.get("part_name") or "").strip()
+                    qty = int(part.get("quantity", 0) or 0)
+                    if not name or qty <= 0 or (part.get("status") or "assembly") != "assembly":
+                        continue
+                    merged[(pn, name)] = merged.get((pn, name), 0) + qty
+            if not merged:
+                continue
+            parts = []
+            for (pn, name), qty in merged.items():
+                s_ = stock.get((name, pn), {"quantity": 0, "holograms": 0})
+                parts.append({"part_name": name, "belongs_to": pn, "shipment_quantity": qty,
+                              "in_stock": s_["quantity"], "hologram_on_file": s_["holograms"]})
+            result.append({
+                "shipment_id": sh.get("shipment_id"), "invoice_no": sh.get("invoice_no") or "",
+                "company_name": sh.get("company_name") or "", "received_date": str(sh.get("received_date") or "")[:10],
+                "parts": parts,
+            })
+        result.sort(key=lambda x: x["received_date"], reverse=True)
+        return {"message": "shipment parts", "dataset": result}
+    except Exception as e:
+        logging.error(f"shipment parts for assembly cannot be fetched: {e}")
+        raise HTTPException(status_code=500, detail="shipment parts cannot be fetched")
+
+
+@app.post("/assembly/add_part_holograms")
+def add_part_holograms(request: PartHologramsRequest, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
+    """
+    Adds hologram numbers to an inventory spare part (used by "Add from Shipment" so they can be
+    uploaded right there). Same rules as the inventory edit form: a lot never holds more hologram
+    numbers than its quantity, so numbers beyond the untagged units are returned as `leftover`;
+    numbers already on file for this part are skipped.
+    """
+    try:
+        name = (request.part_name or "").strip()
+        parent = (request.belongs_to or "").strip()
+        incoming = list(dict.fromkeys(h.strip() for h in request.hologram_numbers if h and h.strip()))
+        if not name or not incoming:
+            raise HTTPException(status_code=400, detail="part name and at least one hologram number are required")
+
+        query = {"product_name": name, "product_type": "spare_parts"}
+        if parent:
+            query["parent_product_name"] = parent
+        col = mongodbclient().database[INVENTORY_COLLECTION]
+        lots = list(col.find(query))
+        if not lots:
+            raise HTTPException(status_code=404, detail=f"'{name}' is not in inventory spare parts")
+        lots.sort(key=lambda l: l.get("purchase_date") or "")
+
+        def _have(lot):
+            have = lot.get("hologram_numbers")
+            if have is None:
+                legacy = lot.get("hologram_no")
+                return [legacy] if legacy else []
+            return list(have)
+
+        on_file = {h for l in lots for h in _have(l)}
+        fresh = [h for h in incoming if h not in on_file]
+        skipped_duplicates = len(incoming) - len(fresh)
+
+        added = 0
+        for lot in lots:
+            if not fresh:
+                break
+            have = _have(lot)
+            free = int(lot.get("quantity", 0) or 0) - len(have)
+            if free <= 0:
+                continue
+            take, fresh = fresh[:free], fresh[free:]
+            col.update_one({"_id": lot["_id"]}, {"$set": {"hologram_numbers": have + take}, "$unset": {"hologram_no": ""}})
+            added += len(take)
+
+        total_quantity = sum(int(l.get("quantity", 0) or 0) for l in lots)
+        total_holograms = sum(len(_have(l)) for l in lots) + added
+        logging.info(f"{added} hologram number(s) added to '{name}' by {user['username']} (assembly shipment picker)")
+        return {"message": "hologram numbers added", "added": added, "skipped_duplicates": skipped_duplicates,
+                "leftover": fresh, "hologram_on_file": total_holograms, "in_stock": total_quantity}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"adding part hologram numbers failed: {e}")
+        raise HTTPException(status_code=500, detail="hologram numbers could not be added")
+
+
 @app.get("/assembly/{assembly_id}")
 def track_assembly(assembly_id: str, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
@@ -2442,8 +2560,17 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                        "that part supplies the hologram number for each assembled unit",
             )
         # pick the first qualifying part (in the order it was entered) as the
-        # hologram-bearing part
-        hologram_key = hologram_candidates[0]          # (part_name, belongs_to)
+        # hologram-bearing part — but prefer one that actually has enough hologram
+        # numbers on file: parts added via "Add from Shipment" may have none yet
+        # (e.g. a screw whose quantity equals the assembly quantity)
+        _inv_probe = inventory_manager()
+        hologram_key = next(
+            (k for k in hologram_candidates
+             if _inv_probe.get_hologram_available_by_name(
+                 collection_name=INVENTORY_COLLECTION, product_name=k[0], product_type="spare_parts",
+                 parent_product_name=k[1] or None) >= request.quantity),
+            hologram_candidates[0],
+        )                                               # (part_name, belongs_to)
         hologram_part_name = hologram_key[0]
 
         # how much of each inventory part actually gets consumed: the hologram
@@ -2677,8 +2804,11 @@ def _inventory_needed(parts_used: list) -> dict:
 @app.post("/assembly/edit/{assembly_id}")
 def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = Depends(require_role("inventory_manager", "admin", "assembly"))):
     """
-    Edit a PENDING assembly while it is still being built — parts can be added,
-    removed or their quantity changed. Only admin and assembly users may do this.
+    Edit an assembly's parts in ANY status (pending, awaiting approval, partially or
+    fully approved) — parts can be added, removed or their quantity changed. Only admin
+    and assembly users may do this.
+    Product name / model number can only be changed while no unit has been approved
+    into inventory yet (approved units keep the name/model they were added with).
 
     Inventory follows the change automatically:
       - a part's inventory consumption went UP   -> the extra is deducted from spare_parts stock
@@ -2696,11 +2826,18 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
             raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
         assembly = existing[0]
 
-        if assembly.get("status") != "pending":
-            raise HTTPException(
-                status_code=400,
-                detail="only pending assemblies can be edited — a completed assembly's units are already in inventory",
-            )
+        # once any unit is approved into inventory, product identity is frozen (those inventory
+        # records would not follow the change) — parts stay editable in every status
+        identity_locked = bool(assembly.get("approved_serials"))
+        if identity_locked:
+            for field, value in (("product_name", request.product_name),
+                                 ("product_id", request.product_id),
+                                 ("model_number", request.model_number)):
+                if value is not None and value.strip() != (assembly.get(field) or ""):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="product name / model cannot be changed after units have been approved into inventory",
+                    )
 
         quantity = int(assembly.get("quantity", 0) or 0)
         new_parts = assembly_manager._normalize_parts_used(_fill_belongs_to([p.dict() for p in request.parts_used]))

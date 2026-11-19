@@ -19,6 +19,8 @@ class assembly_manager(mongodbclient):
                 "source": "inventory" | "local",     # "inventory" -> deducted from inventory's
                                                       # spare_parts stock; "local" -> sourced
                                                       # outside, never touches inventory
+                "shipment_id": str,                 # optional: shipment it was picked from
+                                                      # ("Add from Shipment"); still source="inventory"
             }
         serials: list of dicts, one per assembled unit ->
             {"serial_number": str, "hologram_number": str}
@@ -55,12 +57,16 @@ class assembly_manager(mongodbclient):
             source = part.get("source", "inventory")
             if source not in ("inventory", "local"):
                 source = "inventory"
-            normalized.append({
+            entry = {
                 "part_name": part_name,
                 "quantity": part.get("quantity", 0) or 0,
                 "source": source,
                 "belongs_to": (part.get("belongs_to") or "").strip(),
-            })
+            }
+            # set when the part was picked via "Add from Shipment" (still deducted from inventory)
+            if (part.get("shipment_id") or "").strip():
+                entry["shipment_id"] = part["shipment_id"].strip()
+            normalized.append(entry)
         return normalized
 
     @staticmethod
