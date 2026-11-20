@@ -1823,3 +1823,81 @@ window.serialSearchWidget = function (mount, onPick) {
     hide();
   });
 };
+
+(function () {
+  const KEYS = {
+    'main_dashboard.html': 'd', 'technician_dashboard.html': 'd', 'orders.html': 'o', 'distributor_orders.html': 'o',
+    'inventory.html': 'i', 'shipment.html': 's', 'service.html': 'e', 'technician.html': 'e', 'assembly.html': 'a',
+    'allocated.html': 'l', 'dispatch.html': 'p', 'attendance.html': 't', 'users.html': 'u', 'reports.html': 'r',
+    'qc.html': 'q', 'work_report.html': 'w', 'work.html': 'w', 'distributor.html': 'd', 'distributor_team.html': 't',
+    'create_account.html': 'n'
+  };
+  const visible = el => el && el.offsetWidth > 0 && el.offsetHeight > 0 && !el.disabled;
+  const typing = () => {
+    const a = document.activeElement;
+    if (a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable)) return true;
+    const s = window.getSelection();
+    return !!(s && !s.isCollapsed && String(s).trim());
+  };
+  const modalOpen = () => [...document.querySelectorAll('.modal, .logout-modal.active')].some(m => visible(m) || (m.offsetWidth > 0 && m.offsetHeight > 0));
+  const findLink = key => [...document.querySelectorAll('.sidebar ul li a')].find(a => {
+    const li = a.closest('li');
+    return li && !li.hasAttribute('hidden') && KEYS[sidebarFile(a)] === key && visible(a);
+  });
+  const findCreate = () => {
+    const direct = [...document.querySelectorAll('[data-shortcut="create"], #createOrderBtn, .add-product, .top-actions button')].find(visible);
+    if (direct) return direct;
+    return [...document.querySelectorAll('main button')].find(b => visible(b) && !b.closest('.modal, .sidebar') && /\b(add|create|new)\b/i.test(b.textContent));
+  };
+  const markKeys = () => {
+    if (!document.getElementById('skStyle')) {
+      const st = document.createElement('style');
+      st.id = 'skStyle';
+      st.textContent = '.sidebar u.sk{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}';
+      document.head.appendChild(st);
+    }
+    document.querySelectorAll('.sidebar ul li a').forEach(a => {
+      const span = a.querySelector('span');
+      if (!span || span.querySelector('u.sk')) return;
+      const key = a.matches('[onclick*="openLogoutModal"]') ? 'g' : KEYS[sidebarFile(a)];
+      if (!key) return;
+      const text = span.textContent;
+      const i = text.toLowerCase().indexOf(key);
+      if (i < 0) return;
+      const u = document.createElement('u');
+      u.className = 'sk';
+      u.textContent = text[i];
+      span.textContent = '';
+      span.append(text.slice(0, i), u, text.slice(i + 1));
+    });
+  };
+  const startMarks = () => { markKeys(); setTimeout(markKeys, 500); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startMarks); else startMarks();
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || e.repeat) return;
+    if (typing() || modalOpen()) return;
+    const k = e.key.toLowerCase();
+    if (k === 'c') {
+      const b = findCreate();
+      if (b) { e.preventDefault(); b.click(); }
+      return;
+    }
+    if (k === 'g') {
+      const out = document.querySelector('.sidebar a[onclick*="openLogoutModal"]');
+      if (visible(out)) { e.preventDefault(); out.click(); }
+      return;
+    }
+    const link = findLink(k);
+    if (link) { e.preventDefault(); link.click(); }
+  });
+})();
+
+(function purgeStaleCacheOnce() {
+  const FLAG = 'sk_cache_purged_v1';
+  try { if (localStorage.getItem(FLAG)) return; localStorage.setItem(FLAG, '1'); } catch (e) { return; }
+  const jobs = [];
+  if ('serviceWorker' in navigator) jobs.push(navigator.serviceWorker.getRegistrations().then(r => Promise.all(r.map(x => x.unregister()))));
+  if (window.caches) jobs.push(caches.keys().then(k => Promise.all(k.map(n => caches.delete(n)))));
+  if (!jobs.length) return;
+  Promise.all(jobs).catch(() => { }).then(() => location.reload());
+})();
