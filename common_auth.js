@@ -1963,11 +1963,15 @@ window.serialSearchWidget = function (mount, onPick) {
     if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || e.repeat) return;
     if (typing()) return;
     const k = e.key.toLowerCase();
-    // m = minimize the open wizard / popup one size (full screen -> large -> normal)
+    // m = close the open wizard / popup (top-most one)
     if (k === 'm') {
       const top = topOverlay();
-      const sm = top && top.querySelector('.ab-smaller');
-      if (sm && !sm.disabled) { e.preventDefault(); sm.click(); }
+      if (!top) return;
+      e.preventDefault();
+      const closeBtn = [...top.querySelectorAll('.close, .wizClose, #wizClose, #wizardClose, #allocWizClose, #addWizClose, #msgClose, #workModalClose, .rq-close, button')]
+        .find(b => visible(b) && (b.matches('.close, .wizClose, #wizClose, #wizardClose, #allocWizClose, #addWizClose, #msgClose, #workModalClose, .rq-close') || b.textContent.trim() === '×'));
+      if (closeBtn) closeBtn.click();
+      else top.style.display = 'none';   // no close button found: just hide it
       return;
     }
     // p = print (popup -> row/card under cursor -> page button); if nothing to print it falls through to the Dispatch nav key
