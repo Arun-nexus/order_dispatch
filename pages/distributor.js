@@ -105,8 +105,6 @@ function returnMeta(a) {
   return { label: `${daysLeft}d left`, cls: daysLeft <= 2 ? 'medium' : 'high', overdue: false };
 }
 
-// One table row per allocated unit, plus one row per request still waiting
-// for (or refused at) approval.
 function rebuildRows() {
   const reqRows = spState.myRequests
     .filter(r => r.request_type === 'demo_unit' && (r.status === 'pending' || r.status === 'rejected'))
@@ -121,7 +119,6 @@ function refreshView() {
   renderTable(filteredRows());
 }
 
-// Lifecycle: Under Approval -> Approved -> Processing (sent to dispatch) -> Dispatched
 function rowStatus(row) {
   if (row.kind === 'req') {
     return row.data.status === 'rejected'
@@ -202,9 +199,6 @@ function renderTable(rows) {
   });
 }
 
-// hooks filled in by the convert-to-order step
-// Convert / Return buttons are always visible on demo-unit rows; they are only clickable once the unit is dispatched
-// (and no other request for it is pending).
 function actionBtn(cls, icon, label, enabled, title, color) {
   return `<button class="${cls}" ${enabled ? '' : 'disabled'} title="${title}"
     style="margin-left:6px;padding:6px 10px;border:none;border-radius:8px;font-size:12px;white-space:nowrap;
@@ -225,7 +219,6 @@ function wireRowActions(tbody) {
   tbody.querySelectorAll('.return-btn:not([disabled])').forEach(b => b.addEventListener('click', e => openReturnModal(rowFromEvent(e))));
 }
 
-// ---------- Return a dispatched demo unit (needs admin approval; marked returned once approved) ----------
 function openReturnModal(row) {
   if (!row || row.kind !== 'alloc') return;
   const a = row.data;
@@ -276,7 +269,6 @@ function openReturnModal(row) {
   modal.style.display = 'flex';
 }
 
-// ---------- Convert a dispatched demo unit into an order (needs admin approval) ----------
 async function openConvertModal(row) {
   if (!row || row.kind !== 'alloc') return;
   const a = row.data;
@@ -284,7 +276,6 @@ async function openConvertModal(row) {
   const body = wizBody();
   wizTitle('Convert to Order');
 
-  // companies of this person (backend already limits /customer/search for distributors)
   let companies = [];
   try {
     const r = await apiFetch('/customer/search');
@@ -323,8 +314,8 @@ async function openConvertModal(row) {
   const box = document.getElementById('newCompanyBox');
   const syncBox = () => { box.style.display = sel.value === '__new__' ? 'flex' : 'none'; };
   sel.addEventListener('change', syncBox);
-  if (!companies.length) sel.value = '__new__';   // no companies yet -> go straight to creating one
-  syncBox();
+  if (!companies.length) sel.value = '__new__';   
+    syncBox();
 
   document.getElementById('convertCancel').addEventListener('click', () => modal.style.display = 'none');
   document.getElementById('convertForm').addEventListener('submit', async e => {
@@ -376,7 +367,6 @@ function detailRow(label, value) {
   return `<div class="detail"><small>${label}</small><p>${value}</p></div>`;
 }
 
-// Same layout as the order details modal on the Orders page.
 function openViewModal(row) {
   if (!row) return;
   const modal = document.getElementById('viewAllocationModal');
@@ -437,9 +427,6 @@ function openViewModal(row) {
   modal.style.display = 'flex';
 }
 
-// =========================================================
-// CARD POPUPS — filters + export + click-through to full details
-// =========================================================
 const dcv = { key: '', title: '', base: [], f: {} };
 
 function dcvEnsure() {
@@ -487,8 +474,6 @@ function dcvEnsure() {
   return modal;
 }
 
-// identity line for a product row: "ID · Model" for products/accessories,
-// "Belongs to: <product>" for spare / service parts
 function dcvInv(i) {
   const list = spState.products || [];
   return list.find(p => p.product_name === i.product_name && (p.product_id || '') === (i.product_id || '') && (p.model_no || '') === (i.model_no || ''))
@@ -648,7 +633,6 @@ function wireFilter() {
   });
 }
 
-// ---------- Allot Demo Unit wizard ----------
 const spWiz = { cart: {}, remarks: '' };
 
 function resetSpWiz() {
@@ -681,15 +665,6 @@ function wizBody() {
 }
 function wizTitle(t) { document.getElementById('wizTitle').textContent = t; }
 
-// Multiple inventory entries can share the same product_id (e.g. separate
-// batches/lots). Showing them as separate rows would let the person type into
-// two different rows for "the same" product — since the cart used to be keyed
-// by product_id alone, only the last one edited would actually stick. Collapse
-// them into a single row per product+model instead.
-// A row is only "the same product" when product_id + product_name + model_no
-// ALL match — if even one differs, it's a different, independent product and
-// gets its own row and its own cart line. (Same rule as the Create Order
-// product picker in distributor_orders.js.)
 function rowKeyFor(p) { return `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`; }
 
 function dedupeProducts(rawProducts) {
@@ -723,9 +698,6 @@ function renderProductsStep() {
   document.getElementById('backCart').addEventListener('click', () => { document.getElementById('allotModal').style.display = 'none'; });
   document.getElementById('demoRemarks').addEventListener('input', e => { spWiz.remarks = e.target.value; });
 
-  // ---------- Category tabs: Products / Accessories / Spare Parts ----------
-  // Filters the same product table by product_type — same pattern used on
-  // the Create Order product picker, the admin Orders page and Inventory.
   const catTabsBox = document.getElementById('prodCatTabs');
   const categories = [
     { type: 'product', label: 'Products' },

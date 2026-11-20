@@ -1,4 +1,3 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
@@ -11,8 +10,6 @@ const allocState = { allocations: [], products: [], requests: [], searchQuery: '
 let allocPage = 1;
 const ALLOC_PAGE_SIZE = 50;
 
-// Generic pagination control renderer — rebuilds the .pagination buttons based
-// on however many pages the current row count needs, and wires them up.
 function renderTablePagination(container, page, totalPages, onChange) {
   if (!container) return;
   if (totalPages <= 1) { container.innerHTML = ''; return; }
@@ -30,8 +27,6 @@ function renderTablePagination(container, page, totalPages, onChange) {
   }));
 }
 
-// Opens the allocate wizard at the part step for a technician's spare part request:
-// ?alloc_service=<service_id>&alloc_parts=<name|name>&alloc_request=<request_id>
 async function openRequestedPartAllocation(params) {
   const sid = params.get('alloc_service'), rid = params.get('alloc_request');
   const parts = (params.get('alloc_parts') || '').split('|').map(x => x.trim()).filter(Boolean);
@@ -68,7 +63,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(() => { if (!reqBusy.size) loadPendingRequests(); }, 60 * 1000);
 });
 
-// ---------- Header search (by serial number, product name or sales person) ----------
 function wireHeaderSearch() {
   const input = document.querySelector('.search input');
   if (!input) return;
@@ -79,10 +73,6 @@ function wireHeaderSearch() {
   });
 }
 
-// Combines the header search box with whatever the "Apply Filter" bar last
-// set, so any action that re-fetches data (approve, return, allocate, etc.)
-// can re-render the SAME filtered/searched view instead of snapping back to
-// the full unfiltered list.
 function getFilteredAllocations() {
   let list = allocState.allocations;
 
@@ -131,9 +121,6 @@ function wireNotifBell() {
 async function loadPendingRequests() {
   const role = getRole();
   const section = document.getElementById('pendingRequestsSection');
-  // Requests panel is visible to admin/accounts/service_manager — matches
-  // backend's require_role() on /request/. Other roles get their own
-  // request status via the notification bell (common_auth.js) instead.
   const canView = role === 'admin' || role === 'accounts' || role === 'service_manager';
   if (!canView) {
     if (section) section.style.display = 'none';
@@ -175,7 +162,6 @@ function reqItemLabel(i) {
   return esc(i.product_name || '') + (extra ? ` (${esc(extra)})` : '');
 }
 
-// "dd/mm/yyyy, hh:mm AM/PM" — date AND time the request was generated
 function fmtReqDateTime(iso) {
   if (!iso) return '-';
   const d = new Date(iso);
@@ -184,7 +170,6 @@ function fmtReqDateTime(iso) {
     d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
-// spare part request: requested part(s) with old hologram + the service's product/serial/issue
 function sparePartSummary(r) {
   const d = r.details || {};
   const parts = (d.parts || []).map(p => `<b>${esc(p.part_name || 'Part')}</b>${p.old_hologram_number ? ' (old hologram ' + esc(p.old_hologram_number) + ')' : ''}`).join(', ')
@@ -260,8 +245,6 @@ function renderPendingRequests() {
       subtitle = (subtitle || '') + ` • Partial: ${(r.details?.partial?.approved_items || []).length} approved, ${(r.details?.partial?.unapproved_items || []).length} not approved — ${esc(r.details?.partial?.remarks || '')}`;
     }
     const canPartial = r.status === 'pending' && ['demo_unit', 'order'].includes(r.request_type) && (r.details?.items || []).length > 1;
-    // status_update is completed from the Service page's Update Status action (needs
-    // service charges etc. that this quick panel doesn't collect), so no approve/reject here
     const actions = r.status === 'partially_approved'
       ? `<span style="font-size:12px;color:#92400e;background:#fef3c7;padding:4px 10px;border-radius:999px;font-weight:600;">Awaiting distributor</span>`
       : r.request_type === 'status_update'
@@ -306,9 +289,6 @@ function rowRequest(e) {
   return allocState.requests.find(r => r.request_id === id);
 }
 
-// Shows type-specific details for a pending request: product name/qty/price for
-// demo unit & order requests, spare part note/technician/service id for spare
-// part requests. Reuses the existing viewAllocationModal markup.
 function openRequestDetailsModal(r) {
   if (!r) return;
   const modal = document.getElementById('viewAllocationModal');
@@ -440,9 +420,6 @@ function rowRequestId(e) {
   return e.target.closest('.order-item').dataset.id;
 }
 
-// ---------- payment block for turning a demo unit into an order ----------
-// Same payment modes as the Orders page (Credit / Partial / Net Banking / UPI / Cheque / DD / Cash),
-// so a converted order carries a real payment mode instead of a "Demo Conversion" label.
 const CONV_PAY_MODES = [
   ['Credit', 'Credit'], ['Partial', 'Partial (part now, rest later)'], ['NetBanking', 'Net Banking'],
   ['UPI', 'UPI'], ['Cheque', 'Cheque'], ['DemandDraft', 'Demand Draft'], ['Cash', 'Cash'],
@@ -469,7 +446,6 @@ function convPayDaysHtml(idPrefix, label) {
     <input id="${idPrefix}DaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;${CONV_PAY_INP}">`;
 }
 
-// getTotal() -> order total incl. tax, used for the Partial balance hint / check
 function convPayRender(mode, getTotal) {
   const box = document.getElementById('cvPayExtra');
   if (!box) return;
@@ -510,7 +486,6 @@ function convPayRender(mode, getTotal) {
   }));
 }
 
-// wires the mode <select> built by convPayHtml()
 function convPayWire(getTotal) {
   const sel = document.getElementById('cvPayMode');
   if (!sel) return;
@@ -518,7 +493,6 @@ function convPayWire(getTotal) {
   convPayRender(sel.value, getTotal);
 }
 
-// returns { payment_mode, payment_details } or throws an Error with a message for the user
 function convPayRead(getTotal) {
   const mode = document.getElementById('cvPayMode')?.value || '';
   if (!mode) throw new Error('Please select a payment mode.');
@@ -961,15 +935,8 @@ function updateAllocationCards(allocations) {
   if (values[3]) values[3].textContent = returned;
 }
 
-// Label for one allocated item — new rows always carry quantity 1 and their
-// own serial number (partial returns are gone), but older rows created
-// before this change may still hold quantity>1 with several serials, so
-// both are shown correctly here.
 function itemLabel(i) {
   const qtyPart = (i.quantity || 1) > 1 ? ` x${i.quantity}` : '';
-  // id + model identify exactly which variant/lot this unit came from (two
-  // products can share a name, e.g. same model in black vs grey) — shown as
-  // a small sub-line under the name, same pattern used on the Dispatch page.
   const meta = [i.product_id, i.model_no].filter(Boolean).join(' · ');
   const metaHtml = meta ? `<br><small style="color:#94a3b8;">${esc(meta)}</small>` : '';
   return `${esc(i.product_name || '')}${qtyPart}${metaHtml}`;
@@ -978,14 +945,6 @@ function itemSerials(i) {
   return (i.serial_numbers || []).join(', ');
 }
 
-// Spare/service part allocations only carry the part's own name + quantity
-// (see allocation.py's spare_part shape) — not which product that part
-// belongs to. Inventory's matching spare_parts/service_parts lot DOES carry
-// that (parent_product_name), so it's looked up here from the inventory
-// list already loaded for the allocate wizard's product picker
-// (allocState.products, populated by loadInventoryForAllocation). Matched by
-// part name alone since a spare_part allocation has no product_type of its
-// own to disambiguate — first match wins.
 function sparePartParentName(partName) {
   if (!partName) return '';
   const needle = partName.trim().toLowerCase();
@@ -1008,7 +967,6 @@ function sparePartLabel(sp) {
 }
 
 function renderAllocationsTable(allocations) {
-  // Newest allotments first instead of the raw (ascending) API order.
   const sorted = [...allocations].sort((a, b) =>
     new Date(b.allotment_date || b.created_at || 0) - new Date(a.allotment_date || a.created_at || 0));
 
@@ -1082,7 +1040,6 @@ function renderAllocationsTable(allocations) {
   });
 }
 
-// ---------- Send allocated product to Dispatch (mirrors how orders reach the dispatch queue) ----------
 async function sendToDispatch(a) {
   if (!a) return;
   const label = (a.items || []).map(itemLabel).join(', ');
@@ -1102,15 +1059,9 @@ function rowAllocation(e) {
   return allocState.allocations.find(a => a.allocation_id === tr.dataset.id);
 }
 
-// ---------- Return allocation ----------
-// Every row is now a single allocated unit (or, for spare parts, one
-// service's request) — so returning it is a one-shot confirm, no picking
-// serials or splitting quantity.
 function openReturnModal(a) {
   if (!a) return;
   const isSpare = a.allocation_type === 'spare_part';
-  // plain text only here — this goes into a native confirm() dialog, which
-  // can't render the <br><small> markup itemLabel/sparePartLabel use elsewhere
   const label = isSpare
     ? `${a.spare_part?.part_name ?? ''} x${a.spare_part?.quantity ?? 1}`
     : (a.items || []).map(i => `${i.product_name}${itemSerials(i) ? ' (SN: ' + itemSerials(i) + ')' : ''}`).join(', ');
@@ -1253,9 +1204,6 @@ async function openEditAllocationModal(a) {
   });
 }
 
-// ---------- Convert a dispatched demo unit straight into an order ----------
-// The company is picked from the companies already on file (Users → Companies);
-// "Create new company" is still there for a customer that is not registered yet.
 async function openConvertAllocationModal(a) {
   if (!a) return;
   const modal = document.getElementById('viewAllocationModal');
@@ -1317,7 +1265,6 @@ async function openConvertAllocationModal(a) {
     wire();
   };
 
-  // keep what was typed when the company choice switches between "existing" and "new"
   const readFields = () => {
     const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
     for (const [key, id] of [['company', 'cvCompany'], ['address', 'cvAddress'], ['gst', 'cvGst'], ['price', 'cvPrice'], ['tax', 'cvTax'], ['invNo', 'cvInvNo'], ['invDate', 'cvInvDate'], ['payMode', 'cvPayMode']]) {
@@ -1326,7 +1273,6 @@ async function openConvertAllocationModal(a) {
     }
   };
 
-  // order total (incl. tax) from the price / tax currently typed in the form and this unit's quantities
   const getTotal = () => {
     const price = Number(document.getElementById('cvPrice')?.value) || 0;
     const tax = Number(document.getElementById('cvTax')?.value) || 0;
@@ -1374,7 +1320,6 @@ async function openConvertAllocationModal(a) {
   modal.style.display = 'flex';
 }
 
-// ---------- Report Damaged Product modal ----------
 function openDamageReportModal(a) {
   if (!a) return;
   const modal = document.getElementById('viewAllocationModal');
@@ -1452,7 +1397,6 @@ function openDamageViewModal(a) {
 
   const photoHtml = src => `<img src="${src}" style="max-width:100%;border-radius:10px;margin-top:8px;">`;
   const purgedHtml = `<p style="font-size:12px;color:#94a3b8;margin-top:6px;">Photo already emailed and auto-deleted from the database (2-day retention).</p>`;
-  // photo is no longer sent with the allocation list (it is a large base64 blob) — loaded when opened
   const imageHtml = dr.image ? photoHtml(dr.image) : (dr.image_purged ? purgedHtml : '<p id="damagePhotoBox" style="font-size:12px;color:#94a3b8;margin-top:6px;">Loading photo…</p>');
 
   content.innerHTML = `
@@ -1480,11 +1424,6 @@ function openDamageViewModal(a) {
 function wireTopActions() {
   const exportBtn = document.querySelector('.top-actions .export');
   if (exportBtn) exportBtn.addEventListener('click', exportAllocationsCSV);
-  // Allocate button is wired inside injectAllocateModal()
-
-  // Matches backend: admin/accounts/service_manager can create & send to
-  // dispatch; admin/accounts/distributor/service_manager can return or
-  // report damage.
   const role = getRole();
   window.__allocCanEdit = role === 'admin' || role === 'accounts';
   window.__allocCanCreate = role === 'admin' || role === 'accounts' || role === 'service_manager';
@@ -1495,10 +1434,6 @@ function wireTopActions() {
   }
 }
 
-// Distinct sales-person names across the current product allocations, for
-// the export wizard's "All / a particular sales person" filter. Spare-part
-// and demo-unit allocations don't have a sales person, so they're only ever
-// included when "All" is selected.
 function uniqueSalesPersonNames() {
   const names = new Set();
   allocState.allocations.forEach(a => {
@@ -1541,7 +1476,6 @@ function exportAllocationsCSV() {
   });
 }
 
-// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
   if (a4Intercept(header, rows, filename)) return;
   const q = v => { const t = String(v ?? ''); return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -1620,9 +1554,6 @@ function openExportWizard({ title, statusOptions, statusField, dateField, dateLa
       if (kind === 'spare' && row.allocation_type !== 'spare_part') return false;
       if (kind === 'demo' && row.allocation_type === 'spare_part') return false;
       if (status && row[field] !== status) return false;
-      // "All" (empty) keeps every allocation type; picking a name only keeps
-      // that sales person's product allocations (spare parts/demo units have
-      // no sales_person, so they're excluded once a specific name is chosen).
       if (personField && person && row.sales_person?.name !== person) return false;
       if (dateField && (dateFrom || dateTo)) {
         const rowDate = row[dateField] ? new Date(row[dateField]) : null;
@@ -1655,7 +1586,6 @@ function wireFilter() {
   });
 }
 
-// ---------- Allocate wizard ----------
 const allocWiz = {
   type: '',              // 'product' | 'spare'
   salesPersonId: '',
@@ -1711,7 +1641,6 @@ function allocModalBody() {
 }
 function allocWizTitle(t) { document.getElementById('allocWizTitle').textContent = t; }
 
-// Step 0: allocation type
 function renderAllocTypeStep() {
   const body = allocModalBody();
   allocWizTitle('Allocate');
@@ -1729,8 +1658,6 @@ function renderAllocTypeStep() {
   document.getElementById('btnAllocSpare').addEventListener('click', () => { allocWiz.type = 'spare'; renderActiveServicesStep(); });
 }
 
-// ----- Product allocation flow -----
-// Allocation can only go to a registered system user (no free-typed sales persons).
 async function renderSystemUserStep() {
   const body = allocModalBody();
   allocWizTitle('Select User');
@@ -1782,11 +1709,6 @@ function renderProductCartStep() {
   allocWizTitle(`Products for ${allocWiz.salesPerson?.name ?? ''}`);
   const products = allocState.products;
 
-  // BUG FIX (same as orders.js): inventory keeps one document per lot, and
-  // the same product_id can appear on several rows with a different
-  // product_name/model_no. A row/cart-line is only "the same product" when
-  // product_id + product_name + model_no ALL match — otherwise it's a
-  // different, independent product and needs its own row + cart entry.
   const rowKey = (p) => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
   const totalQtyByKey = new Map();
   for (const p of products) {
@@ -1867,8 +1789,6 @@ function renderProductCartStep() {
   });
 }
 
-// Step: review auto-fetched serial numbers for the cart, optionally swap any
-// of them for a different available serial before allotment details.
 async function renderAllocSerialReviewStep() {
   allocWizTitle('Review Serial Numbers');
   const body = allocModalBody();
@@ -1971,8 +1891,6 @@ async function renderAllocSerialReviewStep() {
   document.getElementById('toDetailsBtn2').addEventListener('click', renderCompanyDetailsStep);
 }
 
-// Step: optional company details — none of these fields are required, so the
-// admin can skip straight through if there's nothing to record here.
 function renderCompanyDetailsStep() {
   const body = allocModalBody();
   allocWizTitle('Company Details (Optional)');
@@ -2033,8 +1951,6 @@ function renderAllotmentDetailsStep() {
         const chosen = (allocWiz.serialChoices[rowKey] || []).filter(Boolean);
         return {
           ...i,
-          // only send serial_numbers when we have exactly one per unit —
-          // otherwise leave empty so the backend falls back to auto-allocation
           serial_numbers: chosen.length === i.quantity ? chosen : []
         };
       }),
@@ -2059,12 +1975,6 @@ function renderAllotmentDetailsStep() {
   });
 }
 
-// ----- Part allocation flow (against a service) -----
-// Step 1: ALL services are listed (any status) with a search box.
-// Step 2: every inventory item except "product" (spare parts, service parts, accessories) can be picked.
-//   - a lot that has hologram numbers -> choose the exact hologram number(s) to give
-//   - a lot without hologram numbers  -> choose the quantity to give
-// The server deducts exactly what was chosen and records the allocation against that service.
 async function renderActiveServicesStep() {
   const body = allocModalBody();
   allocWizTitle('Select Service');
@@ -2113,13 +2023,11 @@ async function renderActiveServicesStep() {
   }
 }
 
-// Everything in inventory except plain products (and faulty/damaged stock) can be given to a service.
 const ALLOC_PART_LABELS = { spare_parts: 'Spare Part', service_parts: 'Service Part', accessories: 'Accessory' };
 const isPartType = p => !!ALLOC_PART_LABELS[p.product_type];
 const holoCountOf = p => (typeof p.hologram_count === 'number' ? p.hologram_count
   : (Array.isArray(p.hologram_numbers) ? p.hologram_numbers.length : (p.hologram_no ? 1 : 0)));
 
-// the list only carries hologram_count; the numbers themselves come from the lot detail
 async function allocFetchLotDetail(p) {
   try {
     const params = new URLSearchParams({
@@ -2151,7 +2059,6 @@ async function renderSparePartFormStep() {
   body.innerHTML = `<p style="color:#94a3b8;">Loading inventory...</p>`;
   await loadInventoryForAllocation();
 
-  // one lot per inventory document (spare/service parts each have their own lot id)
   const lotMap = new Map();
   (allocState.products || []).filter(p => isPartType(p) && (Number(p.quantity) || 0) > 0).forEach(p => {
     const k = String(p._id || `${p.product_id}||${p.product_name}||${p.model_no}`);
@@ -2311,7 +2218,6 @@ async function renderSparePartFormStep() {
   $('spClear').addEventListener('click', () => { chosen.clear(); drawHolos(); updateSummary(); });
   drawLots(); updateSummary();
 
-  // opened from a technician's request: pre-add the requested part
   if (allocWiz.requestId && allocWiz.queue.length) {
     const want = String(allocWiz.queue[0]).trim().toLowerCase();
     const hit = lots.find(l => l.name.trim().toLowerCase() === want) || lots.find(l => l.name.toLowerCase().includes(want) || want.includes(l.name.toLowerCase()));
@@ -2350,7 +2256,6 @@ async function renderSparePartFormStep() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'allocation failed');
-      // confirm those exact hologram numbers left inventory
       let stillThere = [];
       if (withHolo) {
         await loadInventoryForAllocation();

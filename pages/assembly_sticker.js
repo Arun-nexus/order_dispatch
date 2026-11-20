@@ -1,24 +1,3 @@
-/* =========================================================
-   assembly_sticker.js
-   Product sticker (label) designer + export for the Assembly page.
-
-   Two supply types, taken from FETAL_MONITOR.docx:
-     - normal : has M.R.P row, no govt line
-     - govt   : no M.R.P, extra last row "GOVT. SUPPLY NOT FOR RETAIL SALE."
-
-   One sticker is generated per serial number, 2 stickers per A4 page,
-   exported as PDF (jsPDF) or Word .docx (docx library).
-
-   Needs (loaded in assembly.html before this file):
-     window.jspdf  (jsPDF 2.5.1)   -> PDF
-     window.docx   (docx 8.5.0)    -> Word
-
-   Public API: window.AsmSticker
-     makeState(base)                      -> sticker state object (all editable fields)
-     renderEditor(host, state, serials)   -> editable sticker preview inside `host`
-     downloadPdf(state, serials)          / downloadDocx(state, serials)
-     openForAssembly(assembly)            -> stand-alone modal for a saved assembly
-   ========================================================= */
 (function () {
   'use strict';
 
@@ -31,7 +10,6 @@
     govtLine: 'GOVT. SUPPLY NOT FOR RETAIL SALE.',
   };
 
-  // ---- geometry (taken from the Word file: table 9685 twips ~ 171 mm, 2 stickers per A4) ----
   const COL_MM = [60, 111];                 // label column, value column
   const TABLE_MM = COL_MM[0] + COL_MM[1];   // 171 mm
   const PAGE = { w: 210, h: 297, x: (210 - TABLE_MM) / 2, slotTop: [14, 162.5] };
@@ -62,7 +40,6 @@
     };
   }
 
-  // ---- row spec shared by PDF + Word -------------------------------------------------
   function rowSpec(d, serial) {
     const rows = [
       { label: 'Mfg. License No.', value: d.licenseNo, minH: 10 },
@@ -93,9 +70,6 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 800);
   }
 
-  // =========================================================
-  // PDF
-  // =========================================================
   function pdfText(s) { return String(s ?? '').replace(/₹/g, 'Rs. '); }   // built-in PDF fonts have no rupee glyph
 
   function drawStickerPdf(doc, d, serial, x, y) {
@@ -104,7 +78,6 @@
     doc.setFont('times', 'bold');
     doc.setFontSize(FONT_PT);
 
-    // 1) measure every row
     const rows = rowSpec(d, serial).map(r => {
       if (r.full) {
         const lines = doc.splitTextToSize(pdfText(r.text), TABLE_MM - padL - padR);
@@ -128,7 +101,6 @@
       return { ...r, labelLines, valueLines, h: Math.max(r.minH, n * LH + padT + padB) };
     });
 
-    // 2) draw
     doc.setDrawColor(0);
     doc.setLineWidth(0.3);
     doc.setTextColor(0);
@@ -167,9 +139,6 @@
     doc.save(fileBase(state) + '.pdf');
   }
 
-  // =========================================================
-  // WORD (.docx)
-  // =========================================================
   async function downloadDocx(state, serials) {
     if (!window.docx) throw new Error('Word library (docx) did not load. Check your internet connection and reload the page.');
     const D = window.docx;
@@ -250,9 +219,6 @@
     download(await D.Packer.toBlob(doc), fileBase(state) + '.docx');
   }
 
-  // =========================================================
-  // EDITOR UI (sticker preview where every field can be changed)
-  // =========================================================
   function ensureStyles() {
     if (document.getElementById('asmStickerStyles')) return;
     const st = document.createElement('style');
@@ -335,13 +301,11 @@
   const safePdf = guard((s, l) => downloadPdf(s, l));
   const safeDocx = guard((s, l) => downloadDocx(s, l));
 
-  // download buttons wired to a state + serial list
   function wireDownloadButtons(root, state, serials) {
     root.querySelector('[data-stk="pdf"]')?.addEventListener('click', () => safePdf(state, serials));
     root.querySelector('[data-stk="docx"]')?.addEventListener('click', () => safeDocx(state, serials));
   }
 
-  // stand-alone modal for an already saved assembly (table button)
   function openForAssembly(a) {
     ensureStyles();
     let modal = document.getElementById('asmStickerModal');

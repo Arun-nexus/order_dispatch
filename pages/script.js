@@ -1,4 +1,3 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
@@ -40,10 +39,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.refreshCurrentPageData = () => { loadServices(); loadInstallations(); loadDemo(); loadPartAllocs(); loadRequests(); };
 
-// Powers the part-swap rows in the "Update Status" -> Completed form: only
-// service_parts that actually have a hologram number on file can be picked,
-// so a technician can never type a part/hologram combo that doesn't exist
-// in inventory (which used to silently create mismatched/bad records).
 async function loadAvailableHologramParts() {
   try {
     const res = await apiFetch('/service/available_hologram_parts');
@@ -90,7 +85,6 @@ function getFilteredServices() {
   return list;
 }
 
-// every assignable person (all users except admin) as flat options — no role grouping/labels
 function assigneeOptionsHtml(placeholder) {
   return `<option value="">${placeholder}</option>` + svcState.assignees
     .map(u => `<option value="${esc(u.username)}">${esc(u.username)}${u.name && u.name !== u.username ? ' — ' + esc(u.name) : ''}</option>`)
@@ -140,9 +134,6 @@ async function loadServices() {
   }
 }
 
-// Everyone except admins can be assigned a service. /account/users lists all accounts
-// (admin / accounts / service_manager may call it); if that is refused, fall back to the
-// technician + distributor lists so the dropdown is never empty.
 async function loadAssignees() {
   let list = [];
   try {
@@ -165,8 +156,6 @@ async function loadAssignees() {
   return svcState.assignees;
 }
 
-// Product ID is a fixed blank value now (see DEFAULT_PRODUCT_ID below), so it
-// can't identify an order line any more — only match on it when it has content.
 const hasRealProductId = s => !!String(s.product_id ?? '').trim();
 
 function findOrderItemForService(s) {
@@ -240,18 +229,11 @@ function openRescheduleModal(s) {
   };
 }
 
-
-
-
-
-// ---------- Edit service (admin / employee): change the details and reassign the technician ----------
 async function openEditServiceModal(s) {
   if (!s) return;
   await loadAssignees();
   const inp = (name, label, val, type) => `<label style="font-size:13px;">${label}</label><input name="${name}" type="${type || 'text'}" value="${esc(val ?? '')}" style="${IN_S}">`;
 
-  // technician dropdown. Older rows may hold the technician's user id instead of the username,
-  // so match on either; anything unmatched is kept as a selectable "(current)" option.
   const cur = String(s.technician_alloted || '');
   const match = svcState.assignees.find(u => u.username === cur || (u.user_id && u.user_id === cur));
   const selected = match ? match.username : cur;
@@ -320,15 +302,12 @@ function statusBadge(status) {
   return map[status] || 'pending';
 }
 
-// finds the order this service's product belongs to by searching each order's
-// line items (orders store items[].serial_numbers, not a top-level serial_no)
 function findOrderForService(s) {
   if (!s.serial_no) return hasRealProductId(s) ? svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id)) : undefined;
   return svcState.orders.find(o => (o.items || []).some(it => (it.serial_numbers || []).includes(s.serial_no)))
     || (hasRealProductId(s) ? svcState.orders.find(o => (o.items || []).some(it => it.product_id === s.product_id)) : undefined);
 }
 
-// warranty = manual override (warranty_until) if admin/employee set one, else order_date + 365 days
 function computeWarranty(s) {
   if (s.warranty_until) {
     const until = new Date(s.warranty_until);
@@ -414,7 +393,6 @@ function rowService(e) {
   return svcState.services.find(s => s.service_id === tr.dataset.serviceId);
 }
 
-// ---------- Action menu (replaces old confirm()-chain approach) ----------
 function openActionMenu(s, evt) {
   if (!s) return;
   closeActionMenu();
@@ -452,8 +430,6 @@ function openActionMenu(s, evt) {
 
   document.body.appendChild(menu);
 
-  // now that it's in the DOM we know its real size — clamp/flip so it never
-  // opens off the edge of the screen, and matches where the button actually is
   const menuRect = menu.getBoundingClientRect();
   const spaceBelow = window.innerHeight - rect.bottom;
   const openUpwards = spaceBelow < menuRect.height + 10 && rect.top > menuRect.height + 10;
@@ -570,7 +546,6 @@ async function extendWarranty(serviceId) {
   }
 }
 
-// ---------- Review a technician's service report: approve the faulty part return, or send it back ----------
 function closeReviewModal() {
   const m = document.getElementById('svcReviewModal');
   if (m) m.remove();
@@ -714,7 +689,6 @@ function exportServicesCSV() {
   });
 }
 
-// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
   if (a4Intercept(header, rows, filename)) return;
   const q = v => { const t = String(v ?? ''); return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -792,10 +766,6 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
 }
 
 
-// --- Create Service modal (injected: service.html ships a "new-service"
-// button but no matching modal markup) ---
-// Product ID is never typed in by hand — new service requests always use this
-// fixed value (a single space). The serial number identifies the unit.
 const DEFAULT_PRODUCT_ID = ' ';
 
 async function openCreateModal() {
@@ -843,7 +813,6 @@ async function openCreateModal() {
     document.body.appendChild(modal);
 
     modal.querySelector('#cancelCreateService').addEventListener('click', () => modal.style.display = 'none');
-    // spare parts picked while filling the form; they are allocated right after the service is created
     modal._parts = [];
     const partList = modal.querySelector('#createPartList');
     const drawParts = () => {
@@ -920,7 +889,6 @@ async function openCreateModal() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'service creation failed');
-        // allocate the spare parts picked in the form to the new service (deducts inventory)
         const failed = [];
         for (const p of modal._parts) {
           try {
@@ -947,8 +915,6 @@ async function openCreateModal() {
     });
   }
 
-  // refresh the technician dropdown every time the modal opens, so it always
-  // reflects current usernames from Users → technician accounts
   const select = modal.querySelector('#technicianSelect');
   select.innerHTML = '<option value="">Loading...</option>';
   await loadAssignees();
@@ -1150,8 +1116,6 @@ let svcView = 'services';
 let svcSearch = '';
 
 const SVC_HEAD = ['Company', 'Product Name', 'Model No.', 'Serial No.', 'Technician', 'Issue', 'Location', 'Warranty', 'Status', 'Return Approval', 'Created By', 'Listed On', 'Actions'];
-// A technician's own installation request = unassigned installation raised by somebody else.
-// Approving it assigns the installation to whoever raised it.
 const instMeS = () => (typeof getUsername === 'function' ? (getUsername() || '') : '');
 const instIsRequest = i => !i.technician_id && !!i.requested_by && i.requested_by !== instMeS() && i.status !== 'completed';
 async function approveInstallRequest(i) {
@@ -1265,7 +1229,6 @@ const DEMO_TYPE_LABEL = { product: 'Product', accessories: 'Accessory', spare_pa
 const DEMO_TYPE_ORDER = ['product', 'accessories', 'spare_parts', 'service_parts'];
 const isPartType = t => t === 'spare_parts' || t === 'service_parts';
 
-// everything except damaged stock can go out as a demo: products, accessories, spare parts, service parts
 async function loadInventoryOptions() {
   try {
     const res = await apiFetch('/inventory/');
@@ -1282,7 +1245,6 @@ async function loadInventoryOptions() {
   } catch (e) { svcState.inventory = []; }
 }
 
-// serials (products / accessories) or hologram numbers (parts) available for one stock line
 async function loadDemoUnits(p) {
   if (p._units) return p._units;
   const q = new URLSearchParams({ product_id: p.product_id, product_name: p.product_name, model_no: p.model_no,
@@ -1400,7 +1362,6 @@ const SVC_VIEWS = {
   }
 };
 
-// ---- Allocated Parts card ----
 async function loadPartAllocs() {
   try {
     const res = await apiFetch('/allocation/');
@@ -1410,7 +1371,6 @@ async function loadPartAllocs() {
   renderAll();
 }
 
-// one row per spare-part allocation, joined with its service and what the technician reported on it
 function partRowsS() {
   return svcState.partAllocs.map(a => {
     const sp = a.spare_part || {};
@@ -1438,7 +1398,6 @@ function openPartRowDetailS(r) {
     ${dRowS('Return', r.returned ? 'Approved' : 'Pending')}${dRowS('Allocated By', esc(r.alloc.created_by || '-'))}`, 520);
 }
 
-// same flag as "Manager Confirm Return" on the Services table, so approving here or there updates both
 async function approvePartReturnS(r) {
   if (!confirm('Approve the return of the faulty part for this service?')) return;
   try {
@@ -1458,7 +1417,6 @@ async function addPartToFaultyS(r) {
   } catch (e) { if (e.message !== 'unauthorized' && e.message !== 'forbidden') alert(e.message); }
 }
 
-// reschedule requests + technicians' installation requests, in one list
 function requestRowsS() {
   const inst = svcState.installs.filter(i => i.requested_by && i.requested_by !== instMeS() && (i.status !== 'completed' || i.technician_id === i.requested_by) && (!i.technician_id || i.technician_id === i.requested_by))
     .map(i => ({ request_id: 'inst:' + i.installation_id, _inst: i, raised_by: i.requested_by, status: i.technician_id ? 'approved' : 'pending',
@@ -1532,7 +1490,6 @@ function renderChipsS() {
   box.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => { svcState.status = c.dataset.k; renderChipsS(); renderMain(); }));
   const btn = document.getElementById('viewAction');
   if (v.button) { btn.style.display = ''; btn.innerHTML = v.button.label; btn.onclick = v.button.fn; } else { btn.style.display = 'none'; btn.onclick = null; }
-  // second top action on the Services view: allocate a spare part to any service without leaving the page
   let ap = document.getElementById('allocPartBtn');
   if (!ap) {
     ap = document.createElement('button');

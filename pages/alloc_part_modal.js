@@ -1,16 +1,3 @@
-/* Allocate a spare part / service part / accessory to a service, from any page (no page switch).
- *
- *   openAllocatePartModal({ service, requestId, parts, onDone })
- *     service    - service object (needs service_id). Omit it to pick one from the full service list first.
- *     requestId  - technician spare_part request being fulfilled (closed by the server when done)
- *     parts      - names the technician asked for; the first one is pre-selected in the list
- *     onDone     - called after a successful allocation of everything
- *     pick       - true: no service yet (service form). Nothing is posted; onPick(selection) gets the chosen item
- *                  {part_name, quantity, product_id, model_no, product_type, lot_id, hologram_numbers, holograms, manual_holograms}
- *     reserved   - {lot_id: qty} and exclude - [hologram numbers] already chosen in the form (so they are not offered twice)
- *
- * Needs apiFetch() from common_auth.js. Posts to /allocation/create (same payload as the Allocated page).
- */
 (function () {
   const esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const LABELS = { spare_parts: 'Spare Part', service_parts: 'Service Part', accessories: 'Accessory' };
@@ -51,7 +38,6 @@
 
     const INP = 'width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;';
 
-    // ---------- step 1: pick a service (only when none was given) ----------
     async function serviceStep() {
       title('Select Service');
       body.innerHTML = '<p style="color:#94a3b8;">Loading services...</p>';
@@ -79,7 +65,6 @@
       } catch (e) { body.innerHTML = '<small style="color:#d62828;">Could not load services.</small>'; }
     }
 
-    // ---------- step 2: pick the item, hologram(s) / quantity ----------
     async function partStep() {
       const svc = st.service || {};
       title(opts.pick ? 'Add Spare Part' : `Allocate to Service #${String(svc.service_id || '').slice(0, 8)}`);
@@ -190,7 +175,7 @@
       $('apmNone').addEventListener('click', () => { chosen.clear(); drawHolos(); summary(); });
       drawLots(); summary();
 
-      if (requested) {   // pre-add the part the technician asked for
+      if (requested) {   
         const want = String(st.queue[0]).trim().toLowerCase();
         const hit = lots.find(l => l.name.trim().toLowerCase() === want) || lots.find(l => l.name.toLowerCase().includes(want) || want.includes(l.name.toLowerCase()));
         if (hit) { filterEl.value = hit.name; drawLots(); pick(hit.key); }

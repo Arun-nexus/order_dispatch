@@ -1,23 +1,8 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
 function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
 function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
-// =========================================================
-// shipment.js
-// Powers pages/shipment.html — cards, table/filtering, and the
-// multi-step "Add Shipment" wizard (company details -> products
-// -> per-product spare parts + warranty).
-//
-// NOTE ON BACKEND: this file talks to /shipment/ endpoints the
-// same way allocated.js/dispatch.js talk to /request/ etc. If
-// those routes don't exist on the server yet, saveShipmentToServer()
-// below falls back to keeping everything in local memory so the
-// page still works end-to-end for demoing the flow. Swap the
-// fallback out once the FastAPI routes are added.
-// =========================================================
-
 let shipments = [];               // list rendered in the table
 let shipmentDraft = null;         // wizard state while the modal is open
 let shipmentStep = 1;             // 1 = company info, 2 = products, 3 = parts
@@ -48,12 +33,6 @@ function partStatusLabel(status) {
   return PART_STATUS_LABELS[status] || PART_STATUS_LABELS.assembly;
 }
 
-// =========================================================
-// LOAD + CARDS + TABLE
-// =========================================================
-
-// server stores snake_case (shipment_id, company_name, dispatch_date, ...);
-// the UI below works with the camelCase shape used while building the wizard.
 const CURRENCIES = { INR: '₹', USD: '$', EUR: '€', GBP: '£', CNY: 'CN¥', JPY: 'JP¥', AED: 'AED ', SGD: 'S$' };
 let companyList = [];
 
@@ -73,7 +52,6 @@ function addDays(dateStr, days) {
   d.setDate(d.getDate() + (Number(days) || 0));
   return d.toISOString().slice(0, 10);
 }
-// payment summary for the view modal
 function paymentSummaryHtml(s) {
   const total = draftTotal(s);
   const mode = s.paymentMode || 'paid';
@@ -155,7 +133,6 @@ async function loadShipments() {
       shipments = (data.dataset || []).map(fromServerShape);
     }
   } catch (err) {
-    // no backend route yet (or offline) — keep whatever is already in memory
     console.warn('shipment: using local data, server list unavailable', err.message);
   }
   renderCards();
@@ -195,9 +172,6 @@ function renderCards() {
   document.getElementById('cardFY').textContent = fy;
 }
 
-// =========================================================
-// CARD POPUPS — filters + export + click-through to full details
-// =========================================================
 const shipCV = { title: '', base: [], f: {} };
 
 function shipEnsureStyles() {
@@ -476,10 +450,6 @@ function renderTable() {
   tbody.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => openDeleteModal(b.dataset.id)));
 }
 
-// =========================================================
-// VIEW MODAL
-// =========================================================
-
 function openViewModal(id) {
   const s = shipments.find(x => x.id === id);
   if (!s) return;
@@ -518,10 +488,6 @@ function openViewModal(id) {
   box.querySelector('.close').addEventListener('click', () => closeModal('viewShipmentModal'));
   openModal('viewShipmentModal');
 }
-
-// =========================================================
-// MARK RECEIVED MODAL
-// =========================================================
 
 function openReceivedModal(id) {
   editingShipmentId = id;
@@ -568,10 +534,6 @@ function openReceivedModal(id) {
   openModal('receivedModal');
 }
 
-// =========================================================
-// DELETE MODAL
-// =========================================================
-
 function openDeleteModal(id) {
   deletingShipmentId = id;
   openModal('deleteShipmentModal');
@@ -589,9 +551,6 @@ document.getElementById('deleteShipmentConfirm')?.addEventListener('click', asyn
   showResponseModal('Shipment deleted', 'The shipment record has been removed.', true);
 });
 
-// =========================================================
-// MODAL HELPERS
-// =========================================================
 
 function openModal(id) {
   const m = document.getElementById(id);
@@ -601,14 +560,6 @@ function closeModal(id) {
   const m = document.getElementById(id);
   m.style.display = 'none';
 }
-
-// =========================================================
-// ADD SHIPMENT WIZARD
-// Step 1: company name, address, dispatch date, received date (optional)
-// Step 2: add one or more products (name, quantity, price)
-// Step 3: for every product added in step 2 — warranty + spare parts
-//         (each product can have any number of parts, added one at a time)
-// =========================================================
 
 function stepDots(active) {
   const labels = ['Company', 'Products', 'Parts & Warranty'];
@@ -673,7 +624,6 @@ function renderShipmentStep() {
   return renderStep3();
 }
 
-// ---------- STEP 1: company, payment, currency ----------
 function readStep1() {
   const g = id => document.getElementById(id);
   const d = shipmentDraft;
@@ -855,7 +805,6 @@ function renderStep1() {
   });
 }
 
-// ---------- STEP 2: products ----------
 function renderStep2() {
   const box = SHIPMENT_MODAL();
   box.innerHTML = `
@@ -977,7 +926,6 @@ function readProductRowsIntoDraft() {
   });
 }
 
-// ---------- STEP 3: parts + warranty, per product ----------
 function renderStep3() {
   const box = SHIPMENT_MODAL();
   box.innerHTML = `
@@ -1077,11 +1025,9 @@ function syncAllPartsFromDom() {
   shipmentDraft.products.forEach((_, pi) => syncPartsFromDom(pi));
 }
 
-// ---------- FINALIZE ----------
 async function finalizeShipment() {
   syncAllPartsFromDom();
 
-  // drop empty part rows (name left blank)
   shipmentDraft.products.forEach(p => {
     p.parts = p.parts.filter(part => part.name);
   });
@@ -1127,7 +1073,6 @@ async function finalizeShipment() {
       shipmentDraft.totalInr = Math.round(draftTotal(shipmentDraft) * shipmentDraft.exchangeRate * 100) / 100;
     }
   } catch (err) {
-    // no backend route yet — shipment still gets added to local state below
     console.warn('shipment: saved locally only, server unavailable', err.message);
   }
 
@@ -1140,9 +1085,6 @@ async function finalizeShipment() {
   showResponseModal('Shipment added', 'The shipment has been saved successfully.', true);
 }
 
-// =========================================================
-// INIT
-// =========================================================
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addShipmentBtn').addEventListener('click', openAddShipmentModal);
   document.getElementById('applyShipmentFilter').addEventListener('click', renderTable);
@@ -1155,5 +1097,4 @@ document.addEventListener('DOMContentLoaded', () => {
   loadShipments();
 });
 
-// expose for the shared notification bell (common_auth.js) to refresh this page's data
 window.refreshCurrentPageData = loadShipments;

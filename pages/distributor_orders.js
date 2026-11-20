@@ -45,24 +45,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
 window.refreshCurrentPageData = () => { loadOrders(); };
 
-// ---------- Load / render ----------
 async function loadOrders() {
   try {
     const res = await apiFetch('/order/');
     if (!res.ok) throw new Error('failed to fetch orders');
     const data = await res.json();
     const uname = getUsername();
-    // Distributors only ever get orders into the system via an approved
-    // /request/order — those come back with creator.type === "request" and
-    // creator.raised_by set to whoever raised it. Filter to just this user's.
     const mine = (data.dataset || []).filter(o => o.creator?.raised_by === uname || o.reference === uname);
 
-    // Demo-to-order conversions waiting for approval (or refused) show up here as rows
-    // until admin approves; after approval the real order replaces them.
-    // Requests still waiting for approval (or refused) show up here as rows until
-    // admin/accounts approves them; after approval the real order replaces them.
-    //  - "order"            : order request raised from this page (Create Order)
-    //  - "convert_to_order" : demo unit -> order request raised from My Demo Units
     let convertRows = [];
     try {
       const rr = await apiFetch('/request/mine');
@@ -193,9 +183,6 @@ function rowOrder(e) {
   return doState.orders.find(o => o.order_id === tr.dataset.orderId);
 }
 
-// =========================================================
-// CARD POPUPS — filters + export + click-through to full details
-// =========================================================
 const ocv = { key: '', title: '', base: [], f: {} };
 
 function ocvEnsure() {
@@ -243,7 +230,6 @@ function ocvEnsure() {
   return modal;
 }
 
-// "ID · Model" for products / accessories, "Belongs to: <product>" for spare / service parts
 function ocvInv(i) {
   const list = doState.products || [];
   return list.find(p => p.product_name === i.product_name && (p.model_no || '') === (i.model_no || ''))
@@ -382,8 +368,6 @@ function openOrderCardModal(key) {
   modal.style.display = 'flex';
 }
 
-// Pending / Rejected request cards sit next to the existing order cards
-// (an order request shows here until admin/accounts approves it).
 function ensureRequestCards() {
   const wrap = document.querySelector('.cards');
   if (!wrap) return;
@@ -412,7 +396,6 @@ function wireOrderCardClicks() {
   });
 }
 
-// ---------- Header search + filter ----------
 function wireHeaderButtons() {
   const searchInput = document.querySelector('header input');
   if (searchInput) {
@@ -449,7 +432,6 @@ function wireFilter() {
   });
 }
 
-// ---------- View Order modal ----------
 function paymentDetailsLabel(o) {
   const mode = o.payment_mode;
   const d = o.payment_details || {};
@@ -530,8 +512,6 @@ function wireViewModalClose() {
   if (modal) modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
 }
 
-// ---------- Create Order wizard (raises an approval request — distributors
-// can't create orders directly, only admin/employee can) ----------
 const orderWiz = { customerId: '', customer: null, cart: {}, discount: 0, remarks: '', shipDiff: false, shipCompany: '', shipAddress: '' };
 
 function resetOrderWiz() {
@@ -567,7 +547,6 @@ function wireWizClose() {
   });
 }
 
-// Step 1: existing vs new customer
 function renderCustomerTypeStep() {
   wizBody().innerHTML = wizHeader('New Order — Customer') + `
     <p style="color:#64748b;margin-bottom:14px;">Is this order for an existing customer or a new one?</p>
@@ -584,7 +563,6 @@ function renderCustomerTypeStep() {
   document.getElementById('btnNew').addEventListener('click', renderNewCustomerStep);
 }
 
-// Step 2a: search + pick existing customer
 function renderExistingCustomerStep() {
   wizBody().innerHTML = wizHeader('New Order — Select Customer') + `
     <input id="custSearch" placeholder="Search company, GST or contact person" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
@@ -626,7 +604,6 @@ function renderExistingCustomerStep() {
   runSearch();
 }
 
-// Step 2b: new customer form
 function renderNewCustomerStep() {
   wizBody().innerHTML = wizHeader('New Order — New Customer') + `
     <form id="newCustForm" style="display:flex;flex-direction:column;gap:10px;">
@@ -669,12 +646,6 @@ function renderNewCustomerStep() {
   });
 }
 
-// Inventory can hold several lots (batches) of the same product, and older lots may carry a
-// different/blank product_id. product_id is NOT part of a product's identity any more: a product is
-// "the same" only when product name + model no + product type ALL match (spare/service parts are
-// also told apart by the product they belong to). All matching lots collapse into ONE row whose
-// stock is the SUM of the lots; damaged and empty lots are never listed. The row's other details
-// come from the most recently received lot, so an outdated lot can't show up as its own row.
 function rowKeyFor(p) {
   const type = p.product_type || 'product';
   const parent = (type === 'spare_parts' || type === 'service_parts') ? (p.parent_product_name || '').trim().toLowerCase() : '';
@@ -697,7 +668,6 @@ function dedupeProducts(rawProducts) {
   return Array.from(map.values());
 }
 
-// Step 3: product picker with quantity + manually entered price per row
 function renderProductsStep() {
   const products = dedupeProducts(doState.products || []);
   wizBody().innerHTML = wizHeader(`New Order — ${orderWiz.customer?.company_name ?? 'Products'}`) + `
@@ -716,9 +686,6 @@ function renderProductsStep() {
   wireWizClose();
   document.getElementById('backBtn3').addEventListener('click', () => orderWiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
 
-  // ---------- Category tabs: Products / Accessories / Spare Parts ----------
-  // Filters the same product table by product_type, same pattern used on
-  // the admin Orders page and the Inventory page.
   const catTabsBox = document.getElementById('prodCatTabs');
   const categories = [
     { type: 'product', label: 'Products' },
@@ -783,12 +750,6 @@ function renderProductsStep() {
     return price;
   }
 
-  // Price is entered manually here instead of being pulled from the catalog
-  // — the cart line is only ever built (or updated) from whatever is
-  // currently in the row's Qty and Price fields, not from p.price.
-  // (inputs are matched by comparing dataset.rowKey, NOT with a CSS attribute selector: product
-  // names containing quotes / brackets / backslashes make such a selector throw or match nothing,
-  // which silently dropped the typed quantity and gave "add quantity for at least one product")
   function findRowInput(cls, key) {
     return [...rowsBox.querySelectorAll('.' + cls)].find(i => i.dataset.rowKey === key) || null;
   }
@@ -848,7 +809,6 @@ function renderProductsStep() {
   document.getElementById('prodFilter').addEventListener('input', applyFilters);
 
   document.getElementById('toPaymentBtn').addEventListener('click', () => {
-    // re-sync every row currently on screen (covers autofill / paste / missed input events)
     rowsBox.querySelectorAll('.qtyInput').forEach(inp => {
       const key = inp.dataset.rowKey;
       const p = products.find(x => rowKeyFor(x) === key);
@@ -861,7 +821,6 @@ function renderProductsStep() {
   });
 }
 
-// Step 4: payment mode + conditional fields + discount, then send for approval
 function renderPaymentStep() {
   const cartItems = Object.values(orderWiz.cart);
   const subtotal = cartItems.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -1031,8 +990,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'request failed');
 
-    // upload attachments (if any) against the new request; the request itself is already sent
-    let uploadWarning = '';
+     let uploadWarning = '';
     const chosen = Array.from(document.getElementById('orderFiles')?.files || []);
     if (chosen.length) {
       try {

@@ -128,7 +128,7 @@ function renderMonthlyView() {
     </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px;">No attendance uploaded for this month yet.</td></tr>';
 }
 
-// ---------- Upload ----------
+
 function wireUploadModal() {
   const modal = document.getElementById('uploadAttendanceModal');
   document.getElementById('uploadAttendanceBtn').addEventListener('click', () => {
@@ -167,7 +167,7 @@ function wireUploadModal() {
   });
 }
 
-// ---------- Late time ----------
+
 function wireLateTimeModal() {
   const modal = document.getElementById('lateTimeModal');
   document.getElementById('setLateTimeBtn').addEventListener('click', () => modal.style.display = 'flex');

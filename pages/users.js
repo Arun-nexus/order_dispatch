@@ -1,4 +1,3 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
@@ -252,7 +251,6 @@ function wireHeaderSearch() {
   });
 }
 
-// keeps big rupee amounts on one line so they never run into the next column
 const nw = n => `<span style="white-space:nowrap;">${money(n)}</span>`;
 
 function entryTime(x) {
@@ -267,12 +265,10 @@ function addDaysISO(dateStr, days) {
   return d.toISOString().slice(0, 10);
 }
 
-// one purchase row -> how much is paid, what is still pending, when it is due
 function purchaseInfo(p) {
   const amount = Number(p.amount) || 0;
   const mode = p.payment_mode || 'paid';
   const settled = (p.payments || []).reduce((t, x) => t + (Number(x.amount) || 0), 0);
-  // legacy credit rows have no paid_amount -> nothing was paid up front
   const upfront = mode === 'paid' ? amount : (mode === 'partial' ? (Number(p.paid_amount) || 0) : 0);
   const paid = Math.min(upfront + settled, amount);
   const balance = mode === 'paid' ? 0 : Math.max(Math.round((amount - paid) * 100) / 100, 0);
@@ -288,16 +284,11 @@ function customerStats(c) {
     .filter(o => o.customer?.customer_id === c.customer_id)
     .sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
   const orderCredit = orders.filter(o => o.payment_mode === 'Credit').reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
-  // manual Credit entries (old "Return" data, stored in `returns`)
   const returns = (c.returns || []).slice().sort((a, b) => entryTime(b) - entryTime(a));
   const manualReturned = returns.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  // manual Debit entries (stored in `debits`) — add to the Debit side
   const debits = (c.debits || []).slice().sort((a, b) => entryTime(b) - entryTime(a));
   const manualDebited = debits.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  // purchases made FROM this party (recorded by the Inventory add form). Paid ones are
-  // history only; ones bought on credit count towards Credit.
   const purchases = (c.purchases || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  // Partial purchases: only the unpaid balance counts as Credit; later payments reduce it.
   const infos = purchases.map(purchaseInfo);
   const purchaseCredit = infos.reduce((t, i) => t + i.balance, 0);
   const purchasePaid = infos.reduce((t, i) => t + (i.amount - i.balance), 0);
@@ -380,7 +371,6 @@ function renderCustomerTable() {
   tbody.querySelectorAll('.cust-edit').forEach(b => b.addEventListener('click', e => openCustomerEditModal(byId(e))));
 }
 
-// red strip above the Companies table listing every company whose credit time is over
 function renderOverdueBanner() {
   const section = document.getElementById('customersSection');
   const container = section && section.querySelector('.table-container');
@@ -409,7 +399,6 @@ function renderOverdueBanner() {
   }));
 }
 
-// one popup per page load when something is overdue
 function alertOverduePayments() {
   if (userState.overdueAlerted) return;
   const due = userState.customers.map(c => ({ c, s: customerStats(c) })).filter(x => x.s.overduePurchases.length);
@@ -745,7 +734,6 @@ function openCustomerHistory(c, focusEntry) {
   if (focusEntry) box.querySelector('#entAmount').focus();
 }
 
-// records a later payment against the pending balance of a credit / partial purchase
 function openPurchasePaymentModal(c, p) {
   const info = purchaseInfo(p);
   const modal = document.getElementById('customerEditModal');
@@ -993,12 +981,6 @@ function openDeleteModal(u) {
   });
 }
 
-// =========================================================
-// Export (CSV)
-//  - Users: 3 kinds of export (user details / orders / allocations & demo units),
-//    for everyone in the current list or only for particular users.
-//  - Companies: filters pre-filled from whatever is applied, editable before exporting.
-// =========================================================
 function downloadCSV(header, rows, filename) {
   if (a4Intercept(header, rows, filename)) return;
   const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -1033,7 +1015,6 @@ async function ensureAllocations() {
   return userState.allocations || [];
 }
 
-// same rule as the user detail popup: orders referred by the user (or raised by them)
 function orderPerson(o) {
   return o.reference || o.creator?.raised_by || '';
 }

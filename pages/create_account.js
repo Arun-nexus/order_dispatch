@@ -1,7 +1,3 @@
-// =========================
-// Authentication
-// =========================
-
 if (!getToken()) {
     window.location.href = "../index.html";
 }
@@ -10,14 +6,8 @@ if (getRole() !== "admin") {
     alert("Only Admin can access this page.");
     window.location.href = "../main_dashboard.html";
 }
-// ================================
-// Current Selected Service
-// ================================
 
 let selectedService = null;
-// =========================
-// Message
-// =========================
 
 function showMessage(msg, success = true) {
 
@@ -37,9 +27,6 @@ function showMessage(msg, success = true) {
     }
 }
 
-// =========================
-// Create Account
-// =========================
 
 document.getElementById("createForm").addEventListener("submit", async function (e) {
 
@@ -119,9 +106,6 @@ document.getElementById("createForm").addEventListener("submit", async function 
 
 });
 
-// =========================
-// Back Button
-// =========================
 
 const backBtn = document.getElementById("backBtn");
 

@@ -1,4 +1,3 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
@@ -249,7 +248,6 @@ function wireModalButtons() {
   document.querySelectorAll('.export').forEach(btn => a4Ready(() => A4Print.attachNextTo(btn, reportPrintOpts)));
 }
 
-// ---------- Print: summary of whatever KPI cards / monthly figures are currently shown ----------
 function reportPrintOpts() {
   const rows = [];
   document.querySelectorAll('.cards .card').forEach(c => {

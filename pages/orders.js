@@ -1,4 +1,3 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
@@ -180,12 +179,14 @@ function renderOrdersTable(orders) {
       <td>₹${o.total_mrp ?? o.price ?? 0}</td>
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
+        <button class="icon-btn dispatch-form-btn" title="Order Dispatch Form (A4)"><i class="fa-solid fa-print"></i></button>
         ${canManage ? '<button class="icon-btn ellipsis-btn"><i class="fa-solid fa-ellipsis"></i></button>' : ''}
       </td>`;
     tbody.appendChild(tr);
   });
 
   tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewOrderModal(rowOrder(e))));
+  tbody.querySelectorAll('.dispatch-form-btn').forEach(btn => btn.addEventListener('click', e => openDispatchForm(rowOrder(e))));
   tbody.querySelectorAll('.creator-cell').forEach(btn => btn.addEventListener('click', e => openOrderHistoryModal(rowOrder(e))));
   tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openOrderActionMenu(rowOrder(e), e)));
 
@@ -195,12 +196,52 @@ function renderOrdersTable(orders) {
   });
 }
 
+// ===== Order Dispatch Form (A4) : order data se form pre-fill karke print_a4.js ka form kholta hai =====
+function dispatchFormDefaults(o) {
+  const items = o.items || [];
+  const c = o.customer || {};
+  const d = o.dispatch || {};
+  const fmtDate = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
+  const fmtDateTime = v => v ? new Date(v).toLocaleString('en-GB') : '';
+
+  const details = items.length
+    ? items.map(it => `${it.product_name ?? it.product_id ?? ''}${it.model_no ? ' (' + it.model_no + ')' : ''} x ${it.quantity ?? 0}`).join('\n')
+    : `${o.product_name ?? ''}${o.quantity ? ' x ' + o.quantity : ''}`;
+
+  const serials = items
+    .filter(it => (it.serial_numbers || []).length)
+    .map(it => `${it.product_name ?? it.product_id ?? ''}: ${it.serial_numbers.join(', ')}`)
+    .join('\n');
+
+  const mode = String(d.mode_of_delivery || '').toLowerCase();
+  const docket = d.docket_no ? ' ' + d.docket_no : '';
+
+  return {
+    inv: d.invoice_no || '',
+    ref: o.reference || o.creator?.raised_by || '',
+    date: fmtDate(d.invoice_date || o.order_date),
+    party: c.company_name || o.company_name || '',
+    address: c.company_address || '',
+    details,
+    hand: mode.includes('hand') ? 'Yes' : '',
+    porter: mode.includes('porter') ? 'Yes' : '',
+    courier: mode.includes('courier') ? 'Yes' + docket : '',
+    others: mode && !/hand|porter|courier/.test(mode) ? (d.mode_of_delivery + docket) : '',
+    recv: fmtDateTime(o.created_at || o.order_date),
+    serials
+  };
+}
+
+function openDispatchForm(o) {
+  if (!o) return;
+  a4Ready(() => A4Print.form(o.order_id, dispatchFormDefaults(o)));
+}
+
 function rowOrder(e) {
   const tr = e.target.closest('tr');
   return orderState.orders.find(o => o.order_id === tr.dataset.orderId);
 }
 
-// ---------- Order action menu (Edit / Update Status) ----------
 function openOrderActionMenu(o, evt) {
   if (!o) return;
   closeOrderActionMenu();
@@ -210,9 +251,6 @@ function openOrderActionMenu(o, evt) {
 
   const menu = document.createElement('div');
   menu.id = 'orderActionMenu';
-  // position:fixed (not absolute) — getBoundingClientRect() is viewport-relative,
-  // so the menu must use the same coordinate system, otherwise it drifts away
-  // from the button as soon as the page is scrolled.
   menu.style.cssText = 'position:fixed;background:#fff;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;z-index:1200;min-width:160px;';
 
   const items = [
@@ -231,10 +269,6 @@ function openOrderActionMenu(o, evt) {
   });
 
   document.body.appendChild(menu);
-
-  // Estimate menu size (it's off-DOM-flow so offsetHeight is only accurate
-  // once appended) and flip/clamp so it always stays anchored to the button
-  // and never runs off the edge of the screen.
   const menuRect = menu.getBoundingClientRect();
   const spaceBelow = window.innerHeight - rect.bottom;
   const openUpwards = spaceBelow < menuRect.height + 10 && rect.top > menuRect.height + 10;
@@ -263,12 +297,6 @@ function closeOrderActionMenuOnClickAway(e) {
   if (menu && !menu.contains(e.target)) closeOrderActionMenu();
 }
 
-// ---------- Reading serial numbers out of an uploaded Excel/CSV file ----------
-// Same logic as inventory.js's parseSerialsFromFile — copied here since this
-// page doesn't load inventory.js. Flattens every non-empty cell across the
-// whole sheet into a de-duplicated list of serial numbers, so any layout
-// (one column, one row, multiple columns) works without asking the user to
-// format the file a certain way.
 function parseSerialsFromFile(file, onDone, onError, { lowercase = true } = {}) {
   if (typeof XLSX === 'undefined') {
     onError('Excel reader failed to load. Check your connection and try again.');
@@ -301,15 +329,6 @@ function parseSerialsFromFile(file, onDone, onError, { lowercase = true } = {}) 
   reader.readAsArrayBuffer(file);
 }
 
-// Checks every item row's typed/uploaded serial numbers against what's
-// actually available in inventory right now, for serials that are NEW to
-// this item (a serial already on the original order isn't re-checked — it's
-// already reserved by this order, not sitting in the available pool).
-// Any serial that isn't found is silently dropped from that row's list
-// (instead of the save failing outright with a raw backend error), the
-// row's quantity is brought down to match how many valid serials are left,
-// and a report of what was removed is returned so the caller can show it
-// to the user in one popup.
 async function validateAndFixEditSerials(rows, items) {
   const removedReport = [];
   for (const row of rows) {
@@ -425,11 +444,6 @@ function openEditOrderModal(o) {
       </div>
     </div>`).join('');
 
-  // an order can't be saved with zero products — the "remove product"
-  // action below just deletes that row from the form; it hides the remove
-  // button entirely once only one row is left, and if someone still fires
-  // it (or the count somehow drops to zero) it just no-ops with a message
-  // instead of leaving an order with no products to be submitted.
   function updateRemoveButtonsVisibility() {
     const rows = itemsBox.querySelectorAll('.editItemRow');
     const onlyOne = rows.length <= 1;
@@ -450,9 +464,6 @@ function openEditOrderModal(o) {
     });
   });
 
-  // Upload serials from Excel/CSV — replaces this row's serial list with
-  // whatever the file contains, and updates the quantity to match (same
-  // behavior as the equivalent upload on the Inventory page).
   itemsBox.querySelectorAll('.editItemRow').forEach(row => {
     const fileBtn = row.querySelector('.editSerialFileBtn');
     const fileInput = row.querySelector('.editSerialFileInput');
@@ -489,11 +500,6 @@ function openEditOrderModal(o) {
       return;
     }
 
-    // Catch a serial number that isn't actually in inventory BEFORE it hits
-    // the backend and fails the whole save — instead of that error, drop
-    // the missing serial(s) from their row, bring that row's quantity down
-    // to match how many valid serials are left, and tell the user what was
-    // removed so nothing silently disappears.
     const removedReport = await validateAndFixEditSerials(rows, items);
     if (removedReport.length) {
       alert(
@@ -581,7 +587,6 @@ function openOrderStatusModal(o) {
   modal.style.display = 'flex';
 }
 
-// ---------- Return items picker (which product(s), which serial(s), what condition) ----------
 function renderReturnItemsBox(box, o) {
   const items = o.items || [];
   box.innerHTML = items.map((it, idx) => {
@@ -627,8 +632,6 @@ function collectReturnedItems(o, box) {
     const original = items[idx] || {};
     const serialChecks = [...row.querySelectorAll('.returnSerialCheck')];
     const selectedSerials = serialChecks.filter(c => c.checked).map(c => c.value);
-    // if the item has serials on file, at least one must be picked so we know
-    // exactly which unit came back; if it has none, the whole line quantity returns.
     if (serialChecks.length && !selectedSerials.length) {
       throw new Error(`Select which serial number(s) came back for ${original.product_name}.`);
     }
@@ -707,20 +710,16 @@ function wireSortBy() {
   });
 }
 
-// ---------- Card Click -> Detail Modal ----------
 function wireCardFilters() {
   document.querySelectorAll('.cards .card[data-card-filter]').forEach(card => {
     card.addEventListener('click', () => openOrderCardDetailModal(card.dataset.cardFilter));
   });
 }
 
-// ---------- Shared product helpers (cards + view modal) ----------
 const ITEM_TYPE_LABELS = { spare_parts: 'Spare Part', service_parts: 'Service Part', accessories: 'Accessory' };
 const orderMoney = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 const orderDate = d => d ? new Date(d).toLocaleDateString('en-GB') : '-';
 
-// Order items only store id/name/model, so for parts we look the lot up in
-// inventory to find out what kind of item it is and which product it belongs to.
 function itemMeta(it) {
   const list = invLookup.products || [];
   const id = (it.product_id || '').trim();
@@ -733,7 +732,6 @@ function itemMeta(it) {
   return { type, typeLabel: ITEM_TYPE_LABELS[type] || '', parent };
 }
 
-// Product name, then "ID · Model", then (for parts) the part type + which product it belongs to
 function productCellHtml(it) {
   const m = itemMeta(it);
   const sub = [it.product_id ? `ID: ${escapeHtml(it.product_id)}` : '', it.model_no ? `Model: ${escapeHtml(it.model_no)}` : ''].filter(Boolean).join(' · ');
@@ -841,7 +839,6 @@ function openOrderCardDetailModal(type) {
   modal.style.display = 'flex';
 }
 
-// ---------- Apply Filter (Status / Payment Mode / Date) ----------
 function wireFilter() {
   const filterBtn = document.querySelector('.filter-btn');
   if (!filterBtn) return;
@@ -898,7 +895,6 @@ function exportOrdersCSV() {
   });
 }
 
-// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function downloadCSV(header, rows, filename) {
   if (a4Intercept(header, rows, filename)) return;
   const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -975,7 +971,6 @@ function openExportWizard({ title, statusOptions, dateField, dateLabel, getRows,
   modal.style.display = 'flex';
 }
 
-// ---------- View / Track / Deliver overlay modals ----------
 function paymentDetailsLabel(o) {
   const mode = o.payment_mode;
   const d = o.payment_details || {};
@@ -997,7 +992,7 @@ function openViewOrderModal(o) {
   const modal = document.getElementById('viewOrderModal');
   if (!modal) return;
   ensureOrderViewStyles();
-  modal.style.zIndex = 1100;           // always above the card list popup
+  modal.style.zIndex = 1100;           
   const content = modal.querySelector('.modal-content');
   content.style.cssText = 'background:#fff;border-radius:16px;padding:26px;width:min(1000px,95vw);max-height:90vh;overflow-y:auto;';
   const items = o.items || [];
@@ -1101,11 +1096,6 @@ function wireDetailModals() {
   document.querySelectorAll('.modal .close, .modal .cancel-btn').forEach(btn =>
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 
-  // Edit Order's form is now built fresh (per-item rows) every time
-  // openEditOrderModal() runs, so its submit handler is wired there directly
-  // instead of once here against a static form that no longer exists after
-  // the first edit.
-
   const statusForm = document.querySelector('#orderStatusModal form');
   if (statusForm) {
     const statusSelect = statusForm.querySelector('select');
@@ -1174,7 +1164,6 @@ function wireDetailModals() {
   }
 }
 
-// ---------- New Order wizard ----------
 const wiz = {
   customerId: '',      // set when existing customer picked
   customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
@@ -1236,7 +1225,6 @@ function injectCreateModal() {
 function wizardBody() { return document.getElementById('wizardBody'); }
 function wizardTitle(t) { document.getElementById('wizardTitle').textContent = t; }
 
-// Step 1: existing vs new customer
 function renderCustomerTypeStep() {
   wizardTitle('New Order — Customer');
   wizardBody().innerHTML = `
@@ -1253,7 +1241,6 @@ function renderCustomerTypeStep() {
   document.getElementById('btnNew').addEventListener('click', renderNewCustomerStep);
 }
 
-// Step 2a: search + pick existing customer
 function renderExistingCustomerStep() {
   wizardTitle('New Order — Select Customer');
   wizardBody().innerHTML = `
@@ -1319,7 +1306,6 @@ function renderExistingCustomerStep() {
   runSearch();
 }
 
-// Edit an existing customer from the search results
 function renderEditCustomerForm(c) {
   wizardTitle('Edit Customer');
   wizardBody().innerHTML = `
@@ -1362,7 +1348,6 @@ function renderEditCustomerForm(c) {
   });
 }
 
-// Step 2b: new customer form
 function renderNewCustomerStep() {
   wizardTitle('New Order — New Customer');
   wizardBody().innerHTML = `
@@ -1410,22 +1395,10 @@ function renderNewCustomerStep() {
   });
 }
 
-// Step 3: product picker with quantity per row
 function renderProductsStep() {
   wizardTitle(`New Order — ${wiz.customer?.company_name ?? 'Products'}`);
-  // Inventory stores one document per lot/purchase-batch, so the same
-  // product_id can appear as several separate rows here (e.g. 3 lots of
-  // 50+80+73). Rows are still listed one-per-lot exactly as before (nothing
-  // that used to be visible disappears) — only the "Stock" number and the
-  // quantity cap are computed from the TOTAL across all of that product's
-  // lots, to match what the backend's get_available_quantity() actually
-  // checks against (it also sums across lots by product_id).
   const products = invLookup.products || [];
 
-  // A row is only treated as "the same product" when product_id, product_name
-  // AND model_no all match — if even one of the three differs, it's a
-  // different product and gets its own row / cart line. This key is used
-  // everywhere below (dedupe, cart storage, lookup) so all three stay in sync.
   const rowKey = (p) => `${p.product_id}||${p.product_name || ''}||${p.model_no || ''}`;
 
   const totalQtyByKey = new Map();
@@ -1454,10 +1427,6 @@ function renderProductsStep() {
     </div>`;
 
   document.getElementById('backBtn3').addEventListener('click', () => wiz.customerId ? renderExistingCustomerStep() : renderNewCustomerStep());
-
-  // ---------- Category tabs: Products / Accessories / Spare Parts ----------
-  // Filters the same product table by product_type, same pattern as the
-  // category tabs on the Inventory page.
   const catTabsBox = document.getElementById('prodCatTabs');
   const categories = [
     { type: 'product', label: 'Products' },
@@ -1488,21 +1457,6 @@ function renderProductsStep() {
   });
 
   const rowsBox = document.getElementById('prodRows');
-
-  // BUG FIX: inventory stores one document per lot/purchase-batch, so the
-  // same product_id used to appear as several separate <tr> rows here. The
-  // cart was keyed ONLY by product_id, and the qty listeners looked the
-  // product back up with `products.find(x => x.product_id === productId)` —
-  // which always returns the FIRST lot in the array, not the row the user
-  // actually typed into. Net effect: typing a quantity into a different
-  // lot's row silently attached that other lot's data to the cart line, and
-  // typing into a second lot of the same product overwrote the first lot's
-  // cart entry.
-  //
-  // Fix: rows (and the cart) are keyed by rowKey() = product_id + product_name
-  // + model_no together. Two inventory docs collapse into ONE row only when
-  // all three match exactly; if even one differs, they're treated as
-  // different products and each keeps its own row and its own cart line.
   function dedupeByRowKey(list) {
     const seen = new Map();
     for (const p of list) {
@@ -1551,21 +1505,6 @@ function renderProductsStep() {
       quantity: qty
     };
   }
-
-  // One delegated listener on the container, attached ONCE — survives every
-  // re-render from the filter box, so there's no risk of listeners not being
-  // (re)attached to freshly created rows.
-  //
-  // IMPORTANT: this only reads the field and updates the cart — it never
-  // rewrites inp.value while the user is mid-keystroke. Doing that used to
-  // move the caret to the end of the field on every digit typed, which on
-  // mobile keyboards made it impossible to type more than one digit (each
-  // new digit landed in the wrong place or got wiped by the cap). The stock
-  // cap is enforced separately, only once the user leaves the field.
-  //
-  // Since renderRows() now emits at most one row per rowKey (product_id +
-  // product_name + model_no), this find() is unambiguous — there is no
-  // other row sharing the exact same three fields it could match instead.
   rowsBox.addEventListener('input', (e) => {
     const inp = e.target.closest('.qtyInput');
     if (!inp) return;
@@ -1577,8 +1516,6 @@ function renderProductsStep() {
     applyQtyToCart(key, p, computeTypedQty(inp));
   });
 
-  // Enforce the stock cap once the user is done typing (blur doesn't bubble,
-  // so this needs capture:true to work through delegation).
   rowsBox.addEventListener('blur', (e) => {
     const inp = e.target.closest('.qtyInput');
     if (!inp) return;
@@ -1590,11 +1527,6 @@ function renderProductsStep() {
     let qty = computeTypedQty(inp);
     if (qty === null) return;
 
-    // only enforce a cap when we actually have a real stock number for this
-    // product — missing/undefined stock data should never silently zero out
-    // what the user is typing. Use the TOTAL across all of this product's
-    // lots (stockFor), not just this one row's lot, so ordering more than a
-    // single lot but less than the true total isn't wrongly capped/rejected.
     const stock = stockFor(p);
     const hasKnownStock = Number.isFinite(stock);
     if (hasKnownStock) {
@@ -1662,7 +1594,6 @@ function renderProductsStep() {
   });
 }
 
-// Step 4: payment mode + conditional fields + discount
 function renderPaymentStep() {
   wizardTitle('New Order — Payment');
   const cartItems = Object.values(wiz.cart);
@@ -1745,7 +1676,6 @@ function renderPaymentStep() {
     if (subEl) subEl.textContent = `Subtotal: ₹${subtotal.toFixed(2)}`;
     const total = subtotal - (wiz.discount || 0) + (wiz.warrantyCharge || 0);
     document.getElementById('grandTotalBox').textContent = `Grand Total (excl. tax): ₹${total.toFixed(2)}`;
-    // keep the Partial payment hint (balance) in step with discount / price / warranty changes
     const partialPaid = document.getElementById('partialPaid');
     if (partialPaid) partialPaid.dispatchEvent(new Event('input'));
   }
@@ -1791,9 +1721,6 @@ async function loadReferenceUsers() {
   return referenceUsersCache || [];
 }
 
-// Validates payment step inputs (same checks submitOrder used to do up front),
-// stashes them on wiz, then moves to the serial-number review step instead of
-// submitting immediately.
 function proceedToSerialReview(modeSelect, extraBox) {
   const mode = modeSelect.value;
   if (!mode) { alert('Please select a payment mode.'); return; }
@@ -1820,8 +1747,6 @@ function proceedToSerialReview(modeSelect, extraBox) {
   renderSerialReviewStep();
 }
 
-// Step 5: review auto-fetched serial numbers, optionally swap any of them for
-// a different available serial before the order is actually placed.
 async function renderSerialReviewStep() {
   wizardTitle('New Order — Review Serial Numbers');
   const body = wizardBody();
@@ -1830,7 +1755,6 @@ async function renderSerialReviewStep() {
   const cartItems = Object.values(wiz.cart);
   const rowKeyOf = (i) => `${i.product_id}||${i.product_name}||${i.model_no || ''}`;
 
-  // fetch available serials once per distinct product_id+model_no in the cart
   const availableByVariant = {};
   await Promise.all(cartItems.map(async (item) => {
     const variantKey = `${item.product_id}||${item.model_no || ''}`;
@@ -1897,8 +1821,6 @@ async function renderSerialReviewStep() {
   body.innerHTML = html;
   document.getElementById('backBtn5').addEventListener('click', renderPaymentStep);
 
-  // seed defaults into wiz.serialChoices so submit works even if the user
-  // never touches an input, then keep it in sync as they edit
   body.querySelectorAll('.serialPickInput').forEach(inp => {
     const rowKey = inp.dataset.rowKey;
     const slot = Number(inp.dataset.slot);
@@ -1942,9 +1864,6 @@ async function finalizeSubmitOrder() {
       return {
         product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
         quantity: i.quantity, price: i.price, tax_rate: i.tax_rate,
-        // only send serial_numbers when we actually have one per unit —
-        // otherwise (unserialized accessories etc.) leave it empty so the
-        // backend falls back to its normal auto-allocation
         serial_numbers: chosen.length === i.quantity ? chosen : []
       };
     }),
@@ -1989,7 +1908,6 @@ function renderPaymentExtra(mode, extraBox) {
     const manual = document.getElementById('creditDaysManual');
     sel.addEventListener('change', () => manual.style.display = sel.value === 'manual' ? 'block' : 'none');
   } else if (mode === 'Partial') {
-    // part of the amount is paid now, the remaining balance is due after the chosen number of days
     extraBox.innerHTML = `
       <label style="font-size:13px;color:var(--text-muted);">Amount paid now (₹)</label>
       <input id="partialPaid" type="number" min="0" step="any" placeholder="e.g. half of the total" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;margin:6px 0;">
@@ -2042,7 +1960,6 @@ function renderPaymentExtra(mode, extraBox) {
   }
 }
 
-// order total as the backend works it out: price x qty + tax per line, minus discount, plus extended-warranty charge
 function wizOrderTotal() {
   const lines = Object.values(wiz.cart).reduce((s, i) => {
     const line = (Number(i.price) || 0) * (Number(i.quantity) || 0);
@@ -2106,7 +2023,6 @@ function buildPaymentDetails(mode) {
 
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-// ---------- Order Requests (raised by distributors) ----------
 async function loadOrderRequests() {
   const role = getRole();
   if (role !== 'admin' && role !== 'accounts') return;

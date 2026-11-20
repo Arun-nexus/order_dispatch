@@ -142,8 +142,6 @@ table.reg th{background:#e8eefc}`;
       <div class="line"><b>Approved By:</b> <span class="u" style="min-width:200px">${esc(v.approved_by) || '&nbsp;'}</span> &nbsp; <b>Date:</b> <span class="u" style="min-width:120px">${esc(showDate(v.approved_date)) || '&nbsp;'}</span></div></div>`;
   }
 
-  // Prints through a hidden iframe instead of window.open(): works inside webviewers
-  // (no "You'll need a new app to open this about link" dialog, no pop-up blocker).
   function printWindow(html, title, landscape) {
     const extra = landscape ? '@page{size:A4 landscape;margin:12mm}' : '';
     const f = document.createElement('iframe');

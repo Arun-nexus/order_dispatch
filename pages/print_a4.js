@@ -1,21 +1,6 @@
-/* =====================================================================
-   print_a4.js  —  shared A4 printing helpers (Acer Biomedical)
-
-   A4Print.form(id, defaults)   -> opens the editable "ORDER DISPATCH FORM"
-                                   (same structure as the Excel form) and
-                                   prints it on one A4 portrait sheet.
-   A4Print.table({title, subtitle, head, rows, landscape})
-                                -> prints any list/table on A4 (use it next
-                                   to every "Export" button).
-   A4Print.attachNextTo(btn, fn, label)
-                                -> drops a "Print" button right beside an
-                                   existing Export button; fn() must return
-                                   {title, subtitle?, head:[], rows:[[]]}.
-   ===================================================================== */
 const A4Print = (() => {
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  // ---------- print options (remembered): orientation, both sides, copies, page numbers ----------
   const OPT_KEY = 'a4print:opts';
   function loadOpts() {
     let o = {};
@@ -67,7 +52,6 @@ const A4Print = (() => {
     m.querySelector('#a4o_go').focus();
   }
 
-  // ---------- print through a hidden iframe (A4, no app chrome) ----------
   function printDoc(title, bodyHtml, css, o) {
     o = o || {};
     const isForm = !!o.isForm;
@@ -95,9 +79,6 @@ const A4Print = (() => {
     }, 300);
   }
 
-  // =====================================================================
-  //  Generic table print
-  // =====================================================================
   function table(opts) {
     const head = opts.head || [], rows = opts.rows || [];
     if (!rows.length) { alert('Nothing to print for the current filters.'); return; }
@@ -137,18 +118,12 @@ const A4Print = (() => {
     return p;
   }
 
-  // =====================================================================
-  //  ORDER DISPATCH FORM  (mirrors ORDER_DISPATCH_FORM.xlsx cell-for-cell)
-  //  Columns: A 5.66 | B-F 18.66 each      Rows 2..23 (heights from Excel)
-  // =====================================================================
   const MM = 0.315;                       // Excel pt -> mm : base form fits one A4 page
-  // Excel row heights (pt) are only the MINIMUM height: a row grows when its text needs more room.
   const ROW_PT = {
     2: 30, 3: 30, 4: 30, 5: 170.25, 6: 45, 7: 20.1, 8: 20.1, 9: 20.1, 10: 30, 11: 30,
     12: 20.1, 13: 20.1, 14: 20.1, 15: 20.1, 16: 30, 17: 30.6, 18: 110.1, 19: 30, 20: 30, 21: 20.1, 22: 20.1, 23: 20.1, 24: 60
   };
 
-  // width is fixed (194mm); height is free
   const FORM_CSS = `
     .odf-sheet{width:194mm;background:#fff;color:#000;font-family:Cambria,Georgia,'Times New Roman',serif;font-size:10pt;box-sizing:border-box}
     .odf-sheet table{width:194mm;border-collapse:collapse;table-layout:fixed;border:2.4px solid #000}
@@ -216,7 +191,6 @@ const A4Print = (() => {
     </table></div>`;
   }
 
-  // rows grow with their text, so nothing has to be shrunk
   function fit() { /* intentionally empty: height is flexible, width is fixed */ }
 
   function form(id, defaults, opts) {
@@ -267,13 +241,11 @@ const A4Print = (() => {
       if (vb) fit(vb.parentElement);
       persist();
     });
-    // paste as plain text only (keeps the form clean)
     sheet.addEventListener('paste', e => {
       if (!e.target.closest('[data-k]')) return;
       e.preventDefault();
       document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text'));
     });
-    // single-line cells: Enter moves on instead of adding a line (Shift+Enter = new line)
     sheet.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey && e.target.matches('span.v')) e.preventDefault();
     });
@@ -296,11 +268,6 @@ const A4Print = (() => {
     });
   }
 
-  // =====================================================================
-  //  "Print instead of download" hooks for existing Export buttons.
-  //  arm()  -> the NEXT csv download is turned into an A4 print.
-  //  intercept(head, rows, name) is called at the top of every csv helper.
-  // =====================================================================
   let armed = null, armTimer = null;
   const nice = n => String(n || 'Report').replace(/\.csv$/i, '').replace(/_?\d{4}-\d{2}-\d{2}$/, '').replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   function arm(title) {
@@ -317,7 +284,6 @@ const A4Print = (() => {
     return true;
   }
 
-  // adds a "Print" button beside the "Export" submit button of an export wizard / modal form
   function wizardPrint(modal, title) {
     const form = modal && modal.querySelector('form');
     const sub = form && form.querySelector('button[type=submit]');
@@ -336,7 +302,6 @@ const A4Print = (() => {
     sub.insertAdjacentElement('beforebegin', b);
   }
 
-  // adds a "Print" twin next to a button that exports directly (it re-uses the export's own data)
   function attachTwin(btn, title) {
     if (!btn || btn.dataset.twin) return null;
     btn.dataset.twin = '1';

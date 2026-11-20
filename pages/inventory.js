@@ -1,4 +1,3 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
@@ -8,18 +7,9 @@ const invState = { products: [], activeProductId: null, activeModelNo: '', activ
 let invPage = 1;
 const INV_PAGE_SIZE = 20;
 
-// Some inventory documents were created before product_id was required and
-// can have product_id === "". An empty string can never appear as a URL
-// path segment (the /inventory/*/{product_id} routes simply won't match a
-// missing segment), so we substitute this sentinel whenever we need to
-// target such a record over the network — app.py decodes it back to "".
 const EMPTY_PRODUCT_ID_SENTINEL = '__blank_id__';
 
-// Product ID is no longer typed in by hand anywhere on this page. Every
-// product created or edited from here gets this fixed value (a single space).
 const DEFAULT_PRODUCT_ID = ' ';
-// A space-only id gets trimmed away if it is sent as a URL path segment, so it
-// travels as this sentinel instead — app.py decodes it back to " ".
 const SPACE_PRODUCT_ID_SENTINEL = '__space_id__';
 
 function urlProductId(id) {
@@ -76,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
   applyRolePermissions();
 });
 
-// ---------- "Record" — full lifetime history lookup by serial number ----------
 function wireSerialRecordModal() {
   const btn = document.querySelector('.top-actions .record-search');
   const modal = document.getElementById('serialRecordModal');
@@ -84,16 +73,13 @@ function wireSerialRecordModal() {
 
   btn.addEventListener('click', () => openSerialRecordModal());
 
-  // last search result, so an event can be opened in full and "Back" needs no new request
   const current = { events: [], serial: '' };
-  // which category the search runs against: 'serial' or 'hologram' (kept while the modal stays open)
   let kind = 'serial';
   const KIND_META = {
     serial:   { title: 'Serial Number', placeholder: 'Enter serial number', hint: 'Search a serial number to see its full lifetime record — when it was added to inventory, assembled, sold/demoed, returned, and every service raised against it.' },
     hologram: { title: 'Hologram Number', placeholder: 'Enter hologram number', hint: 'Search a hologram number to see where that part/unit has been — stock lots, assembled units, services and allocations.' },
   };
 
-  // one delegated listener for: open event details / back to timeline / jump to another serial
   modal.addEventListener('click', e => {
     const box = modal.querySelector('#serialRecordResults');
     if (!box) return;
@@ -125,7 +111,6 @@ function wireSerialRecordModal() {
     }
   });
 
-  // switch category: updates toggle, heading, hint and placeholder, and clears the old result
   function setKind(next) {
     kind = next === 'hologram' ? 'hologram' : 'serial';
     const meta = KIND_META[kind];
@@ -179,9 +164,6 @@ function wireSerialRecordModal() {
     const resultsBox = modal.querySelector('#serialRecordResults');
     if (!serial) { resultsBox.innerHTML = `<p style="color:var(--danger);font-size:13px;">Enter a ${kind === 'hologram' ? 'hologram' : 'serial'} number to search.</p>`; return; }
     resultsBox.innerHTML = '<p style="color:var(--text-light);font-size:13px;">Searching...</p>';
-    // serials are stored lowercase (see wireEditSerialFileUpload / the add-product
-    // wizard) — lowercase here too so a serial typed in a different case still matches.
-    // server matches case-insensitively (stored serials are not all lowercase)
     const normalizedSerial = serial.trim();
     try {
       const res = await apiFetch(`/inventory/serial_history/${encodeURIComponent(normalizedSerial)}?kind=${kind}`);
@@ -202,8 +184,6 @@ function wireSerialRecordModal() {
     modal.style.display = 'flex';
   }
 
-  // Allow other parts of the page (e.g. a row's serial number) to jump
-  // straight into a search for that serial.
   window.openSerialRecordModal = openSerialRecordModal;
 }
 
@@ -266,7 +246,6 @@ function renderSerialTimeline(events, serial, kind) {
     </div>`;
 }
 
-// ---------- full details of one timeline event ----------
 const srIsEmpty = v => v === null || v === undefined || v === ''
   || (Array.isArray(v) && !v.length)
   || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
@@ -277,7 +256,6 @@ function srSerialChip(sn, hl, kind) {
   return `<span class="iv-chip sr-serial" data-kind="${kind || 'serial'}" data-serial="${escapeHtmlInv(sn)}" title="Open this number's history" style="cursor:pointer;${on ? 'background:var(--primary);color:#fff;' : ''}">${escapeHtmlInv(sn)}</span>`;
 }
 
-// hologram keys (hologram_number, old_hologram_number, ...) are clickable and open a hologram search
 const srKindOf = k => (/hologram/i.test(k) ? 'hologram' : /serial/i.test(k) ? 'serial' : '');
 
 function srScalar(key, v, hl, hlKind) {
@@ -345,7 +323,6 @@ function exportLowStockToExcel(lowItems) {
   XLSX.writeFile(wb, `low_stock_${Date.now()}.xlsx`);
 }
 
-// ---------- Cards -> click to see details (filters + export + row click) ----------
 function wireCardClicks() {
   document.querySelectorAll('.card-clickable').forEach(card => {
     card.addEventListener('click', () => openCardDetailModal(card.dataset.card));
@@ -360,7 +337,6 @@ const ivStockState = p => (ivQty(p) === 0 ? 'out' : ivQty(p) <= 10 ? 'low' : 'ok
 const IV_STOCK_LABELS = { ok: 'In Stock', low: 'Low Stock (≤ 10)', out: 'Out of Stock' };
 const ivUniq = arr => [...new Set(arr.filter(v => v !== undefined && v !== null && v !== ''))];
 
-// Product / accessory / damaged -> name + "ID · Model". Spare / service part -> part name + "Belongs to".
 function itemIdentityHtml(p) {
   const name = `<strong>${escapeHtmlInv(p.product_name ?? '')}</strong>`;
   if (ivIsPart(p)) {
@@ -408,8 +384,6 @@ function ensureInvStyles() {
   document.head.appendChild(st);
 }
 
-// cfg = { title, source, filters:[{key,label,options:[[v,l]],test(p,v)}], columns:[{label,cell}],
-//         csvHeads, csvRow(row), aggregate?(list), summary?(rows), open?:true, file }
 function invCardView(cfg) {
   const modal = document.getElementById('cardDetailModal');
   if (!modal) return;
@@ -583,7 +557,6 @@ function openCardDetailModal(cardType) {
   }
 }
 
-// ---------- Product type (Product / Spare Parts / Damaged Product) helpers ----------
 const PRODUCT_TYPE_LABELS = {
   product: 'Product',
   spare_parts: 'Spare Parts',
@@ -604,36 +577,23 @@ function productTypeBadgeClass(type) {
   return 'high';
 }
 
-// service_parts entries carry a part_category ("purchase" | "warranty") so
-// the two never merge into one entry — show that as its own badge
 function partCategoryBadgeHtml(p) {
   if (p.product_type !== 'service_parts' || !p.part_category) return '';
   const label = p.part_category === 'warranty' ? 'Warranty' : 'Purchase';
   return `<span class="stock medium" style="margin-left:4px;">${label}</span>`;
 }
 
-// warranty badge for service_parts entries synced from a shipment's
-// "warranty" parts — server computes warranty_status fresh on every fetch
 function warrantyBadgeHtml(p) {
   if (!['warranty', 'purchase'].includes(p.part_category) || !p.warranty_until) return '';
   const over = p.warranty_status === 'over warranty';
   return `<span class="stock ${over ? 'low' : 'high'}" style="margin-left:4px;">${over ? 'Over Warranty' : 'Under Warranty'}</span>`;
 }
 
-// serial numbers are optional for these types — accessories are sometimes
-// unserialized, and spare/service parts are tracked purely by quantity.
-// Normalized (trim + lowercase) so a stray casing/whitespace difference
-// coming from the DB (e.g. legacy "Accessories") never falls through to
-// the strict serial-count-must-match-quantity path.
 function isSerialOptionalType(type) {
   const t = (type || '').trim().toLowerCase();
   return t === 'accessories' || t === 'spare_parts' || t === 'service_parts';
 }
 
-// ---------- Reading serial numbers out of an uploaded Excel/CSV file ----------
-// Flattens every non-empty cell across the whole sheet into a de-duplicated
-// list of serial numbers, so any layout (one column, one row, multiple
-// columns) works without asking the user to format the file a certain way.
 function parseSerialsFromFile(file, onDone, onError, { lowercase = true } = {}) {
   if (typeof XLSX === 'undefined') {
     onError('Excel reader failed to load. Check your connection and try again.');
@@ -667,7 +627,6 @@ function parseSerialsFromFile(file, onDone, onError, { lowercase = true } = {}) 
   reader.readAsArrayBuffer(file);
 }
 
-// ---------- Category filter tabs (Product / Spare Parts / Damaged Product) ----------
 function wireCategoryFilter() {
   const buttons = document.querySelectorAll('.cat-filter-btn');
   if (!buttons.length) return;
@@ -843,12 +802,6 @@ function renderSearchSuggestions(input, suggestBox) {
   suggestBox.style.display = 'block';
 }
 
-// Combines whatever category tab / header search / "Apply Filter" criteria
-// are currently active on invState and returns the resulting view. Used both
-// by the individual filter controls AND by loadInventory(), so that any
-// action which re-fetches data (delete, edit save, add, etc.) re-renders the
-// SAME filtered view the user was looking at instead of silently snapping
-// back to the full unfiltered product list.
 function getFilteredInventory(ignoreCategory) {
   let list = invState.activeCategory && !ignoreCategory
     ? invState.products.filter(p => (p.product_type || 'product') === invState.activeCategory)
@@ -872,17 +825,12 @@ function getFilteredInventory(ignoreCategory) {
 
 function applyRolePermissions() {
   const role = getRole();
-  // matches the backend's require_role("service_manager", "admin", "accounts", "inventory_manager")
-  // on /inventory/create and /inventory/update — 'employee' isn't a real role,
-  // it was leftover from before roles were split into accounts/service_manager/assembly
   const canManage = role === 'admin' || role === 'accounts' || role === 'service_manager' || role === 'inventory_manager';
   const canDelete = role === 'admin';
   if (!canManage) {
     const addBtn = document.querySelector('.add-product');
     if (addBtn) addBtn.style.display = 'none';
   }
-  // delete buttons are re-hidden per row after each render too (renderInventoryTable),
-  // this just covers the static "Add Product" button up front.
   window.__invCanManage = canManage;
   window.__invCanDelete = canDelete;
 }
@@ -912,15 +860,12 @@ function updateInventoryCards(products) {
   const suppliers = new Set(products.map(p => p.supplier).filter(Boolean)).size;
   const inventoryValue = products.reduce((sum, p) => sum + (Number(p.price) || 0) * (Number(p.quantity) || 0), 0);
 
-  // inventory.html card order: Total Products, Total Stock, Low Stock, Suppliers, Inventory Value
   cardValues[0].textContent = products.length;
   if (cardValues[1]) cardValues[1].textContent = totalStock;
   if (cardValues[2]) cardValues[2].textContent = lowStock;
   if (cardValues[3]) cardValues[3].textContent = suppliers;
   if (cardValues[4]) cardValues[4].textContent = `₹${(inventoryValue / 100000).toFixed(1)}L`;
 
-  // Service Parts / Spare Parts cards — Active = hologram numbers on file for every unit,
-  // Pending = not fully hologram-tagged yet (none or only some units), same rule as the table's status
   const setPartCard = (type, totalId, statusId) => {
     const list = products.filter(p => p.product_type === type);
     let active = 0, pending = 0;
@@ -934,7 +879,6 @@ function updateInventoryCards(products) {
   setPartCard('spare_parts', 'cardSparePartsTotal', 'cardSparePartsStatus');
 }
 
-// spare_parts / service_parts only: has at least one hologram number on file vs none
 function isPartProduct(p) { return p.product_type === 'spare_parts' || p.product_type === 'service_parts'; }
 function partHologramCount(p) {
   return typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length;
@@ -947,12 +891,6 @@ function stockClass(qty) {
   return 'low';
 }
 
-// Column sets per category — the header labels/cells shown adapt to whichever
-// filter tab is active, so irrelevant columns (e.g. Model No. for spare parts)
-// don't clutter the table.
-// hologram numbers are tracked one-per-unit (parallel to quantity, not to
-// serial numbers) — hologram_numbers is the array; hologram_no is the old
-// single-string field, kept here only as a fallback for un-migrated records
 function hologramNumbersOf(p) {
   if (Array.isArray(p.hologram_numbers)) return p.hologram_numbers;
   return p.hologram_no ? [p.hologram_no] : [];
@@ -960,8 +898,6 @@ function hologramNumbersOf(p) {
 
 function statusFromHologram(p) {
   if (p.product_type !== 'spare_parts' && p.product_type !== 'service_parts') return 'Pending';
-  // the main list only sends hologram_count (a number); the full hologram_numbers
-  // array is only present after fetchProductDetail (view/edit modals)
   const count = typeof p.hologram_count === 'number' ? p.hologram_count : hologramNumbersOf(p).length;
   const qty = Number(p.quantity) || 0;
   if (count === 0) return 'Pending';
@@ -978,11 +914,6 @@ function columnsForCategory(category) {
   const supplierCell = p => p.supplier ?? '';
   const nameCell = p => p.product_name ?? '';
   const modelCell = p => p.model_no ?? '';
-  // Mixed (no category filter) view: a part is identified by its own name +
-  // which product it belongs to, not by product_id/model_no (those are
-  // always empty for parts) — so the single "Product" column shows whichever
-  // identity actually applies, instead of a part's row showing a bare name
-  // with no id/model and no link back to its parent product.
   const identityCell = p => {
     const isPart = p.product_type === 'spare_parts' || p.product_type === 'service_parts';
     if (isPart) {
@@ -994,9 +925,7 @@ function columnsForCategory(category) {
     const meta = [(p.product_id || '').trim(), p.model_no].filter(Boolean).join(' · ');
     return `${escapeHtmlInv(p.product_name ?? '')}${meta ? `<br><small style="color:var(--text-light);">${meta}</small>` : ''}`;
   };
-  // shipment stores warranty length in months (e.g. "12 months"); the backend
-  // adds that to the received_date and stores it as warranty_until. Here we
-  // just subtract today's date from that to show how many days are left.
+
   const daysRemaining = (warrantyUntil) => {
     if (!warrantyUntil) return null;
     const until = new Date(warrantyUntil + 'T00:00:00');
@@ -1016,9 +945,6 @@ function columnsForCategory(category) {
     const cls = s === 'Active' ? 'high' : (s === 'Partial' ? 'medium' : 'low');
     return `<span class="stock ${cls}">${s}</span>`;
   };
-  // Who added this lot, and — if it's since been edited by someone else —
-  // who last updated it. Mirrors how the order page attributes each order
-  // to whoever raised/actioned it.
   const addedByCell = p => {
     const addedBy = p.created_by ? escapeHtmlInv(p.created_by) : '—';
     const updatedBy = p.updated_by && p.updated_by !== p.created_by ? escapeHtmlInv(p.updated_by) : '';
@@ -1090,8 +1016,6 @@ function renderTableHeader(category) {
 }
 
 function renderInventoryTable(products) {
-  // API returns products in insertion (ascending) order — reverse so the
-  // most recently added product shows at the top instead of the bottom.
   const sorted = [...products].reverse();
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / INV_PAGE_SIZE));
@@ -1139,12 +1063,6 @@ function renderInventoryTable(products) {
   });
 }
 
-// The main list no longer carries serial_numbers/hologram_numbers (that was
-// the bulk of its payload — this is what was making the page slow). View,
-// Edit, and Repair need that per-row detail, so they fetch it fresh here
-// instead of reading it off the cached row. Falls back to the cached row
-// (serials just won't show) if the fetch fails, so a network hiccup doesn't
-// hard-block the modal from opening at all.
 async function fetchProductDetail(p) {
   if (!p) return p;
   try {
@@ -1156,15 +1074,10 @@ async function fetchProductDetail(p) {
     });
     const res = await apiFetch(`/inventory/detail?${params}`);
     if (!res.ok) {
-      // surface the backend's actual error (e.g. a 500's real cause) in the
-      // console instead of silently falling back — makes it obvious when
-      // the fallback (serial-less cached row) is being used, and why.
       try { console.error('fetchProductDetail failed:', res.status, await res.json()); } catch (_) { }
       return p;
     }
     const data = await res.json();
-    // parts have no product_id, so an older backend (without lot_id support) can hand back a
-    // different lot — never merge another lot's data into this row
     if (p._id && data.product && data.product._id && data.product._id !== p._id) return p;
     return { ...p, ...data.product };
   } catch (err) {
@@ -1183,12 +1096,6 @@ function rowProduct(e) {
   );
 }
 
-// Repair action on a Damaged Product row (replaces Delete there):
-// - has serial numbers -> it's a full product -> opens a service record for
-//   in-house warranty repair (issue = "Inhouse Warranty")
-// - no serial numbers -> it's a part (e.g. swapped out during a service) ->
-//   not serviceable in-house, so it's just flagged "Send to Parent Company"
-//   in this row's Status column instead
 let repairBusy = false;
 async function handleRepairClick(p) {
   if (!p || repairBusy) return;
@@ -1223,9 +1130,6 @@ function wireTopActions() {
   document.querySelector('.export').addEventListener('click', (e) => openExportCategoryMenu(e.currentTarget));
 }
 
-// Export step 1: pick the category (Product / Service Parts / Spare Parts / Faulty /
-// Accessories / All). Everything after this (detailed vs summary, date range) only
-// covers the chosen category.
 const EXPORT_CATEGORIES = [
   { value: 'product', label: 'Product', icon: 'fa-box' },
   { value: 'service_parts', label: 'Service Parts', icon: 'fa-screwdriver-wrench' },
@@ -1288,9 +1192,6 @@ function openExportCategoryMenu(anchorBtn) {
   }, 0);
 }
 
-// Small popup so the user can pick which export they want before the usual
-// date-range wizard opens: the original serial-wise detailed export, or a
-// one-line-per-product summary (name+id+model concatenated, quantity next to it).
 function openExportTypeMenu(anchorBtn) {
   let menu = document.getElementById('exportTypeMenu');
   if (menu) menu.remove();
@@ -1343,11 +1244,8 @@ function exportInventoryCSV() {
     dateLabel: 'Purchase Date',
     getRows: exportRowsForCategory,
     onConfirm: async (rows) => {
-      // the cached list no longer carries serial_numbers/hologram_numbers —
-      // fetch each row's full detail first for this "serial number wise" export
       const fullRows = await Promise.all(rows.map(fetchProductDetail));
       const header = fullRows.map(p => `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`);
-      // parts have no serial numbers — their per-unit identifiers are hologram numbers
       const columns = fullRows.map(p => (p.serial_numbers && p.serial_numbers.length)
         ? p.serial_numbers
         : ((p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? hologramNumbersOf(p) : []));
@@ -1361,8 +1259,6 @@ function exportInventoryCSV() {
   });
 }
 
-// One row per product: name + id + model no. concatenated into a single
-// label, with the current quantity right next to it.
 function exportInventorySummaryCSV() {
   openExportWizard({
     title: `Export Inventory Summary — ${exportCategoryLabel()}`,
@@ -1381,11 +1277,6 @@ function exportInventorySummaryCSV() {
   });
 }
 
-// ---------- Export a single, specifically-chosen product ----------
-// Lets the user search/pick exactly one product (scoped to the category
-// already chosen in step 1) instead of exporting a whole category, and
-// downloads a CSV where Product Name, Product ID and Model Number are each
-// their own clearly-labelled column (rather than folded into one string).
 function openSpecificProductPicker() {
   document.getElementById('exportSingleProductModal')?.remove();
 
@@ -1459,7 +1350,6 @@ async function exportSingleProductCSV(product) {
   downloadCSV(header, csvRows, `product_${safeName}.csv`);
 }
 
-// ---------- Generic export filter wizard (status + date range, then CSV of only the matching rows) ----------
 function csvEscape(val) {
   const s = val === null || val === undefined ? '' : String(val);
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -1590,11 +1480,6 @@ function openViewModal(p) {
 
   const bv = Array.isArray(p.batches_view) ? p.batches_view : [];
 
-  // Serial numbers of each batch. Best case the backend sends them inside the
-  // batch (b.serial_numbers). If not, we split the serial list in the order the
-  // batches were added — only safe while nothing was removed/marked faulty, i.e.
-  // when total batch quantity == number of serials on file. Otherwise null =
-  // "not available" (we don't guess).
   const totalBatchQty = bv.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
   const canSplitSerials = serials.length > 0 && totalBatchQty === serials.length;
   let serialCursor = 0;
@@ -1727,9 +1612,6 @@ function openEditModal(p) {
   const typeSelect = document.getElementById('editProductType');
   if (typeSelect) {
     const normalizedType = (p.product_type || 'product').trim().toLowerCase();
-    // guard against a value that doesn't match any <option> (legacy casing,
-    // stray whitespace, or an unrecognized type) leaving the select with no
-    // selection at all, which would silently disable the serial-optional bypass
     typeSelect.value = [...typeSelect.options].some(o => o.value === normalizedType) ? normalizedType : 'product';
   }
 
@@ -1764,10 +1646,6 @@ function openEditModal(p) {
   modal.style.display = 'flex';
 }
 
-// Parts (spare_parts/service_parts) are identified by their own name + which
-// product they belong to, not by product_id/model_no (those stay empty for
-// parts) — so the edit form swaps between the two identity shapes based on
-// the selected type, same idea as toggleHologramSection below.
 function toggleTypeSpecificFields(type) {
   const isPart = type === 'spare_parts' || type === 'service_parts';
   const nameInput = document.getElementById('editProductNameInput');
@@ -1778,8 +1656,6 @@ function toggleTypeSpecificFields(type) {
   if (idModelWrap) idModelWrap.style.display = isPart ? 'none' : 'flex';
 }
 
-// Raising the quantity in the edit form asks for the date the extra units arrived
-// (each arrival is stored as its own batch with its own warranty).
 function syncEditBatchBox() {
   const form = document.querySelector('#editModal form');
   const wrap = document.getElementById('editBatchWrap');
@@ -1795,8 +1671,6 @@ function onEditTypeChangeForTypeFields() {
   toggleTypeSpecificFields(typeSelect ? typeSelect.value : 'product');
 }
 
-// hologram numbers are only tracked on spare_parts / service_parts entries —
-// "product" units get theirs via the per-serial service/assembly workflow instead
 function toggleHologramSection(type) {
   const section = document.getElementById('editHologramSection');
   if (section) section.style.display = (type === 'spare_parts' || type === 'service_parts') ? 'block' : 'none';
@@ -1807,9 +1681,6 @@ function onEditTypeChangeForHologram() {
   toggleHologramSection(typeSelect ? typeSelect.value : 'product');
 }
 
-// keeps the hologram status line's "of N quantity" number in sync while the
-// user is typing a new quantity into the edit form (named fn so the
-// add/removeEventListener pairing in openEditModal actually works)
 function syncEditHologramQuantity() {
   const modal = document.getElementById('editModal');
   const quantityInput = modal.querySelector('form').elements['quantity'];
@@ -1817,9 +1688,6 @@ function syncEditHologramQuantity() {
   renderHologramUI();
 }
 
-// ---------- Hologram numbers (per-unit, spare_parts / service_parts) ----------
-// Renders the chip list + status line ("Active"/"Partial"/"Pending") based on
-// how many hologram numbers are on file vs. the quantity on record.
 function renderHologramUI() {
   const list = document.getElementById('currentHologramList');
   const statusMsg = document.getElementById('hologramStatusMsg');
@@ -1846,9 +1714,6 @@ function renderHologramUI() {
   statusMsg.style.color = color;
 }
 
-// Sends a hologram add/remove to the server immediately (independent of the
-// main "Save" button) so the partial/leftover logic can be validated against
-// the quantity that's actually on record right now.
 let hologramBusy = false;
 async function submitHologramChange({ add = [], remove = [] }) {
   if (hologramBusy) return;
@@ -1882,8 +1747,6 @@ async function submitHologramChange({ add = [], remove = [] }) {
   }
 }
 
-// Shown when an uploaded/typed batch of hologram numbers has more entries
-// than there are remaining unit slots — offers exporting the unused ones.
 function openHologramOverflowModal(added, leftover) {
   const modal = document.getElementById('hologramOverflowModal');
   const msg = document.getElementById('hologramOverflowMsg');
@@ -1911,7 +1774,6 @@ function wireHologramControls() {
   const preview = document.getElementById('hologramFilePreview');
   if (!addBtn || !fileBtn) return;
 
-  // clone-replace to drop old listeners since this is re-wired on every open
   const newAddBtn = addBtn.cloneNode(true);
   addBtn.parentNode.replaceChild(newAddBtn, addBtn);
   const newFileBtn = fileBtn.cloneNode(true);
@@ -1947,9 +1809,6 @@ function wireHologramControls() {
   };
 }
 
-// "Add by file" for the edit modal: lets the user upload an Excel/CSV of
-// serial numbers instead of typing each new one in by hand when quantity
-// goes up. Re-wired on every open so listeners don't stack across opens.
 function wireEditSerialFileUpload() {
   const btn = document.getElementById('editSerialFileBtn');
   const fileInput = document.getElementById('editSerialFileInput');
@@ -1978,9 +1837,6 @@ function wireEditSerialFileUpload() {
   });
 }
 
-// Cycles one serial number through: normal -> faulty -> marked for removal
-// -> normal. A lot that's already IN the Damaged Product category skips the
-// "faulty" step (it's already damaged) and goes straight to removal.
 function cycleEditSerialState(s) {
   const typeSelect = document.getElementById('editProductType');
   const currentType = (typeSelect ? typeSelect.value : invState.activeProductType) || 'product';
@@ -2000,12 +1856,6 @@ function cycleEditSerialState(s) {
   renderEditSerialsUI();
 }
 
-// Keeps the serial-number list in sync with whatever quantity is typed into
-// the edit form: shows current serials (removable if quantity is going down),
-// and prompts for new serial numbers if quantity is going up. Each serial
-// chip cycles through three states on click: normal -> faulty (goes to the
-// Damaged Product category on save) -> marked for removal (write-off, gone
-// from stock entirely) -> back to normal.
 function renderEditSerialsUI() {
   const modal = document.getElementById('editModal');
   const quantityInput = modal.querySelector('form').elements['quantity'];
@@ -2042,8 +1892,6 @@ function renderEditSerialsUI() {
   const fileBtn = document.getElementById('editSerialFileBtn');
   const diff = targetQuantity - keptCount;
 
-  // serial numbers are optional for some types, so quantity can move freely
-  // without needing to add/remove serials to match it
   if (serialOptional) {
     msgBox.textContent = 'Serial numbers are optional for this product type.';
     msgBox.style.color = 'var(--text-muted)';
@@ -2093,7 +1941,6 @@ function openDeleteModal(p) {
   document.getElementById('deleteModal').style.display = 'flex';
 }
 
-// ---------- Add Product wizard ----------
 const addWiz = {
   productId: '',
   productName: '',
@@ -2139,10 +1986,6 @@ function addModalBody() {
 
 function addWizTitle(t) { document.getElementById('addWizTitle').textContent = t; }
 
-// ---------- Supplier / company picker (shared by the lot + part forms) ----------
-// Companies come from the same customers collection the Orders page creates, so a
-// supplier is picked from existing parties — or typed in manually (saved as a new
-// company with the same schema: address, GST, contact person / number / email).
 const supplierState = { companies: [] };
 
 async function loadSupplierCompanies() {
@@ -2154,7 +1997,6 @@ async function loadSupplierCompanies() {
   } catch (err) { /* picker still works in manual mode */ }
 }
 
-// ---------- payment block (Paid / Partial / Credit + credit days) shared by the lot and part forms ----------
 function paymentBlockHTML(selId, hintId, required, emptyLabel) {
   const inp = 'padding:10px;border:1px solid var(--border);border-radius:8px;';
   return `
@@ -2193,7 +2035,6 @@ function paymentDueDate(form) {
   return d.toISOString().slice(0, 10);
 }
 
-// returns an error message, or '' when the payment fields are fine
 function validatePaymentFields(form) {
   const mode = form.querySelector('[name="payment_mode"]').value;
   if (mode !== 'partial' && mode !== 'credit') return '';
@@ -2217,7 +2058,6 @@ function readPaymentFields(form) {
   };
 }
 
-// shows/hides the extra fields and keeps the coloured hint under the select up to date
 function wirePaymentBlock(form, selId, hintId) {
   const sel = form.querySelector('#' + selId);
   const hint = form.querySelector('#' + hintId);
@@ -2319,11 +2159,9 @@ function initSupplierPicker(form, optional) {
   pick.addEventListener('change', sync);
   fillOptions();
   sync();
-  // companies load in the background; add them to the dropdown once they arrive
   loadSupplierCompanies().then(() => { fillOptions(); sync(); });
 }
 
-// Reads the picker back into the payload fields the backend expects.
 function readSupplier(form) {
   const fd = new FormData(form);
   const v = fd.get('supplier_pick') || '';
@@ -2383,8 +2221,6 @@ function wireInvoiceAutofill(form) {
   });
 }
 
-// Step 1: pick the category first — the next form asks for exactly the details
-// that category's table and view-details modal show.
 const ADD_TYPES = [
   { type: 'product', label: 'Product', icon: 'fa-box', hint: 'Finished units with serial numbers' },
   { type: 'spare_parts', label: 'Spare Parts', icon: 'fa-gears', hint: 'Assembly parts, tracked by quantity' },
@@ -2411,8 +2247,6 @@ function renderAddTypeStep() {
   }));
 }
 
-// Spare parts / service parts: same fields as their table + view-details
-// (product it belongs to, part name, received date, warranty, quantity, hologram numbers).
 function renderPartDetailsStep() {
   const body = addModalBody();
   const isService = addWiz.productType === 'service_parts';
@@ -2458,7 +2292,6 @@ function renderPartDetailsStep() {
     const category = isService ? (fd.get('part_category') || '') : '';
     const warrantyUntil = fd.get('warranty_until') || '';
     if (category === 'warranty' && !warrantyUntil) { alert('Warranty Until is required for a warranty part.'); return; }
-    // hologram numbers are allowed to repeat — no uniqueness guard here.
     const holograms = (fd.get('hologram_numbers') || '').split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
     if (holograms.length > quantity) { alert('Hologram numbers cannot be more than the quantity.'); return; }
 
@@ -2500,7 +2333,6 @@ function renderPartDetailsStep() {
   }));
 }
 
-// Step 3: lot no, quantity, serial numbers (auto/manual), supplier + pricing
 function renderLotDetailsStep() {
   const body = addModalBody();
   addWizTitle(`Add ${productTypeLabel(addWiz.productType)}`);
@@ -2553,7 +2385,6 @@ function renderLotDetailsStep() {
   initSupplierPicker(form, isFaulty);
   wireInvoiceAutofill(form);
 
-  // live hint: total amount, and what Credit / Partial does on the company ledger
   wirePaymentBlock(form, 'lotPaymentMode', 'paymentHint');
   const typeSelect = document.getElementById('lotProductType');
   const qtyInput = form.querySelector('[name="quantity"]');
@@ -2567,7 +2398,6 @@ function renderLotDetailsStep() {
   let fileSerials = [];
   let usingFileSerials = false;
 
-  // serial number is required for every type except accessories
   function syncSerialRequirement() {
     const optional = isSerialOptionalType(typeSelect.value);
     firstSerialInput.required = !optional;
@@ -2695,7 +2525,6 @@ function renderLotDetailsStep() {
       const firstSerial = (fd.get('first_serial') || '').trim().toLowerCase();
 
       if (serialOptional && !firstSerial) {
-        // accessories can be listed with no serial numbers at all
         serials = [];
       } else {
         serials = [firstSerial];
@@ -2713,9 +2542,6 @@ function renderLotDetailsStep() {
       }
     }
 
-    // duplicate-serial guard only applies to product_type "product" — other
-    // types (accessories/damaged) are allowed to reuse a serial number
-    // (e.g. a unit moving into "damaged" under the serial it already had).
     if (serials.length && productType === 'product') {
       if (new Set(serials).size !== serials.length) { alert('Serial numbers must be unique.'); return; }
 
@@ -2791,16 +2617,12 @@ function wireModals() {
     const typeSelect = document.getElementById('editProductType');
     const serialOptional = isSerialOptionalType(typeSelect ? typeSelect.value : 'product');
 
-    // accessories: quantity and serial count don't have to match, so skip
-    // all the strict sync checks below
     if (!serialOptional) {
       if (targetQuantity > keptCount) {
         if (new_serial_numbers.some(v => !v)) {
           showResponseModal('Missing serial numbers', 'Please fill in every new serial number field before saving.', false);
           return;
         }
-        // duplicate-serial guard only applies to product_type "product" —
-        // other types are allowed to reuse a serial number already on file.
         const editType = typeSelect ? typeSelect.value : 'product';
         if (editType === 'product') {
           const existingSerials = new Set(
@@ -2825,10 +2647,6 @@ function wireModals() {
     const editIsPart = editType === 'spare_parts' || editType === 'service_parts';
     const updated_values = {
       product_name: form.elements['product_name'].value,
-      // id/model belong to physical products only; parts are identified by
-      // parent_product_name instead, so each is only sent for its own type —
-      // keeps a part's doc from picking up stray empty id/model fields and
-      // vice versa.
       ...(editIsPart
         ? { parent_product_name: form.elements['parent_product_name'].value, product_id: '', model_no: '' }
         : { product_id: DEFAULT_PRODUCT_ID, model_no: form.elements['model_no'].value }),
@@ -2842,9 +2660,6 @@ function wireModals() {
       product_type: typeSelect ? typeSelect.value : 'product'
     };
     try {
-      // invState.activeProductId / invState.activeModelNo are the ORIGINAL id and
-      // model number, used to locate the record being edited. Any new id/model
-      // typed into the form travels inside updated_values as a rename request.
       const res = await apiFetch(`/inventory/update/${invState.activeId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

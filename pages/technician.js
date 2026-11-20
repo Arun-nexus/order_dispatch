@@ -65,10 +65,6 @@ function requestStatusClass(status) {
   return 'pending';
 }
 
-
-// ======================================================================
-// Services list
-// ======================================================================
 async function loadMyServices() {
   try {
     const svcRes = await apiFetch('/service/my');
@@ -94,12 +90,6 @@ async function loadMyServices() {
   }
 }
 
-
-// ---- approval rules -------------------------------------------------------
-// A technician never edits dates / assignment directly. Everything goes through the
-// service manager (Service page): either the technician raises a request and it is
-// approved there (the installation is then assigned to whoever raised it), or the
-// manager assigns it to a technician directly.
 const ME = () => (typeof getUsername === 'function' ? (getUsername() || '') : '');
 const instAwaiting = i => !i.technician_id;                                  // my request, not approved yet
 const instStatusKey = i => (instAwaiting(i) ? 'pending' : i.status);
@@ -108,7 +98,7 @@ function instLabel(i) {
   if (i.status === 'requested') return 'Assigned · not scheduled';
   return INSTALL_LABEL[i.status] || i.status;
 }
-// my installation requests, shown next to the other requests
+
 function installRequestRows() {
   return techState.installs.filter(i => i.requested_by && i.requested_by === ME()).map(i => ({
     request_id: 'inst:' + i.installation_id, request_type: 'installation',
@@ -142,7 +132,6 @@ function toLocalInput(v) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-// the wizard step the technician has to do next
 function nextStepOf(s) {
   return { assigned: 1, spare_decision: 2, report: 3 }[s.workflow_step || 'assigned'] || 1;
 }
@@ -177,12 +166,6 @@ function primaryActionHtml(s) {
   return '';
 }
 
-
-
-
-// ======================================================================
-// Shared helpers
-// ======================================================================
 async function postJson(url, body) {
   const res = await apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json();
@@ -204,9 +187,6 @@ async function pickImage(file) {
   return readFileAsBase64(file);
 }
 
-// ======================================================================
-// View modal
-// ======================================================================
 function openViewModal(s) {
   if (!s) return;
   const modal = document.getElementById('viewModal');
@@ -288,14 +268,6 @@ function wireStaticModals() {
     btn.addEventListener('click', e => e.target.closest('.modal').style.display = 'none'));
 }
 
-// ======================================================================
-// Service wizard
-//   step 1  damaged product image + serial number     -> POST /service/start
-//   step 2  spare part needed?  (faulty part photo +   -> POST /service/spare_decision
-//           hologram number for each part)
-//   step 3  service report                             -> POST /service/submit_report
-//   then the service manager approves the faulty part return and the service becomes completed
-// ======================================================================
 const wiz = {
   id: null, step: 1, serial: '', damageImage: '', hasSavedImage: false, spareNeeded: null,
   parts: [], newHolo: {}, workDone: '', finalImage: '', notice: '', busy: false
@@ -341,7 +313,6 @@ function setWizErr(msg) {
   if (el) el.textContent = msg || '';
 }
 
-// copy what is typed into the form back into wiz, so redrawing never loses anything
 function captureWizardInputs() {
   const root = wizEl();
   if (wiz.step === 1) {
@@ -595,7 +566,6 @@ async function submitReport() {
   await loadMyServices();
 }
 
-// ---------- Request New Service modal (creates an approval request, not a live service) ----------
 function readFileAsBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -719,9 +689,6 @@ function openRequestServiceModal() {
   modal.style.display = 'flex';
 }
 
-// ======================================================================
-// Reschedule a service
-// ======================================================================
 function canReschedule(s) {
   return s && s.status !== 'completed' && s.status !== 'rejected';
 }
@@ -773,9 +740,6 @@ function openRescheduleRequest(o) {
   modal.style.display = 'flex';
 }
 
-// ======================================================================
-// Generic detail modal (used by the cards, demo units, parts and installations)
-// ======================================================================
 function openDetailModal(title, bodyHtml) {
   const modal = document.getElementById('detailModal');
   const content = modal.querySelector('.modal-content');
@@ -795,9 +759,6 @@ const TD = 'style="padding:8px;border-top:1px solid #e2e8f0;"';
 
 
 
-// ======================================================================
-// Demo units and allocated parts
-// ======================================================================
 async function loadAllocations() {
   try {
     const res = await apiFetch('/allocation/technician');
@@ -922,9 +883,6 @@ function openPartDetail(a) {
 }
 
 
-// ======================================================================
-// Installations
-// ======================================================================
 const INSTALL_LABEL = { requested: 'Requested', scheduled: 'Scheduled', in_progress: 'In progress', pending_approval: 'Completion in review', completed: 'Completed' };
 
 async function loadInstallations() {

@@ -1,7 +1,7 @@
 const dispState = { pendingOrders: [], pendingSpare: [], pendingProductAlloc: [], dispatchedOrders: [], dispatchedSpare: [], dispatchedProductAlloc: [], searchQuery: '', activeFilters: null };
 let dispPage = 1;
-let dispAssemblyDates = {};   // serial -> assembling date (from backend)
-let dispUserNames = {};   // username -> display name (for the form's REF box)
+let dispAssemblyDates = {};   
+let dispUserNames = {};   
 const DISP_PAGE_SIZE = 30;
 
 function renderTablePagination(container, page, totalPages, onChange) {
@@ -30,7 +30,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setInterval(loadDispatchQueue, 60 * 1000);
 });
 
-// ---------- Cards -> click to see details ----------
 function dispatchRowState(d) {
   const hasDispatch = !!d.dispatch;
   const hasDocket = hasDispatch && !!d.dispatch.docket_no;
@@ -262,7 +261,6 @@ function wireDispatchCardClicks() {
   if (modal) modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
 }
 
-// ---------- Header search (docket, invoice, product, serial number) ----------
 function wireHeaderSearch() {
   const input = document.querySelector('.search input');
   if (!input) return;
@@ -278,9 +276,6 @@ function rowSerialNumbers(row) {
   return (row.data.items || []).flatMap(i => i.serial_numbers || []);
 }
 
-// Combines the header search box with whatever the type/status "Apply
-// Filter" bar last set, so any action that reloads data (confirm dispatch,
-// add docket, etc.) re-renders the SAME filtered/searched view.
 function getFilteredRows() {
   let rows = combinedRows();
 
@@ -519,7 +514,6 @@ function wireFilter() {
   });
 }
 
-// ---------- View Details modal ----------
 const DV_LABELS = {
   dispatched_through: 'Courier / Transport', mode_of_delivery: 'Mode of Delivery', gst_number: 'GST No.', total_mrp: 'Total Amount',
   company_name: 'Company', company_address: 'Address', phone_number: 'Phone', contact_number: 'Contact No.', serial_numbers: 'Serial No.',
@@ -755,9 +749,6 @@ function openViewDispatchModal(row) {
   modal.style.display = 'flex';
 }
 
-// ---------- Order Dispatch Form (Excel form -> editable A4 print) ----------
-// Fills only what the system already has; every other box is left blank and
-// stays editable inside the form before printing.
 function odfDateTime(v) {
   if (!v) return '';
   const dt = new Date(v);
@@ -775,7 +766,6 @@ function odfDefaults(row) {
     const items = d.items || [];
     lines = items.map((it, i) => `${i + 1}. ${it.product_name ?? ''}${it.model_no ? ' (' + it.model_no + ')' : ''}  -  Qty: ${it.quantity ?? 0}`);
     serials = items.filter(it => (it.serial_numbers || []).length).map(it => `${it.product_name ?? ''}: ${it.serial_numbers.join(', ')}`);
-    // Manufacturing date = assembling date of the unit (only filled when an assembly record exists)
     items.forEach(it => {
       const days = [...new Set((it.serial_numbers || []).map(sn => dispAssemblyDates[sn]).filter(Boolean)
         .map(v => new Date(v)).filter(x => !isNaN(x)).map(x => x.toLocaleDateString('en-GB')))];
@@ -807,7 +797,6 @@ function odfDefaults(row) {
   if (disp.docket_no) extra.push(`Docket No.: ${String(disp.docket_no).toUpperCase()}`);
   if (disp.ship_to_different) extra.push(`SHIP TO: ${disp.ship_to_address?.company_name ?? ''}${disp.ship_to_address?.address ? ', ' + disp.ship_to_address.address : ''}`);
 
-  // mode of dispatch -> tick the matching box of the form
   const mode = disp.mode_of_delivery || '';
   const through = disp.dispatched_through || '';
   const out = { hand: '', porter: '', courier: '', others: '' };

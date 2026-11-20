@@ -1,46 +1,14 @@
-/* ---- A4 print support: print_a4.js is loaded on demand (safe if it is missing) ---- */
 (function () { if (typeof A4Print === 'undefined' && !document.getElementById('a4printjs')) { const s = document.createElement('script'); s.id = 'a4printjs'; s.src = 'print_a4.js'; document.head.appendChild(s); } })();
 function a4Ready(cb, n) { n = n || 0; if (typeof A4Print !== 'undefined') return cb(); if (n < 50) setTimeout(() => a4Ready(cb, n + 1), 200); }
 function a4Intercept(head, rows, name) { return typeof A4Print !== 'undefined' && A4Print.intercept(head, rows, name); }
 function a4WizardPrint(modal, title) { if (typeof A4Print !== 'undefined') A4Print.wizardPrint(modal, title); }
 function a4Twin(btn, title) { if (btn) a4Ready(() => A4Print.attachTwin(btn, title)); }
-// =========================================================
-// assembly.js
-// Powers pages/assembly.html — cards, table/filtering, and the
-// 4-step "Add Assembly" wizard:
-//   1) Product details (name, ID, model no., quantity to build)
-//   2) Parts used — pulled from inventory's spare_parts stock (only parts
-//      that already carry hologram numbers show up here) and/or added
-//      locally (never touches inventory). Exactly one inventory part must
-//      have quantity == assembly quantity — that's the hologram-bearing part.
-//   3) Serial numbers only, auto-generated per unit, editable. Hologram
-//      numbers are NOT entered here — the server pulls one per unit from
-//      the hologram-bearing part's stock when the assembly is saved.
-//   4) Sticker — Normal / Govt. supply label (see assembly_sticker.js): editable,
-//      one sticker per serial, 2 per A4 page, download as PDF or Word.
-//      Supply type, mfg month/year and M.R.P are entered in step 1.
-//
-// Add from Shipment (step 2): pick parts of a received shipment (multi-select, remove the ones not needed),
-//   upload hologram numbers for them on the spot (POST /assembly/add_part_holograms); the parts are
-//   deducted from inventory spare_parts stock like any inventory part (GET /assembly/shipment_parts).
-//
-// Edit Assembly (admin + assembly roles only, any status — name/model lock once units are approved):
-//   parts can be added / removed / changed while the assembly is in progress;
-//   the backend deducts or restocks inventory spare_parts by the difference.
-//
-// Talks to the real backend: GET/POST /assembly/... and
-// GET /assembly/available_parts (see app.py + manage_assembly.py).
-// Spare-part stock itself is fed by shipment.js: a shipment part marked
-// "assembly" lands in inventory (product_type="spare_parts") as soon as
-// that shipment is marked received; hologram numbers are added afterward
-// via inventory.js's edit modal (serial-wise, from Excel or by hand).
-// =========================================================
 
 let assemblies = [];
-let availableParts = [];      // [{part_name, quantity}] — inventory spare_parts stock
+let availableParts = [];     
 let assemblyDraft = null;
 let assemblyStep = 1;
-let inventoryProducts = [];   // distinct finished products already in inventory (for "Existing product" mode)
+let inventoryProducts = [];  
 let deletingAssemblyId = null;
 
 const ASSEMBLY_MODAL = () => document.querySelector('#assemblyModal .modal-content');
@@ -49,9 +17,6 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// =========================================================
-// SERVER <-> UI SHAPE
-// =========================================================
 
 function fromServerShapeAssembly(a) {
   return {
@@ -92,10 +57,6 @@ function toServerShapeAssembly(a) {
     sticker: a.sticker || null,
   };
 }
-
-// =========================================================
-// LOAD + CARDS + TABLE
-// =========================================================
 
 async function loadAssemblies() {
   try {
@@ -145,9 +106,6 @@ function renderCards() {
   document.getElementById('cardAvailableShipment').textContent = availableParts.length;
 }
 
-// =========================================================
-// CARD POPUPS — filters + export + click-through to full details
-// =========================================================
 const asmCV = { type: '', title: '', base: [], f: {} };
 
 const ASM_STATUS_LABEL = {
@@ -371,12 +329,10 @@ function wireAssemblyCardClicks() {
   });
 }
 
-// product/model a spare part belongs to (backend field name tolerant)
 function partBelongs(p) {
   return p.belongs_to || p.belongs_to_product || p.part_belongs_to || p.product_name || p.parent_product || '';
 }
 
-// inventory parts are identified by part name + the product they belong to
 const PART_SEP = '||';
 function partKey(name, belongs) { return (name || '') + PART_SEP + (belongs || ''); }
 
@@ -455,10 +411,6 @@ function renderTable() {
   tbody.querySelectorAll('[data-action="approve"]').forEach(b => b.addEventListener('click', () => openApproveAssemblyModal(b.dataset.id)));
   tbody.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => openDeleteAssemblyModal(b.dataset.id)));
 }
-
-// =========================================================
-// VIEW / COMPLETE / DELETE / EXPORT (saved assemblies)
-// =========================================================
 
 function openViewAssemblyModal(id) {
   const a = assemblies.find(x => x.id === id);
@@ -634,15 +586,8 @@ function exportSerialsToExcel(serials, productName) {
   XLSX.writeFile(wb, `${safeName}_serials.xlsx`);
 }
 
-// =========================================================
-// MODAL HELPERS
-// =========================================================
 function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-
-// =========================================================
-// ADD ASSEMBLY WIZARD
-// =========================================================
 
 function stepDots(active) {
   const labels = ['Product', 'Parts Used', 'Serial Numbers', 'Sticker'];
@@ -657,8 +602,6 @@ function stepDots(active) {
     </div>`;
 }
 
-// Product ID is never typed in by hand — every assembly / assembled product
-// uses this fixed value (a single space).
 const DEFAULT_PRODUCT_ID = ' ';
 
 async function loadInventoryProducts() {
@@ -684,16 +627,16 @@ async function loadInventoryProducts() {
 
 async function openAddAssemblyModal() {
   assemblyDraft = {
-    mode: 'existing',   // 'existing' = pick from inventory, 'new' = type details
+    mode: 'existing',   
     productName: '', productId: DEFAULT_PRODUCT_ID, modelNumber: '', quantity: 1,
-    partsUsed: [], serials: [], lots: [],   // lots[i] = lot no. of unit i (compulsory, may differ per unit)
-    supplyType: 'normal',                   // 'normal' | 'govt' -> decides which sticker layout is used
-    mfgMonth: new Date().toISOString().slice(0, 7),   // YYYY-MM
+    partsUsed: [], serials: [], lots: [],   
+    supplyType: 'normal',                   
+    mfgMonth: new Date().toISOString().slice(0, 7),   
     mrp: '',
-    sticker: null,                          // editable sticker state, created when step 4 opens
+    sticker: null,                          
   };
   assemblyStep = 1;
-  await Promise.all([loadAvailableParts(), loadInventoryProducts()]);   // refresh stock right before the wizard opens
+  await Promise.all([loadAvailableParts(), loadInventoryProducts()]);   
   if (!inventoryProducts.length) assemblyDraft.mode = 'new';
   renderAssemblyStep();
   openModal('assemblyModal');
@@ -706,7 +649,6 @@ function renderAssemblyStep() {
   return renderAStep4();
 }
 
-// ---------- STEP 1: product details ----------
 function renderAStep1() {
   const box = ASSEMBLY_MODAL();
   box.innerHTML = `
@@ -801,7 +743,7 @@ function renderAStep1() {
     assemblyDraft.modelNumber = document.getElementById('a1ModelNumber').value.trim();
     assemblyDraft.quantity = Math.max(1, Number(document.getElementById('a1Quantity').value) || 1);
     readStep1Extras();
-    assemblyDraft.sticker = null;   // product / supply details may have changed -> rebuild the sticker in step 4
+    assemblyDraft.sticker = null;   
     assemblyStep = 2;
     renderAssemblyStep();
   });
@@ -814,7 +756,6 @@ function readStep1Extras() {
   if (r) assemblyDraft.mrp = r.value.trim();
 }
 
-// ---------- STEP 2: parts used (from inventory spare_parts + local) ----------
 function renderAStep2() {
   const box = ASSEMBLY_MODAL();
   box.innerHTML = `
@@ -859,8 +800,6 @@ function renderAStep2() {
     if (!availableParts.length) return;
     syncPartsUsedFromDom();
     const first = availableParts[0];
-    // default quantity to the assembly quantity — that's the 1:1 rule for
-    // whichever part ends up supplying the hologram numbers; still editable
     assemblyDraft.partsUsed.push({ name: first.part_name, quantity: assemblyDraft.quantity, source: 'inventory', belongsTo: partBelongs(first) });
     renderPartsUsedRows();
   });
@@ -883,17 +822,11 @@ function renderAStep2() {
       showResponseModal('Add an inventory part', 'Add at least one part from inventory — its hologram numbers supply the hologram number for each assembled unit.', false);
       return;
     }
-    // mirror the backend: merge quantities of rows that share the same part
-    // name (e.g. the same part split across two rows) before checking, since
-    // that's how /assembly/create sums them up server-side
     const summedByName = {};
     inventoryParts.forEach(p => {
       const k = partKey(p.name, p.belongsTo);
       summedByName[k] = (summedByName[k] || 0) + Number(p.quantity || 0);
     });
-    // only block when NOT ENOUGH (kam) — no part reaches the assembly
-    // quantity. If more than one part qualifies (zyada), that's fine: the
-    // backend just picks one and leaves the extra untouched in inventory.
     const hologramCandidates = Object.keys(summedByName).filter(name => summedByName[name] >= Number(assemblyDraft.quantity));
     if (hologramCandidates.length === 0) {
       showResponseModal(
@@ -914,7 +847,6 @@ function renderPartsUsedRows() {
 
   wrap.innerHTML = assemblyDraft.partsUsed.map((p, i) => {
     if (p.shipmentId) {
-      // picked via "Add from Shipment": name / product are fixed, only the quantity can change or the row be removed
       return `
       <div style="display:flex;gap:8px;align-items:center;" data-part-row="${i}">
         <span style="font-size:11px;font-weight:600;color:#0f766e;width:70px;flex-shrink:0;" title="Picked from a received shipment — deducted from inventory stock">SHIPMENT</span>
@@ -928,8 +860,6 @@ function renderPartsUsedRows() {
     }
     let nameField;
     if (p.source === 'inventory') {
-      // a part this assembly already uses may have dropped out of the available
-      // list (stock fully consumed) — keep it selectable so edits don't lose it
       const isSel = sp => sp.part_name === p.name && (partBelongs(sp) === (p.belongsTo || '') || !p.belongsTo);
       const missing = p.name && !availableParts.some(isSel)
         ? `<option value="${escAttr(partKey(p.name, p.belongsTo))}" selected>${aesc(p.name)}${p.belongsTo ? ' — ' + aesc(p.belongsTo) : ''} (0 left in stock)</option>` : '';
@@ -977,9 +907,7 @@ function syncPartsUsedFromDom() {
     const nameEl = row.querySelector('.partUsedName');
     const part = assemblyDraft.partsUsed[i];
     if (nameEl.classList.contains('partUsedFixed')) {
-      // shipment row: name + belongs-to are fixed, only the quantity below is read
     } else if (nameEl.tagName === 'SELECT') {
-      // inventory row: option value is "partName||belongsTo"
       const [n, b] = nameEl.value.split(PART_SEP);
       part.name = (n || '').trim();
       part.belongsTo = (b || '').trim();
@@ -992,13 +920,8 @@ function syncPartsUsedFromDom() {
   });
 }
 
-// ---------- ADD FROM SHIPMENT (wizard step 2) ----------
-// Pick a received shipment, tick the parts this batch needs (untick / ✕ the ones it doesn't),
-// optionally upload hologram numbers per part, then add them. A received shipment's assembly parts
-// already live in inventory spare_parts, so the rows are added as inventory parts (tagged with the
-// shipment) and are deducted from inventory stock exactly like "Add Part from Inventory".
-let shipmentParts = [];   // GET /assembly/shipment_parts
-let shipPick = null;      // picker state while the popup is open
+let shipmentParts = [];   
+let shipPick = null;      
 
 async function loadShipmentParts() {
   try {
@@ -1160,7 +1083,6 @@ function renderShipmentPicker() {
   box.querySelector('#spConfirm').addEventListener('click', confirmShipmentPick);
 }
 
-// reads every non-empty cell of every sheet (xlsx / xls / csv) — same idea as the serial upload on the inventory page
 function parseHologramsFromFile(file, onDone, onError) {
   if (typeof XLSX === 'undefined') { onError('Excel reader is not loaded — refresh the page and try again.'); return; }
   const reader = new FileReader();
@@ -1183,7 +1105,6 @@ function parseHologramsFromFile(file, onDone, onError) {
   reader.readAsArrayBuffer(file);
 }
 
-// One hologram list for the whole machine: the same numbers are added to every ticked part
 async function pickerApplyHolograms(numbers) {
   if (!shipPick) return;
   const clean = [...new Set((numbers || []).map(x => String(x).trim()).filter(Boolean))];
@@ -1240,11 +1161,9 @@ function confirmShipmentPick() {
   renderPartsUsedRows();
 }
 
-// ---------- STEP 3: serial + hologram numbers ----------
 function generateSerialNumbers(quantity, productId) {
+
   const datePart = todayStr().replace(/-/g, '');
-  // Product ID is a fixed blank value now, so it can't seed the serial prefix —
-  // fall back to the model number (then 'PRD') when the id has nothing usable.
   const clean = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const base = clean(productId) || clean(assemblyDraft && assemblyDraft.modelNumber) || 'PRD';
   const serials = [];
@@ -1255,9 +1174,6 @@ function generateSerialNumbers(quantity, productId) {
   return serials;
 }
 
-// Bumps the trailing number in a seed string by `offset`, keeping the same
-// zero-padding width — "ACER-20260820-0001" + 1 -> "ACER-20260820-0002".
-// If the seed has no trailing digits, a "-0002" style suffix is appended.
 function incrementSeed(seed, offset) {
   const match = seed.match(/^(.*?)(\d+)$/);
   if (!match) {
@@ -1269,16 +1185,12 @@ function incrementSeed(seed, offset) {
 }
 
 function renderAStep3() {
-  // fresh draft: only unit 1 gets a suggested value (still fully editable);
-  // the rest stay blank until "Generate Remaining" is used, or the user can
-  // just type every one manually. Hologram numbers are NOT entered here —
-  // the server assigns one per unit from the hologram-bearing inventory
-  // part's stock (see hologramPartName below) when the assembly is saved.
+
   if (!assemblyDraft.serials.length || assemblyDraft.serials.length !== assemblyDraft.quantity) {
     const suggestion = generateSerialNumbers(1, assemblyDraft.productId)[0];
     assemblyDraft.serials = Array.from({ length: assemblyDraft.quantity }, (_, i) => i === 0 ? suggestion : '');
   }
-  // one lot number per unit (compulsory). Different units may carry different lot numbers.
+
   if (!Array.isArray(assemblyDraft.lots) || assemblyDraft.lots.length !== assemblyDraft.quantity) {
     assemblyDraft.lots = Array.from({ length: assemblyDraft.quantity }, () => '');
   }
@@ -1378,7 +1290,6 @@ function renderAStep3() {
   renderSerialRows();
 }
 
-// ---------- STEP 4: sticker (Normal / Govt.), editable, PDF + Word download ----------
 function renderAStep4() {
   if (typeof AsmSticker === 'undefined') {
     showResponseModal('Sticker module missing', 'assembly_sticker.js did not load. Reload the page and try again.', false);
@@ -1497,7 +1408,6 @@ function syncSerialsFromDom() {
   });
 }
 
-// ---------- FINALIZE ----------
 function validateSerialsStep() {
   syncSerialsFromDom();
   if ((assemblyDraft.lots || []).some(l => !String(l || '').trim())) applyLotBlocks(false);
@@ -1506,8 +1416,6 @@ function validateSerialsStep() {
     showResponseModal('Missing values', 'Every unit needs a serial number.', false);
     return false;
   }
-  // Lot No. is compulsory for every unit. Deliberately NO uniqueness / consistency check on lots:
-  // one assembly may carry several lot numbers, and the same lot can repeat across units.
   const lotMissing = (assemblyDraft.lots || []).findIndex(l => !String(l || '').trim());
   if (lotMissing !== -1 || (assemblyDraft.lots || []).length !== assemblyDraft.serials.length) {
     showResponseModal('Lot No. required', `Every unit needs a Lot No.${lotMissing !== -1 ? ' Unit ' + (lotMissing + 1) + ' is missing one.' : ''}`, false);
@@ -1522,7 +1430,6 @@ function validateSerialsStep() {
 }
 
 async function finalizeAssembly() {
-  // supply type / mfg date / M.R.P that were finally printed on the sticker are what gets saved
   const st = assemblyDraft.sticker;
   if (st) {
     assemblyDraft.supplyType = st.type;
@@ -1540,7 +1447,7 @@ async function finalizeAssembly() {
     closeModal('assemblyModal');
     assemblyDraft = null;
     await loadAssemblies();
-    await loadAvailableParts();   // inventory spare parts stock changed — refresh
+    await loadAvailableParts();  
     showResponseModal('Assembly saved', 'The assembly has been created and parts stock updated.', true);
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
@@ -1549,12 +1456,6 @@ async function finalizeAssembly() {
   }
 }
 
-// =========================================================
-// EDIT ASSEMBLY — admin + assembly roles only, any status
-// While an assembly is being built, parts can be added, removed or changed.
-// The backend (POST /assembly/edit/{id}) deducts from / restocks inventory
-// spare parts by the difference. Unit quantity and serials stay as they are.
-// =========================================================
 const ASSEMBLY_EDIT_ROLES = ['admin', 'assembly'];
 function canEditAssembly() {
   return ASSEMBLY_EDIT_ROLES.includes(getRole());
@@ -1563,7 +1464,7 @@ function canEditAssembly() {
 let editingAssemblyId = null;
 let editingHologramPart = '';
 let editingHologramBelongs = '';
-let editingIdentityLocked = false;   // true once any unit of this assembly is approved into inventory
+let editingIdentityLocked = false;
 
 function escAttr(v) {
   return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -1576,15 +1477,11 @@ async function openEditAssemblyModal(id) {
   }
   const a = assemblies.find(x => x.id === id);
   if (!a) return;
-  // Parts can be edited in every status. Product name / model are locked once any
-  // unit has been approved, because those units are already in inventory under the
-  // old name/model and editing here would not change them.
   editingIdentityLocked = (a.approvedSerials || []).length > 0;
 
-  await loadAvailableParts();   // fresh stock numbers for the dropdowns
+  await loadAvailableParts();   
   editingAssemblyId = id;
 
-  // which inventory part supplies the hologram numbers (same rule as the backend)
   const sums = {};
   (a.partsUsed || []).filter(p => p.source !== 'local').forEach(p => {
     const k = partKey(p.name, p.belongsTo);
@@ -1677,7 +1574,6 @@ async function saveAssemblyEdit() {
     return;
   }
 
-  // mirror the backend: the hologram part must stay >= assembly quantity
   const holoTotal = parts
     .filter(p => p.source === 'inventory' && p.name === editingHologramPart && (!editingHologramBelongs || (p.belongsTo || '') === editingHologramBelongs))
     .reduce((sum, p) => sum + Number(p.quantity), 0);
@@ -1694,7 +1590,6 @@ async function saveAssemblyEdit() {
     const res = await apiFetch(`/assembly/edit/${editingAssemblyId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // once units are in inventory, name/model are not sent (backend keeps them as they are)
         ...(editingIdentityLocked ? {} : {
           product_name: productName,
           product_id: DEFAULT_PRODUCT_ID,
@@ -1710,7 +1605,7 @@ async function saveAssemblyEdit() {
     assemblyDraft = null;
     editingAssemblyId = null;
     await loadAssemblies();
-    await loadAvailableParts();   // inventory stock may have moved — refresh
+    await loadAvailableParts(); 
 
     const changes = data.inventory_changes || [];
     const summary = changes.length
@@ -1724,9 +1619,6 @@ async function saveAssemblyEdit() {
   }
 }
 
-// =========================================================
-// INIT
-// =========================================================
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('addAssemblyBtn').addEventListener('click', openAddAssemblyModal);
   document.getElementById('applyAssemblyFilter').addEventListener('click', renderTable);
@@ -1739,5 +1631,4 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAssemblies();
 });
 
-// expose for the shared notification bell (common_auth.js) to refresh this page's data
 window.refreshCurrentPageData = () => { loadAssemblies(); loadAvailableParts(); };
