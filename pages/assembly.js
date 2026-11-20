@@ -1029,7 +1029,7 @@ function shipLabel(sh) { return sh.invoice_no || String(sh.shipment_id || '').sl
 function pickerSelectShipment(id) {
   const sh = shipmentParts.find(x => x.shipment_id === id);
   shipPick.shipmentId = id;
-  shipPick.pasteOpen = {};
+  shipPick.pasteOpen = false;
   shipPick.rows = ((sh && sh.parts) || []).map(p => ({
     part_name: p.part_name, belongs_to: p.belongs_to || '', shipment_quantity: p.shipment_quantity,
     in_stock: p.in_stock, hologram_on_file: p.hologram_on_file,
@@ -1047,7 +1047,7 @@ async function openShipmentPicker() {
          : 'Could not load shipments right now. Please try again.', false);
     return;
   }
-  shipPick = { shipmentId: '', rows: [], pasteOpen: {}, msg: null };
+  shipPick = { shipmentId: '', rows: [], pasteOpen: false, msg: null };
   pickerSelectShipment(shipmentParts[0].shipment_id);
   renderShipmentPicker();
   ensureShipmentPickModal().style.display = 'flex';
@@ -1081,17 +1081,34 @@ function renderShipmentPicker() {
       <i class="fa-solid fa-circle-info"></i>
       Tick the parts this batch needs and remove (✕) the ones it doesn't. These parts are already in inventory, so the quantity you enter is
       deducted from inventory stock when the assembly is saved ("In stock" counts this part across all shipments).
-      Hologram numbers uploaded here are added to the part in inventory immediately. Only the part that supplies the unit hologram numbers needs them.
+      Upload the hologram numbers once in the green box — they are added to every ticked part (all parts of one machine carry the same number).
     </p>
     ${msg}
     ${rows.length ? `
+    <div style="border:1px solid #a7f3d0;background:#f0fdf9;border-radius:10px;padding:12px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:600;color:#0f766e;margin-bottom:4px;"><i class="fa-solid fa-barcode"></i> Hologram numbers — one upload for all selected parts</div>
+      <div style="font-size:12px;color:#475569;margin-bottom:8px;">
+        One machine = one hologram number on all its parts, so give the list once (one number per machine). It is added to every ticked part
+        (<strong id="spSelCount">${rows.filter(r => r.checked && r.in_stock > 0).length} selected</strong> right now) — tick / untick the parts first.
+      </div>
+      <label style="cursor:pointer;display:inline-block;padding:7px 12px;border:1px dashed #0f766e;border-radius:6px;font-size:12px;color:#0f766e;background:#fff;">
+        <i class="fa-solid fa-file-arrow-up"></i> Upload Excel / CSV
+        <input type="file" id="spFile" accept=".xlsx,.xls,.csv" style="display:none;">
+      </label>
+      <button type="button" id="spPasteBtn" style="padding:7px 12px;border:1px dashed #0f766e;border-radius:6px;background:#fff;font-size:12px;color:#0f766e;cursor:pointer;">Type / paste</button>
+      ${shipPick.pasteOpen ? `
+      <div style="margin-top:8px;">
+        <textarea id="spPasteText" rows="3" placeholder="Hologram numbers — one per line or comma separated" style="width:100%;"></textarea>
+        <button type="button" id="spPasteAdd" style="margin-top:6px;padding:7px 12px;border:none;border-radius:8px;background:#0f766e;color:#fff;cursor:pointer;font-size:12px;">Add to selected parts</button>
+      </div>` : ''}
+    </div>
     <div style="overflow-x:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead><tr>
           <th style="${th}"><input type="checkbox" id="spAll" title="Select / unselect all" ${rows.every(r => r.checked || r.in_stock <= 0) ? 'checked' : ''}></th>
           <th style="${th}">Part</th><th style="${th}">Belongs to</th><th style="${th}">In shipment</th>
           <th style="${th}">In stock</th><th style="${th}">Holograms on file</th><th style="${th}">Qty to use</th>
-          <th style="${th}">Hologram numbers</th><th style="${th}"></th>
+          <th style="${th}"></th>
         </tr></thead>
         <tbody>
           ${rows.map((r, i) => `
@@ -1103,20 +1120,9 @@ function renderShipmentPicker() {
             <td style="${td}">${r.in_stock}${r.in_stock <= 0 ? ' <small style="color:#dc2626;">(none left)</small>' : ''}</td>
             <td style="${td}">${r.hologram_on_file}</td>
             <td style="${td}"><input type="number" min="0" max="${r.in_stock}" class="spQty" data-i="${i}" value="${r.qty}" style="width:80px;" ${r.in_stock <= 0 ? 'disabled' : ''}></td>
-            <td style="${td}white-space:nowrap;">
-              <label style="cursor:pointer;display:inline-block;padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;font-size:12px;">
-                <i class="fa-solid fa-file-arrow-up"></i> Upload
-                <input type="file" class="spFile" data-i="${i}" accept=".xlsx,.xls,.csv" style="display:none;">
-              </label>
-              <button type="button" class="spPasteBtn" data-i="${i}" style="padding:6px 10px;border:1px dashed #94a3b8;border-radius:6px;background:none;font-size:12px;cursor:pointer;">Type / paste</button>
-            </td>
             <td style="${td}"><button type="button" class="spRemove" data-i="${i}" title="Remove from this list" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:32px;height:32px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button></td>
           </tr>
-          ${shipPick.pasteOpen[i] ? `
-          <tr><td colspan="9" style="padding:0 8px 10px;">
-            <textarea class="spPasteText" data-i="${i}" rows="3" placeholder="Hologram numbers — one per line or comma separated" style="width:100%;"></textarea>
-            <button type="button" class="spPasteAdd" data-i="${i}" style="margin-top:6px;padding:7px 12px;border:none;border-radius:8px;background:#0f766e;color:#fff;cursor:pointer;font-size:12px;">Add these hologram numbers</button>
-          </td></tr>` : ''}`).join('')}
+`).join('')}
         </tbody>
       </table>
     </div>` : '<p style="color:#94a3b8;font-size:13px;">All parts were removed — pick the shipment again to bring them back.</p>'}
@@ -1131,26 +1137,26 @@ function renderShipmentPicker() {
   box.querySelector('#spShipment').addEventListener('change', e => { pickerSelectShipment(e.target.value); shipPick.msg = null; renderShipmentPicker(); });
   const all = box.querySelector('#spAll');
   if (all) all.addEventListener('change', e => { rows.forEach(r => { if (r.in_stock > 0) r.checked = e.target.checked; }); renderShipmentPicker(); });
-  box.querySelectorAll('.spCheck').forEach(c => c.addEventListener('change', () => { rows[Number(c.dataset.i)].checked = c.checked; }));
+  box.querySelectorAll('.spCheck').forEach(c => c.addEventListener('change', () => {
+    rows[Number(c.dataset.i)].checked = c.checked;
+    const cnt = box.querySelector('#spSelCount');
+    if (cnt) cnt.textContent = `${rows.filter(r => r.checked && r.in_stock > 0).length} selected`;
+  }));
   box.querySelectorAll('.spQty').forEach(q => q.addEventListener('input', () => { rows[Number(q.dataset.i)].qty = q.value; }));
   box.querySelectorAll('.spRemove').forEach(b => b.addEventListener('click', () => {
-    rows.splice(Number(b.dataset.i), 1); shipPick.pasteOpen = {}; renderShipmentPicker();
+    rows.splice(Number(b.dataset.i), 1); shipPick.pasteOpen = false; renderShipmentPicker();
   }));
-  box.querySelectorAll('.spPasteBtn').forEach(b => b.addEventListener('click', () => {
-    const i = Number(b.dataset.i); shipPick.pasteOpen[i] = !shipPick.pasteOpen[i]; renderShipmentPicker();
-  }));
-  box.querySelectorAll('.spPasteAdd').forEach(b => b.addEventListener('click', () => {
-    const i = Number(b.dataset.i);
-    const txt = box.querySelector(`.spPasteText[data-i="${i}"]`).value;
-    pickerAddHolograms(i, txt.split(/[\s,;]+/));
-  }));
-  box.querySelectorAll('.spFile').forEach(f => f.addEventListener('change', () => {
-    const file = f.files[0];
+  const pasteBtn = box.querySelector('#spPasteBtn');
+  if (pasteBtn) pasteBtn.addEventListener('click', () => { shipPick.pasteOpen = !shipPick.pasteOpen; renderShipmentPicker(); });
+  const pasteAdd = box.querySelector('#spPasteAdd');
+  if (pasteAdd) pasteAdd.addEventListener('click', () => pickerApplyHolograms(box.querySelector('#spPasteText').value.split(/[\s,;]+/)));
+  const fileIn = box.querySelector('#spFile');
+  if (fileIn) fileIn.addEventListener('change', () => {
+    const file = fileIn.files[0];
     if (!file) return;
-    const i = Number(f.dataset.i);
-    parseHologramsFromFile(file, nums => pickerAddHolograms(i, nums),
+    parseHologramsFromFile(file, nums => pickerApplyHolograms(nums),
       err => { shipPick.msg = { text: err, ok: false }; renderShipmentPicker(); });
-  }));
+  });
   box.querySelector('#spConfirm').addEventListener('click', confirmShipmentPick);
 }
 
@@ -1177,34 +1183,39 @@ function parseHologramsFromFile(file, onDone, onError) {
   reader.readAsArrayBuffer(file);
 }
 
-async function pickerAddHolograms(i, numbers) {
+// One hologram list for the whole machine: the same numbers are added to every ticked part
+async function pickerApplyHolograms(numbers) {
   if (!shipPick) return;
-  const r = shipPick.rows[i];
   const clean = [...new Set((numbers || []).map(x => String(x).trim()).filter(Boolean))];
-  if (!r) return;
-  if (!clean.length) { shipPick.msg = { text: 'No hologram numbers found.', ok: false }; renderShipmentPicker(); return; }
-  try {
-    const res = await apiFetch('/assembly/add_part_holograms', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ part_name: r.part_name, belongs_to: r.belongs_to, hologram_numbers: clean }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'could not add hologram numbers');
-    // rows of the same part share one inventory stock pool
-    shipPick.rows.forEach(x => { if (x.part_name === r.part_name && x.belongs_to === r.belongs_to) x.hologram_on_file = data.hologram_on_file; });
-    const bits = [`${data.added} hologram number(s) added to ${r.part_name}`];
-    if (data.skipped_duplicates) bits.push(`${data.skipped_duplicates} already on file`);
-    if ((data.leftover || []).length) bits.push(`${data.leftover.length} not added — no untagged unit of this part is left in stock`);
-    shipPick.msg = { text: bits.join(' · ') + '.', ok: !(data.leftover || []).length };
-    shipPick.pasteOpen = {};
-    renderShipmentPicker();
-    loadAvailableParts();
-  } catch (err) {
-    if (err.message !== 'unauthorized' && err.message !== 'forbidden') {
-      shipPick.msg = { text: err.message, ok: false };
-      renderShipmentPicker();
+  const fail = text => { shipPick.msg = { text, ok: false }; renderShipmentPicker(); };
+  if (!clean.length) return fail('No hologram numbers found.');
+  const targets = shipPick.rows.filter(r => r.checked && r.in_stock > 0);
+  if (!targets.length) return fail('Tick at least one part first — the hologram numbers are added to the ticked parts.');
+
+  const added = [], problems = [];
+  for (const r of targets) {
+    try {
+      const res = await apiFetch('/assembly/add_part_holograms', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ part_name: r.part_name, belongs_to: r.belongs_to, hologram_numbers: clean }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'could not add hologram numbers');
+      shipPick.rows.forEach(x => { if (x.part_name === r.part_name && x.belongs_to === r.belongs_to) x.hologram_on_file = data.hologram_on_file; });
+      added.push(`${r.part_name} +${data.added}${data.skipped_duplicates ? ` (${data.skipped_duplicates} already on file)` : ''}`);
+      if ((data.leftover || []).length) problems.push(`${r.part_name}: ${data.leftover.length} not added (no untagged unit left in stock)`);
+    } catch (err) {
+      if (err.message === 'unauthorized' || err.message === 'forbidden') return;
+      problems.push(`${r.part_name}: ${err.message}`);
     }
   }
+  shipPick.pasteOpen = false;
+  shipPick.msg = {
+    text: `${clean.length} hologram number(s) applied to ${targets.length} part(s) — ${added.join(', ') || 'none added'}.` + (problems.length ? ` Check: ${problems.join('; ')}.` : ''),
+    ok: !problems.length,
+  };
+  renderShipmentPicker();
+  loadAvailableParts();
 }
 
 function confirmShipmentPick() {
