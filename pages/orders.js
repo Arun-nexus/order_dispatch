@@ -874,7 +874,7 @@ function exportOrdersCSV() {
     dateLabel: 'Order Date',
     getRows: () => applySort(orderState.currentBase || orderState.orders),
     onConfirm: (rows) => {
-      const header = ['Order ID', 'Order Date', 'Products', 'Qty', 'Serial Numbers', 'Company', 'Payment Mode', 'Status', 'Total'];
+      const header = ['Order ID', 'Order Date', 'Products', 'Qty', 'Serial Numbers', 'Company', 'Payment Mode', 'Status', 'Total', 'Reference'];
       const csvRows = rows.map(o => [
         o.order_id,
         o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '',
@@ -888,7 +888,8 @@ function exportOrdersCSV() {
         o.customer?.company_name ?? o.company_name ?? '',
         o.payment_mode,
         o.status,
-        o.total_mrp
+        o.total_mrp,
+        o.reference || o.creator?.raised_by || ''
       ]);
       downloadCSV(header, csvRows, 'orders.csv');
     }

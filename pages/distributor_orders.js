@@ -110,25 +110,35 @@ function renderCards(orders) {
   const today = new Date().toDateString();
   orders = orders.filter(o => !o._isRequest);
   const todaysOrders = orders.filter(o => o.order_date && new Date(o.order_date).toDateString() === today);
-  const todaysAmount = todaysOrders.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
+  const live = orders.filter(o => o.status !== 'cancelled');
+  const todaysAmount = todaysOrders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
+  const salesAmount = live.reduce((s, o) => s + (Number(o.total_mrp) || 0), 0);
 
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   set('cardTotalOrders', orders.length);
-  set('cardTodayAmount', `₹${todaysAmount.toFixed(2)}`);
+  set('cardSalesAmount', slFmt(salesAmount));
+  set('cardSalesToday', `Today: ${slFmt(todaysAmount)}`);
   set('cardTodayOrders', todaysOrders.length);
   set('cardDelivered', orders.filter(o => o.status === 'delivered').length);
-  set('cardPendingOrders', orders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled').length);
+  set('cardPendingOrders', orders.filter(o => o.status !== 'delivered' && o.status !== 'cancelled' && !isDispatched(o)).length);
+  set('cardDispatched', orders.filter(o => isDispatched(o) && o.status !== 'delivered').length);
   set('cardPendingRequests', (doState.orders || []).filter(o => o._isRequest && o.status === 'under_approval').length);
   set('cardRejectedRequests', (doState.orders || []).filter(o => o._isRequest && o.status === 'request_rejected').length);
 }
 
-function statusClass(status) {
-  const map = { placed: 'pending', processing: 'pending', delivered: 'delivered', cancelled: 'cancel', under_approval: 'pending', request_rejected: 'cancel' };
+function isDispatched(o, status) {
+  const s = status ?? o?.status;
+  return s === 'dispatched' || (s === 'processing' && !!o?.dispatch);
+}
+
+function statusClass(status, o) {
+  if (isDispatched(o, status)) return 'dispatched';
+  const map = { placed: 'pending', processing: 'pending', dispatched: 'dispatched', delivered: 'delivered', cancelled: 'cancel', under_approval: 'pending', request_rejected: 'cancel' };
   return map[status] || 'pending';
 }
 
 function statusLabel(status, o) {
-  if (status === 'processing' && o?.dispatch) return 'Dispatched';
+  if (isDispatched(o, status)) return 'Dispatched';
   const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled', under_approval: 'Under Approval', request_rejected: 'Rejected' };
   return map[status] || status || '';
 }
@@ -165,7 +175,7 @@ function renderTable(orders) {
       <td>${o.payment_mode ?? ''}</td>
       <td>₹${o.total_mrp ?? 0}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="${statusClass(o.status)}">${statusLabel(o.status, o)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${o.remark}</small>` : ''}</td>
+      <td><span class="${statusClass(o.status, o)}">${statusLabel(o.status, o)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${o.remark}</small>` : ''}</td>
       <td><button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button></td>`;
     tbody.appendChild(tr);
   });
@@ -214,7 +224,25 @@ function ocvEnsure() {
       .oc-pill{padding:2px 9px;border-radius:99px;font-size:11.5px;font-weight:600;white-space:nowrap}
       .oc-pill.pending{background:#fef3c7;color:#92400e}
       .oc-pill.delivered{background:#dcfce7;color:#166534}
-      .oc-pill.cancel{background:#fee2e2;color:#991b1b}`;
+      .oc-pill.cancel{background:#fee2e2;color:#991b1b}
+      .oc-pill.dispatched,span.dispatched{background:#dbeafe;color:#1e40af}
+      span.dispatched{padding:4px 10px;border-radius:99px;font-size:12px;font-weight:600}
+      .sl-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+      .sl-tab{padding:7px 14px;border:1px solid #e2e8f0;border-radius:99px;background:#fff;color:#334155;cursor:pointer;font-size:12.5px;font-weight:600}
+      .sl-tab.on{background:#1665ff;border-color:#1665ff;color:#fff}
+      .sl-bar input{padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-size:12.5px}
+      .sl-main{display:flex;flex-wrap:wrap;gap:18px}
+      .sl-chart{flex:1 1 520px;min-width:0}
+      .sl-side{flex:0 0 290px;max-width:100%}
+      .sl-kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+      .sl-kpi div{background:#f8fafc;border:1px solid #eef1f6;border-radius:10px;padding:9px 11px}
+      .sl-kpi span{display:block;font-size:11px;color:#64748b}
+      .sl-kpi b{font-size:15px;color:#0f172a}
+      .sl-list{max-height:290px;overflow:auto;border:1px solid #eef1f6;border-radius:10px}
+      .sl-list table{width:100%;border-collapse:collapse;font-size:12.5px;color:#1e293b}
+      .sl-list th{position:sticky;top:0;background:#f1f5f9;color:#334155;text-align:left;padding:7px 8px}
+      .sl-list td{padding:6px 8px;border-bottom:1px solid #f1f5f9}
+      .sl-list td:not(:first-child),.sl-list th:not(:first-child){text-align:right}`;
     document.head.appendChild(st);
   }
   let modal = document.getElementById('cardDetailModal');
@@ -251,7 +279,8 @@ function ocvBase(key) {
     case 'todayAmount': return ["Today's Order Amount", todays];
     case 'today': return ["Today's Orders", todays];
     case 'delivered': return ['Delivered', real.filter(o => o.status === 'delivered')];
-    case 'pending': return ['Pending', real.filter(o => o.status !== 'delivered' && o.status !== 'cancelled')];
+    case 'pending': return ['Pending', real.filter(o => o.status !== 'delivered' && o.status !== 'cancelled' && !isDispatched(o))];
+    case 'dispatched': return ['Dispatched', real.filter(o => isDispatched(o) && o.status !== 'delivered')];
     case 'pendingReq': return ['Pending Requests', doState.orders.filter(o => o._isRequest && o.status === 'under_approval')];
     case 'rejectedReq': return ['Rejected Requests', doState.orders.filter(o => o._isRequest && o.status === 'request_rejected')];
     default: return ['Orders', doState.orders];
@@ -289,7 +318,7 @@ function ocvRowsHtml(list) {
       <td>${esc(o.payment_mode || '-')}${o.payment_mode && o.payment_mode !== '-' ? `<span class="oc-sub">${esc(paymentDetailsLabel(o))}</span>` : ''}</td>
       <td>₹${esc(o.total_mrp ?? 0)}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="oc-pill ${statusClass(o.status)}">${esc(statusLabel(o.status, o))}</span>${o.status === 'request_rejected' && o.reason ? `<span class="oc-sub">${esc(o.reason)}</span>` : ''}</td>
+      <td><span class="oc-pill ${statusClass(o.status, o)}">${esc(statusLabel(o.status, o))}</span>${o.status === 'request_rejected' && o.reason ? `<span class="oc-sub">${esc(o.reason)}</span>` : ''}</td>
     </tr>`;
   }).join('');
 }
@@ -330,6 +359,7 @@ function ocvExport(list, base) {
 }
 
 function openOrderCardModal(key) {
+  if (key === 'sales') return openSalesModal();
   const modal = ocvEnsure();
   const [title, base] = ocvBase(key);
   ocv.key = key; ocv.title = title; ocv.base = base; ocv.f = {};
@@ -371,6 +401,10 @@ function openOrderCardModal(key) {
 function ensureRequestCards() {
   const wrap = document.querySelector('.cards');
   if (!wrap) return;
+  if (!document.getElementById('cardDispatched')) {
+    wrap.insertAdjacentHTML('beforeend', `
+      <div class="card"><div><span>Dispatched</span><h2 id="cardDispatched">0</h2><p>On the way to customer</p></div><i class="fa-solid fa-truck-fast"></i></div>`);
+  }
   if (!document.getElementById('cardPendingRequests')) {
     wrap.insertAdjacentHTML('beforeend', `
       <div class="card"><div><span>Pending Requests</span><h2 id="cardPendingRequests">0</h2><p>Awaiting admin/accounts approval</p></div><i class="fa-solid fa-hourglass-half"></i></div>
@@ -385,7 +419,7 @@ function ensureRequestCards() {
 function wireOrderCardClicks() {
   ocvEnsure();
   const map = {
-    cardTotalOrders: 'total', cardTodayAmount: 'todayAmount', cardTodayOrders: 'today', cardDelivered: 'delivered',
+    cardTotalOrders: 'total', cardSalesAmount: 'sales', cardDispatched: 'dispatched', cardTodayOrders: 'today', cardDelivered: 'delivered',
     cardPendingOrders: 'pending', cardPendingRequests: 'pendingReq', cardRejectedRequests: 'rejectedReq'
   };
   Object.entries(map).forEach(([id, key]) => {
@@ -423,8 +457,8 @@ function wireFilter() {
       if (statusVal === 'delivered') return o.status === 'delivered';
       if (statusVal === 'under_approval') return o.status === 'under_approval';
       if (statusVal === 'request_rejected') return o.status === 'request_rejected';
-      if (statusVal === 'dispatched') return o.status === 'processing' && !!o.dispatch;
-      if (statusVal === 'pending') return !o._isRequest && o.status !== 'delivered' && o.status !== 'cancelled';
+      if (statusVal === 'dispatched') return !o._isRequest && isDispatched(o);
+      if (statusVal === 'pending') return !o._isRequest && o.status !== 'delivered' && o.status !== 'cancelled' && !isDispatched(o);
       return true;
     });
     doPage = 1;
@@ -1010,4 +1044,108 @@ async function submitOrderRequest(modeSelect, extraBox) {
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
   }
+}
+
+const sl = { range: 'week', day: '' };
+const slFmt = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function slBuckets() {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+  const b = [];
+  if (sl.range === 'today' || sl.range === 'day') {
+    const base = sl.range === 'day' && sl.day ? new Date(sl.day + 'T00:00:00') : new Date(y, m, d);
+    for (let h = 0; h < 24; h++) b.push({ label: `${String(h).padStart(2, '0')}:00`, from: new Date(base.getFullYear(), base.getMonth(), base.getDate(), h), to: new Date(base.getFullYear(), base.getMonth(), base.getDate(), h + 1) });
+  } else if (sl.range === 'week') {
+    for (let i = 6; i >= 0; i--) {
+      const f = new Date(y, m, d - i);
+      b.push({ label: `${f.getDate()} ${MONTHS[f.getMonth()]}`, from: f, to: new Date(y, m, d - i + 1) });
+    }
+  } else if (sl.range === 'month') {
+    const n = new Date(y, m + 1, 0).getDate();
+    for (let i = 1; i <= n; i++) b.push({ label: `${i} ${MONTHS[m]}`, from: new Date(y, m, i), to: new Date(y, m, i + 1) });
+  } else {
+    for (let i = 0; i < 12; i++) b.push({ label: `${MONTHS[i]} ${y}`, from: new Date(y, i, 1), to: new Date(y, i + 1, 1) });
+  }
+  b.forEach(x => { x.amount = 0; x.count = 0; });
+  doState.orders.filter(o => !o._isRequest && o.status !== 'cancelled' && o.order_date).forEach(o => {
+    const t = new Date(o.order_date);
+    const x = b.find(k => t >= k.from && t < k.to);
+    if (x) { x.amount += Number(o.total_mrp) || 0; x.count++; }
+  });
+  return b;
+}
+
+function slChartSvg(b) {
+  const W = 620, H = 280, L = 62, R = 16, T = 16, B = 44;
+  const max = Math.max(...b.map(x => x.amount), 1);
+  const step = Math.pow(10, Math.floor(Math.log10(max)));
+  const top = Math.ceil(max / step) * step;
+  const iw = W - L - R, ih = H - T - B;
+  const px = i => L + (b.length === 1 ? iw / 2 : (i * iw) / (b.length - 1));
+  const py = v => T + ih - (v / top) * ih;
+  let g = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = (top / 4) * i, y = py(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#e2e8f0"/><text x="${L - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="#64748b">${v >= 100000 ? (v / 100000).toFixed(1) + 'L' : v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k' : Math.round(v)}</text>`;
+  }
+  const every = Math.ceil(b.length / 8);
+  b.forEach((x, i) => {
+    if (i % every === 0 || i === b.length - 1) g += `<text x="${px(i)}" y="${H - 22}" text-anchor="middle" font-size="10" fill="#64748b">${x.label}</text>`;
+  });
+  const pts = b.map((x, i) => `${px(i)},${py(x.amount)}`).join(' ');
+  const area = `${px(0)},${py(0)} ${pts} ${px(b.length - 1)},${py(0)}`;
+  const dots = b.map((x, i) => `<circle cx="${px(i)}" cy="${py(x.amount)}" r="${b.length > 14 ? 3 : 4.5}" fill="#1665ff" stroke="#fff" stroke-width="1.5"><title>${x.label}: ${slFmt(x.amount)} (${x.count} order${x.count === 1 ? '' : 's'})</title></circle>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:#fff"><polygon points="${area}" fill="#1665ff" fill-opacity=".08"/>${g}<polyline points="${pts}" fill="none" stroke="#1665ff" stroke-width="2.5" stroke-linejoin="round"/>${dots}</svg>`;
+}
+
+function slPaint() {
+  const b = slBuckets();
+  const total = b.reduce((s, x) => s + x.amount, 0);
+  const cnt = b.reduce((s, x) => s + x.count, 0);
+  const best = b.reduce((a, x) => (x.amount > a.amount ? x : a), b[0]);
+  document.getElementById('slChart').innerHTML = slChartSvg(b);
+  document.getElementById('slKpi').innerHTML = `
+    <div><span>Total Sales</span><b>${slFmt(total)}</b></div>
+    <div><span>Orders</span><b>${cnt}</b></div>
+    <div><span>Avg / Order</span><b>${slFmt(cnt ? total / cnt : 0)}</b></div>
+    <div><span>Best ${sl.range === 'year' ? 'Month' : (sl.range === 'today' || sl.range === 'day') ? 'Hour' : 'Day'}</span><b>${best && best.amount ? esc(best.label) : '-'}</b></div>`;
+  document.getElementById('slRows').innerHTML = b.map(x => `<tr><td>${x.label}</td><td>${x.count}</td><td>${slFmt(x.amount)}</td></tr>`).join('');
+  document.querySelectorAll('.sl-tab').forEach(t => t.classList.toggle('on', t.dataset.r === sl.range));
+}
+
+function openSalesModal() {
+  const modal = ocvEnsure();
+  sl.range = 'week'; sl.day = '';
+  const content = modal.querySelector('.modal-content');
+  content.innerHTML = `
+    <div class="oc-head"><h3>Sales Amount</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button></div>
+    <div class="sl-bar">
+      <button class="sl-tab" data-r="today">Today</button>
+      <button class="sl-tab" data-r="week">Week</button>
+      <button class="sl-tab" data-r="month">Month</button>
+      <button class="sl-tab" data-r="year">Year</button>
+      <label style="font-size:12px;color:#64748b;margin-left:8px;">Pick day</label>
+      <input type="date" id="slDay">
+    </div>
+    <div class="sl-main">
+      <div class="sl-chart" id="slChart"></div>
+      <div class="sl-side">
+        <div class="sl-kpi" id="slKpi"></div>
+        <div class="sl-list"><table><thead><tr><th>Period</th><th>Orders</th><th>Amount</th></tr></thead><tbody id="slRows"></tbody></table></div>
+      </div>
+    </div>
+    <p style="font-size:11.5px;color:#94a3b8;margin-top:8px;">Cancelled orders and pending requests are excluded. Week = last 7 days.</p>`;
+  content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
+  content.querySelectorAll('.sl-tab').forEach(t => t.addEventListener('click', () => {
+    sl.range = t.dataset.r; sl.day = ''; content.querySelector('#slDay').value = ''; slPaint();
+  }));
+  content.querySelector('#slDay').addEventListener('change', e => {
+    if (!e.target.value) return;
+    sl.range = 'day'; sl.day = e.target.value; slPaint();
+  });
+  slPaint();
+  modal.style.display = 'flex';
 }
