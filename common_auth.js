@@ -1839,7 +1839,31 @@ window.serialSearchWidget = function (mount, onPick) {
     const s = window.getSelection();
     return !!(s && !s.isCollapsed && String(s).trim());
   };
-  const modalOpen = () => [...document.querySelectorAll('.modal, .logout-modal.active')].some(m => visible(m) || (m.offsetWidth > 0 && m.offsetHeight > 0));
+  // every open popup / wizard (not only .modal: export wizards etc. are plain overlays with an id ending in "Modal")
+  const overlays = () => [...document.querySelectorAll('.modal, [id$="Modal"], #reqPopup, .logout-modal.active')]
+    .filter(m => m.offsetWidth > 0 && m.offsetHeight > 0 && !m.closest('.sidebar') && getComputedStyle(m).position === 'fixed');
+  const topOverlay = () => {
+    let best = null, bz = -Infinity;
+    overlays().forEach(m => { const z = parseInt(getComputedStyle(m).zIndex, 10) || 0; if (z >= bz) { best = m; bz = z; } });
+    return best;
+  };
+  const modalOpen = () => overlays().length > 0;
+  const hasPrintIcon = b => !!b.querySelector('i[class*="fa-print"]') || /\bprint\b/i.test(sig(b));
+  // print button: inside the top popup first, else on the row/card under the cursor, else a page-level one
+  const findPrint = () => {
+    const top = topOverlay();
+    if (top) {
+      const btns = [...top.querySelectorAll('button, a')].filter(b => visible(b) && hasPrintIcon(b));
+      return btns.find(b => !b.classList.contains('ab-print')) || btns[0] || null;   // prefer the A4 print over the generic one
+    }
+    const item = currentItem();
+    if (item) {
+      const b = [...item.querySelectorAll('button, a')].find(x => visible(x) && hasPrintIcon(x));
+      if (b) return b;
+    }
+    return [...document.querySelectorAll('main button, .top-actions button, header button')]
+      .find(b => visible(b) && !b.closest('.sidebar, tbody, .modal') && hasPrintIcon(b)) || null;
+  };
   const findLink = key => [...document.querySelectorAll('.sidebar ul li a')].find(a => {
     const li = a.closest('li');
     return li && !li.hasAttribute('hidden') && KEYS[sidebarFile(a)] === key && visible(a);
@@ -1937,8 +1961,21 @@ window.serialSearchWidget = function (mount, onPick) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startMarks); else startMarks();
   document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || e.repeat) return;
-    if (typing() || modalOpen()) return;
+    if (typing()) return;
     const k = e.key.toLowerCase();
+    // m = minimize the open wizard / popup one size (full screen -> large -> normal)
+    if (k === 'm') {
+      const top = topOverlay();
+      const sm = top && top.querySelector('.ab-smaller');
+      if (sm && !sm.disabled) { e.preventDefault(); sm.click(); }
+      return;
+    }
+    // p = print (popup -> row/card under cursor -> page button); if nothing to print it falls through to the Dispatch nav key
+    if (k === 'p') {
+      const pb = findPrint();
+      if (pb) { e.preventDefault(); pb.click(); return; }
+    }
+    if (modalOpen()) return;
     if (e.key === 'Enter') {
       // let a focused button / link do its own Enter action
       const a = document.activeElement;
