@@ -1844,10 +1844,72 @@ window.serialSearchWidget = function (mount, onPick) {
     const li = a.closest('li');
     return li && !li.hasAttribute('hidden') && KEYS[sidebarFile(a)] === key && visible(a);
   });
+  // a button "looks like" export if its text / id / class / onclick / title / icon says so
+  const sig = b => `${b.textContent} ${b.id} ${b.className} ${b.getAttribute('onclick') || ''} ${b.title || ''} ${b.getAttribute('data-shortcut') || ''}`;
+  const isExport = b => /export|download|excel|csv|xlsx/i.test(sig(b)) || !!b.querySelector('i[class*="file-export"], i[class*="download"], i[class*="file-excel"]');
+  // first visible match, trying the selectors in priority order (not DOM order)
+  const firstVisible = sels => {
+    for (const s of sels) {
+      const el = [...document.querySelectorAll(s)].find(b => visible(b) && !b.closest('.modal, .sidebar'));
+      if (el) return el;
+    }
+    return null;
+  };
+  const findExport = () => firstVisible([
+    '[data-shortcut="export"]', '.top-actions .export', '.export-users-btn', '.export-customers-btn', '#exportBtn', '.export'
+  ]) || [...document.querySelectorAll('main button, .top-actions button')]
+    .find(b => visible(b) && !b.closest('.modal, .sidebar') && isExport(b));
   const findCreate = () => {
-    const direct = [...document.querySelectorAll('[data-shortcut="create"], #createOrderBtn, .add-product, .top-actions button')].find(visible);
+    // #viewAction (service / technician pages) must come before .add-product: "Allocate Spare Part" is also .add-product there
+    const direct = firstVisible([
+      '[data-shortcut="create"]', '#viewAction', '#createOrderBtn', '#addAssemblyBtn', '#addShipmentBtn',
+      '.top-actions .add-product', '.add-product'
+    ]);
     if (direct) return direct;
-    return [...document.querySelectorAll('main button')].find(b => visible(b) && !b.closest('.modal, .sidebar') && /\b(add|create|new)\b/i.test(b.textContent));
+    // never pick an export button here: 'c' = create, 'x' = export
+    const ok = b => visible(b) && !b.closest('.modal, .sidebar') && !isExport(b);
+    const named = [...document.querySelectorAll('main button, .top-actions button')].find(b => ok(b) && /\b(add|create|new)\b/i.test(sig(b)));
+    if (named) return named;
+    return [...document.querySelectorAll('.top-actions button')].find(ok);
+  };
+
+  // --- Enter = open "view" of the row / card under the mouse cursor (or the keyboard-focused one) ---
+  let hoverEl = null;
+  document.addEventListener('mouseover', e => { hoverEl = e.target; }, true);
+  document.addEventListener('mouseleave', () => { hoverEl = null; }, true);
+  const CARD = '.cards .card, .card-clickable, .cat-card';
+  const ITEM = `tbody tr, ${CARD}, .order-item, .user-card, .company-card, li[data-id]`;
+  // exact "view / details" buttons used across the pages (eye icon, history, user link, info icon)
+  const VIEW_SEL = [
+    '[data-shortcut="view"]', '.view-btn', '.view-alloc-btn', '.view-dispatch-btn', '.req-view-btn',
+    '[data-action="view"]', '[data-act="view"]', '.cust-history', '.user-link'
+  ].join(',');
+  const isView = b => /\bview\b|details?|\beye\b/i.test(sig(b)) || !!b.querySelector('i[class*="fa-eye"], i[class*="fa-circle-info"]');
+  const isDanger = b => /delete|remove|trash|edit|pencil|cancel|reject|approve|export|print|return/i.test(sig(b)) || !!b.querySelector('i[class*="trash"], i[class*="fa-pen"]');
+  const findViewIn = item => {
+    const exact = [...item.querySelectorAll(VIEW_SEL)].find(b => b.offsetWidth > 0);
+    if (exact) return exact;
+    const btns = [...item.querySelectorAll('button, a')].filter(b => b.offsetWidth > 0);
+    return btns.find(b => isView(b) && !isDanger(b)) || null;
+  };
+  const currentItem = () => {
+    const a = document.activeElement;
+    const fromFocus = a && a !== document.body && a.closest ? a.closest(ITEM) : null;
+    const src = (hoverEl && hoverEl.isConnected) ? hoverEl : null;
+    const fromHover = src && src.closest ? src.closest(ITEM) : null;
+    const item = fromHover || fromFocus;
+    if (!item || item.closest('.sidebar, .modal, thead')) return null;
+    return item;
+  };
+  const openView = () => {
+    const item = currentItem();
+    if (!item) return false;
+    // dashboard cards: Enter opens the card itself
+    if (item.matches(CARD)) { item.click(); return true; }
+    const v = findViewIn(item);
+    if (v) { v.click(); return true; }
+    if (item.getAttribute('onclick') || item.style.cursor === 'pointer' || getComputedStyle(item).cursor === 'pointer') { item.click(); return true; }
+    return false;
   };
   const markKeys = () => {
     if (!document.getElementById('skStyle')) {
@@ -1877,8 +1939,20 @@ window.serialSearchWidget = function (mount, onPick) {
     if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented || e.repeat) return;
     if (typing() || modalOpen()) return;
     const k = e.key.toLowerCase();
+    if (e.key === 'Enter') {
+      // let a focused button / link do its own Enter action
+      const a = document.activeElement;
+      if (a && /^(BUTTON|A)$/.test(a.tagName)) return;
+      if (openView()) e.preventDefault();
+      return;
+    }
     if (k === 'c') {
       const b = findCreate();
+      if (b) { e.preventDefault(); b.click(); }
+      return;
+    }
+    if (k === 'x') {
+      const b = findExport();
       if (b) { e.preventDefault(); b.click(); }
       return;
     }
