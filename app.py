@@ -522,8 +522,7 @@ class AssemblyPartUsed(BaseModel):
     quantity: int = 0
     source: str = "inventory"
     belongs_to: str = ""          
-    shipment_id: str = ""         # set when picked via "Add from Shipment" (stock is still deducted from inventory)
-
+    shipment_id: str = ""         
 
 class PartHologramsRequest(BaseModel):
     part_name: str
@@ -588,7 +587,7 @@ def login_page(request: LoginRequest, http_request: Request):
         if user["password"] != request.password:
             raise HTTPException(status_code=401, detail="details did not match")
 
-        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username not in("arun","user","prashant","amit","sachin","tarun","manu","rahul","gaurav", "sandeep","harsh","manideep","radhey shyam","vijay","aslam"):
+        if APP_CLIENT_KEY and user["role"] in APP_ONLY_ROLES and request.username not in("nikita","arun","user","prashant","amit","sachin","tarun","manu","rahul","gaurav", "sandeep","harsh","manideep","radhey shyam","vijay","aslam"):
             ua = http_request.headers.get("user-agent", "")
             if f"key={APP_CLIENT_KEY}" not in ua:
                 raise HTTPException(status_code=403, detail="this role can log in only from the desktop app")
