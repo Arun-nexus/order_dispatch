@@ -197,7 +197,7 @@ function renderOrdersTable(orders) {
 }
 
 // ===== Order Dispatch Form (A4) : order data se form pre-fill karke print_a4.js ka form kholta hai =====
-function dispatchFormDefaults(o) {
+function dispatchFormDefaults(o, withSerials) {
   const items = o.items || [];
   const c = o.customer || {};
   const d = o.dispatch || {};
@@ -228,7 +228,7 @@ function dispatchFormDefaults(o) {
     courier: mode.includes('courier') ? 'Yes' + docket : '',
     others: mode && !/hand|porter|courier/.test(mode) ? (d.mode_of_delivery + docket) : '',
     recv: fmtDateTime(o.created_at || o.order_date),
-    serials
+    serials: withSerials ? serials : ''
   };
 }
 
