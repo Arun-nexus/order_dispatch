@@ -428,9 +428,11 @@ function openEditOrderModal(o) {
         <label style="font-size:11px;color:var(--text-muted);width:100px;">Price
           <input type="number" min="0" class="editPrice" value="${it.price ?? 0}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
         </label>
-        <label style="font-size:11px;color:var(--text-muted);width:80px;">Tax %
+        ${o.gst_type === 'without_gst'
+      ? `<div style="font-size:11px;color:var(--text-muted);width:80px;">Tax<div style="padding:8px 0;font-weight:600;">Without GST</div><input type="hidden" class="editTax" value="0"></div>`
+      : `<label style="font-size:11px;color:var(--text-muted);width:80px;">Tax %
           <input type="number" min="0" class="editTax" value="${it.tax_rate ?? 0}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
-        </label>
+        </label>`}
       </div>
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-top:8px;">Serial Numbers (comma separated)
         <input class="editSerials" placeholder="e.g. SN001, SN002" value="${(it.serial_numbers || []).join(', ')}" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;">
@@ -1179,6 +1181,7 @@ const wiz = {
 };
 
 const PAYMENT_MODES = [
+  { value: 'Paid', label: 'Paid' },
   { value: 'Credit', label: 'Credit' },
   { value: 'Partial', label: 'Partial (part now, rest later)' },
   { value: 'NetBanking', label: 'Net Banking' },

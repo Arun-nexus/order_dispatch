@@ -1010,6 +1010,7 @@ function renderAllocationsTable(allocations) {
       <td><span class="stock ${meta.cls}">${meta.label}</span></td>
       <td>
         <button class="icon-btn view-alloc-btn"><i class="fa-solid fa-eye"></i></button>
+        ${!isSpare ? '<button class="icon-btn dispatch-form-btn" title="Dispatch Form (A4)"><i class="fa-solid fa-print"></i></button>' : ''}
         ${window.__allocCanEdit && !isSpare && !a.dispatch && !meta.complete
         ? '<button class="icon-btn edit-alloc-btn" title="Edit (serial / details)"><i class="fa-solid fa-pen"></i></button>' : ''}
         ${window.__allocCanEdit && !isSpare && !meta.complete
@@ -1027,6 +1028,7 @@ function renderAllocationsTable(allocations) {
   });
 
   tbody.querySelectorAll('.view-alloc-btn').forEach(btn => btn.addEventListener('click', e => openViewAllocationModal(rowAllocation(e))));
+  tbody.querySelectorAll('.dispatch-form-btn').forEach(btn => btn.addEventListener('click', e => openAllocDispatchForm(rowAllocation(e))));
   tbody.querySelectorAll('.edit-alloc-btn').forEach(btn => btn.addEventListener('click', e => openEditAllocationModal(rowAllocation(e))));
   tbody.querySelectorAll('.convert-alloc-btn').forEach(btn => btn.addEventListener('click', e => openConvertAllocationModal(rowAllocation(e))));
   tbody.querySelectorAll('.dispatch-alloc-btn').forEach(btn => btn.addEventListener('click', e => sendToDispatch(rowAllocation(e))));
@@ -1052,6 +1054,46 @@ async function sendToDispatch(a) {
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
   }
+}
+
+// ===== Dispatch Form (A4) : allocation data se form pre-fill karke print_a4.js ka form kholta hai (orders page jaisa) =====
+function allocDispatchFormDefaults(a, withSerials) {
+  const items = a.items || [];
+  const d = a.dispatch || {};
+  const fmtDate = v => v ? new Date(v).toLocaleDateString('en-GB') : '';
+  const fmtDateTime = v => v ? new Date(v).toLocaleString('en-GB') : '';
+
+  const details = items
+    .map(it => `${it.product_name ?? it.product_id ?? ''}${it.model_no ? ' (' + it.model_no + ')' : ''} x ${it.quantity ?? 0}`)
+    .join('\n');
+
+  const serials = items
+    .filter(it => (it.serial_numbers || []).length)
+    .map(it => `${it.product_name ?? it.product_id ?? ''}: ${it.serial_numbers.join(', ')}`)
+    .join('\n');
+
+  const mode = String(d.mode_of_delivery || '').toLowerCase();
+  const docket = d.docket_no ? ' ' + d.docket_no : '';
+
+  return {
+    inv: d.invoice_no || '',
+    ref: a.sales_person?.name || a.created_by || a.allocated_by || '',
+    date: fmtDate(d.invoice_date || a.allotment_date),
+    party: a.company_name || '',
+    address: a.address || '',
+    details,
+    hand: mode.includes('hand') ? 'Yes' : '',
+    porter: mode.includes('porter') ? 'Yes' : '',
+    courier: mode.includes('courier') ? 'Yes' + docket : '',
+    others: mode && !/hand|porter|courier/.test(mode) ? (d.mode_of_delivery + docket) : '',
+    recv: fmtDateTime(a.created_at || a.allotment_date),
+    serials: withSerials ? serials : ''
+  };
+}
+
+function openAllocDispatchForm(a) {
+  if (!a) return;
+  a4Ready(() => A4Print.form(a.allocation_id, allocDispatchFormDefaults(a)));
 }
 
 function rowAllocation(e) {

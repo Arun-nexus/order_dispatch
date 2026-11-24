@@ -7,12 +7,9 @@ let doPage = 1;
 const DO_PAGE_SIZE = 50;
 
 const PAYMENT_MODES = [
+  { value: 'Paid', label: 'Paid' },
   { value: 'Credit', label: 'Credit' },
-  { value: 'NetBanking', label: 'Net Banking' },
-  { value: 'UPI', label: 'UPI' },
-  { value: 'Cheque', label: 'Cheque' },
-  { value: 'DemandDraft', label: 'Demand Draft' },
-  { value: 'Cash', label: 'Cash' },
+  { value: 'Partial', label: 'Partial (part now, rest later)' },
 ];
 
 function renderTablePagination(container, page, totalPages, onChange) {
@@ -71,6 +68,7 @@ async function loadOrders() {
               order_id: r.request_id, customer: r.details?.customer || {}, items,
               payment_mode: isOrderReq ? (r.details?.payment_mode || '-') : '-',
               payment_details: isOrderReq ? (r.details?.payment_details || {}) : {},
+              gst_type: isOrderReq ? (r.details?.gst_type || 'with_gst') : '',
               order_remarks: isOrderReq ? (r.details?.remarks || '') : '',
               ship_to_different: isOrderReq ? !!r.details?.ship_to_different : false,
               ship_to_address: isOrderReq ? (r.details?.ship_to_address || null) : null,
@@ -134,13 +132,13 @@ function isDispatched(o, status) {
 
 function statusClass(status, o) {
   if (isDispatched(o, status)) return 'dispatched';
-  const map = { placed: 'pending', processing: 'pending', dispatched: 'dispatched', delivered: 'delivered', cancelled: 'cancel', returned: 'cancel', under_approval: 'pending', request_rejected: 'cancel' };
+  const map = { placed: 'pending', processing: 'pending', dispatched: 'dispatched', delivered: 'delivered', cancelled: 'cancel', under_approval: 'pending', request_rejected: 'cancel' };
   return map[status] || 'pending';
 }
 
 function statusLabel(status, o) {
   if (isDispatched(o, status)) return 'Dispatched';
-  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled', returned: 'Returned', under_approval: 'Under Approval', request_rejected: 'Rejected' };
+  const map = { placed: 'Pending', processing: 'Processing', delivered: 'Delivered', cancelled: 'Cancelled', under_approval: 'Under Approval', request_rejected: 'Rejected' };
   return map[status] || status || '';
 }
 
@@ -163,23 +161,20 @@ function renderTable(orders) {
 
   pageRows.forEach(o => {
     const items = o.items || [];
-    let productLabel = '-';
-    if (items.length) {
-      const first = items[0];
-      const model = first.model_no || ocvInv(first)?.model_no || '';
-      productLabel = `${esc(first.product_name ?? '')}${model ? ` <small style="color:#64748b;">(${esc(model)})</small>` : ''}${items.length > 1 ? ` +${items.length - 1} more` : ''}`;
-    }
+    const productLabel = items.length
+      ? `${items[0].product_name ?? ''}${items.length > 1 ? ` +${items.length - 1} more` : ''}`
+      : '-';
     const companyName = o.customer?.company_name ?? '';
     const tr = document.createElement('tr');
     tr.dataset.orderId = o.order_id;
     tr.innerHTML = `
       <td>${o.order_id ? o.order_id.slice(0, 8) : '-'}${o._isRequest ? `<br><small style="color:#94a3b8;">${o._reqKind === 'convert' ? 'Request (demo → order)' : 'Request'}</small>` : ''}</td>
-      <td>${esc(companyName)}</td>
+      <td>${companyName}</td>
       <td>${productLabel}</td>
       <td>${o.payment_mode ?? ''}</td>
       <td>₹${o.total_mrp ?? 0}</td>
       <td>${o.order_date ? new Date(o.order_date).toLocaleDateString('en-GB') : '-'}</td>
-      <td><span class="${statusClass(o.status, o)}">${statusLabel(o.status, o)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${esc(o.remark)}</small>` : ''}</td>
+      <td><span class="${statusClass(o.status, o)}">${statusLabel(o.status, o)}</span>${o.status === 'placed' && o.remark ? `<br><small style="color:#94a3b8;">${o.remark}</small>` : ''}</td>
       <td><button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button></td>`;
     tbody.appendChild(tr);
   });
@@ -442,7 +437,6 @@ function wireHeaderButtons() {
       const filtered = doState.orders.filter(o =>
         (o.order_id || '').toLowerCase().includes(term) ||
         (o.items || []).some(it => (it.product_name || '').toLowerCase().includes(term)) ||
-        (o.items || []).some(it => (it.model_no || '').toLowerCase().includes(term)) ||
         (o.items || []).some(it => (it.serial_numbers || []).some(sn => (sn || '').toLowerCase().includes(term))) ||
         (o.customer?.company_name || '').toLowerCase().includes(term)
       );
@@ -457,6 +451,7 @@ function wireFilter() {
   if (!filterBtn) return;
   filterBtn.addEventListener('click', () => {
     const statusVal = document.getElementById('statusFilter')?.value || '';
+    const wantedStatus = statusVal === 'delivered' ? 'delivered' : (statusVal === 'pending' ? null : null);
     const filtered = doState.orders.filter(o => {
       if (statusVal === 'delivered') return o.status === 'delivered';
       if (statusVal === 'under_approval') return o.status === 'under_approval';
@@ -474,10 +469,7 @@ function paymentDetailsLabel(o) {
   const mode = o.payment_mode;
   const d = o.payment_details || {};
   if (mode === 'Credit') return `Credit — ${d.credit_days ?? '-'} days`;
-  if (mode === 'Partial') {
-    const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-    return `Partial — ${inr(d.paid_amount)} paid, ${inr(d.balance_amount)} due in ${d.credit_days ?? '-'} days${d.due_date ? ' (by ' + d.due_date + ')' : ''}`;
-  }
+  if (mode === 'Partial') return `Partial — ₹${d.paid_amount ?? '-'} paid now, rest in ${d.credit_days ?? '-'} days`;
   if (mode === 'Cheque') return `Cheque #${d.cheque_number ?? '-'} (${d.cheque_date ?? '-'})${d.bank_name ? ', ' + d.bank_name : ''}`;
   if (mode === 'DemandDraft') return `DD #${d.dd_number ?? '-'} (${d.dd_date ?? '-'})${d.bank_name ? ', ' + d.bank_name : ''}`;
   if (mode === 'UPI') return `UPI — ${d.upi_id ?? '-'}`;
@@ -486,189 +478,54 @@ function paymentDetailsLabel(o) {
   return mode || '-';
 }
 
-/* ================= Rich "Order Details" view (same look as admin Orders page) ================= */
-const ITEM_TYPE_LABELS = { spare_parts: 'Spare Part', service_parts: 'Service Part', accessories: 'Accessory' };
-const orderMoney = n => '₹' + (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const orderDate = d => d ? new Date(d).toLocaleDateString('en-GB') : '-';
-
-function orderCreatorLabel(o) {
-  const c = o.creator;
-  if (!c) return '-';
-  if (c.type === 'request') return `${c.raised_by ?? '-'} → ${c.approved_by ?? '-'}`;
-  return c.created_by ?? c.raised_by ?? '-';
-}
-
-function itemMeta(it) {
-  const list = doState.products || [];
-  const id = (it.product_id || '').trim();
-  const model = it.model_no || '';
-  const inv = list.find(p => id && p.product_id === id && (p.model_no || '') === model)
-    || (id && list.find(p => p.product_id === id))
-    || list.find(p => p.product_name === it.product_name && (p.model_no || '') === model)
-    || list.find(p => p.product_name === it.product_name);
-  const type = it.product_type || inv?.product_type || 'product';
-  const parent = it.parent_product_name || it.belongs_to || inv?.parent_product_name || '';
-  return { type, typeLabel: ITEM_TYPE_LABELS[type] || '', parent, inv };
-}
-
-function productCellHtml(it) {
-  const m = itemMeta(it);
-  const pid = it.product_id || m.inv?.product_id || '';
-  const model = it.model_no || m.inv?.model_no || '';
-  const sub = [pid ? `ID: ${esc(pid)}` : '', model ? `Model: ${esc(model)}` : ''].filter(Boolean).join(' · ');
-  const part = m.typeLabel
-    ? `<div style="margin-top:3px;"><span class="ov-chip">${m.typeLabel}</span>${m.parent ? ` <span class="ov-sub">belongs to: <strong style="color:var(--text-secondary);">${esc(m.parent)}</strong></span>` : ''}</div>`
-    : '';
-  return `<strong>${esc(it.product_name ?? '')}</strong>${sub ? `<div class="ov-sub">${sub}</div>` : ''}${part}`;
-}
-
-function ensureOrderViewStyles() {
-  if (document.getElementById('ov-style')) return;
-  const st = document.createElement('style');
-  st.id = 'ov-style';
-  st.textContent = `
-    #viewOrderModal .ov-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e2e8f0}
-    #viewOrderModal .ov-head h3{margin:0 0 4px}
-    #viewOrderModal .ov-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:18px}
-    #viewOrderModal .ov-cell{background:#f8fafc;border-radius:10px;padding:10px 12px}
-    #viewOrderModal .ov-cell small{display:block;color:#64748b;font-size:11px;margin-bottom:2px}
-    #viewOrderModal .ov-cell p{margin:0;font-size:14px;color:#0f172a;word-break:break-word}
-    #viewOrderModal .ov-title{font-size:13px;font-weight:600;color:#334155;margin:4px 0 8px}
-    #viewOrderModal .ov-scroll{overflow-x:auto;margin-bottom:18px;border:1px solid #e2e8f0;border-radius:10px}
-    #viewOrderModal .ov-table{width:100%;border-collapse:collapse;font-size:13px;color:#1e293b}
-    #viewOrderModal .ov-table th{background:#f1f5f9 !important;color:#334155 !important;text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap}
-    #viewOrderModal .ov-table td{padding:9px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top}
-    #viewOrderModal .ov-table tr:last-child td{border-bottom:none}
-    #viewOrderModal .ov-sub{color:#94a3b8;font-size:12px}
-    #viewOrderModal .ov-chip{display:inline-block;background:#eaf1ff;color:#1665ff;border-radius:999px;padding:1px 9px;font-size:11px;font-weight:600}
-    #viewOrderModal .ov-serial{display:inline-block;background:#f1f5f9;border-radius:6px;padding:1px 7px;margin:2px 4px 0 0;font-size:11px;color:#334155}
-    #viewOrderModal .ov-bottom{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
-    #viewOrderModal .ov-notes{flex:1;min-width:260px;display:grid;gap:10px}
-    #viewOrderModal .ov-totals{width:300px;max-width:100%;background:#f8fafc;border-radius:12px;padding:12px 16px;margin-left:auto}
-    #viewOrderModal .ov-totals div{display:flex;justify-content:space-between;padding:5px 0;font-size:14px;color:#334155}
-    #viewOrderModal .ov-totals .ov-grand{border-top:1px solid #e2e8f0;margin-top:4px;padding-top:9px;font-weight:700;font-size:16px;color:#0f172a}
-    #viewOrderModal .ov-attach a{display:block;color:#1665ff;font-size:14px;text-decoration:none}
-    #viewOrderModal .ov-attach a:hover{text-decoration:underline}`;
-  document.head.appendChild(st);
-}
-
 function openViewOrderModal(o) {
   if (!o) return;
   const modal = document.getElementById('viewOrderModal');
-  if (!modal) return;
-  ensureOrderViewStyles();
   const content = modal.querySelector('.modal-content');
-  content.style.cssText = 'background:#fff;border-radius:16px;padding:26px;width:min(1000px,95vw);max-height:90vh;overflow-y:auto;';
   const items = o.items || [];
   const customer = o.customer || {};
-  const d = o.dispatch || null;
-  const e = esc;
-  const cell = (label, val) => `<div class="ov-cell"><small>${label}</small><p>${val || '-'}</p></div>`;
 
   const itemsRows = items.length
-    ? items.map(it => {
-      const lineTotal = it.line_total ?? ((it.price || 0) * (it.quantity || 0));
-      const serials = (it.serial_numbers || []).map(s => `<span class="ov-serial">${e(s)}</span>`).join('');
-      return `<tr>
-          <td>${productCellHtml(it)}</td>
-          <td>${serials || '<span class="ov-sub">—</span>'}</td>
-          <td>${it.quantity ?? 0}</td>
-          <td>${orderMoney(it.price)}</td>
-          <td>${it.tax_rate ?? 0}%</td>
-          <td><strong>${orderMoney(lineTotal)}</strong></td>
-        </tr>`;
-    }).join('')
-    : `<tr><td colspan="6" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
-
-  const returnedHtml = (o.returned_items || []).length ? `
-    <div class="ov-title">Returned Product(s)</div>
-    <div class="ov-scroll"><table class="ov-table">
-      <thead><tr><th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Condition</th></tr></thead>
-      <tbody>${o.returned_items.map(r => `<tr>
-        <td>${productCellHtml(r)}</td>
-        <td>${(r.serial_numbers && r.serial_numbers.length) ? r.serial_numbers.map(s => `<span class="ov-serial">${e(s)}</span>`).join('') : '—'}</td>
-        <td>${r.quantity ?? 0}</td>
-        <td><span class="${r.condition === 'faulty' ? 'cancel' : 'delivered'}">${r.condition === 'faulty' ? 'Faulty' : 'OK'}</span></td>
-      </tr>`).join('')}</tbody>
-    </table></div>` : '';
-
-  const sparePartsHtml = (o.spare_parts || []).length ? `
-    <div class="ov-title">Spare Parts</div>
-    <div class="ov-scroll"><table class="ov-table">
-      <thead><tr><th>Name</th><th>Qty</th><th>Price</th></tr></thead>
-      <tbody>${o.spare_parts.map(sp => `<tr><td>${e(sp.name ?? '')}${sp.belongs_to ? `<div class="ov-sub">belongs to: ${e(sp.belongs_to)}</div>` : ''}</td><td>${sp.quantity ?? 0}</td><td>${orderMoney(sp.price)}</td></tr>`).join('')}</tbody>
-    </table></div>` : '';
-
-  const attachHtml = (o.attachments || []).length
-    ? `<div class="ov-cell ov-attach"><small>Attachments</small>${o.attachments.map((a, i) =>
-      `<a href="#" class="attach-link" data-i="${i}"><i class="fa-solid fa-paperclip"></i> ${e(a.name)}</a>`).join('')}</div>` : '';
-
-  const shipTo = o.ship_to_different && o.ship_to_address
-    ? cell('Ship To', e([o.ship_to_address.company_name, o.ship_to_address.address].filter(Boolean).join(', '))) : '';
-
-  const notes = [
-    o.status === 'request_rejected' ? cell('Rejection Reason', e(o.reason || '')) : '',
-    o.status === 'cancelled' ? cell('Cancellation Reason', e(o.cancel_reason || '')) : '',
-    o.status === 'returned' ? cell('Return Reason', e(o.return_reason || '')) : '',
-    o.order_remarks ? cell('Order Remarks', e(o.order_remarks)) : '',
-    o.status === 'placed' && o.remark ? cell('Remark', e(o.remark)) : '',
-    (o.edit_history || []).length ? cell('Last Edit Remark', e(o.edit_history[o.edit_history.length - 1].remark || '')) : '',
-    shipTo,
-    o.converted_from_demo ? cell('Source', 'Converted from demo unit') : '',
-    attachHtml
-  ].join('');
-
-  const warrantyCell = o._isRequest ? '' :
-    cell('Warranty', (o.warranty_years ?? 1) > 1 ? `${o.warranty_years} Years (Extended, +${orderMoney(o.warranty_charge)})` : 'Standard (1 Year)');
+    ? items.map(it => `<tr>
+        <td>${esc(it.product_name)}</td>
+        <td>${esc((it.serial_numbers || []).join(', ')) || '-'}</td>
+        <td>${it.quantity ?? 0}</td>
+        <td>₹${it.price ?? 0}</td>
+        <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
 
   content.innerHTML = `
-    <div class="ov-head">
-      <div>
-        <h3>${o._isRequest ? 'Request Details' : 'Order Details'}</h3>
-        <span class="ov-sub">${o._isRequest ? 'Request ID' : 'Order ID'}: ${e(o.order_id ?? '')}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;">
-        <span class="${statusClass(o.status, o)}">${statusLabel(o.status, o)}</span>
-        <button class="close" style="border:none;background:none;font-size:22px;cursor:pointer;">&times;</button>
-      </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3>Order Details</h3>
+      <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-
-    <div class="ov-grid">
-      ${cell('Company', e(customer.company_name ?? ''))}
-      ${cell('Address', e(customer.company_address ?? ''))}
-      ${cell('GST Number', e(customer.gst_number ?? ''))}
-      ${cell('Contact', e([customer.contractor_person, customer.contractor_number].filter(Boolean).join(' · ')))}
-      ${cell('Order Date', orderDate(o.order_date))}
-      ${cell('Payment', e(paymentDetailsLabel(o)))}
-      ${cell('Reference', e(o.reference || o.creator?.raised_by || ''))}
-      ${cell('Created By', e(orderCreatorLabel(o)))}
-      ${warrantyCell}
-      ${d ? cell('Invoice', e([d.invoice_no, d.invoice_date].filter(Boolean).join(' · '))) : ''}
-      ${d ? cell('Docket / Delivery', e([d.docket_no, d.mode_of_delivery].filter(Boolean).join(' · '))) : ''}
-    </div>
-
-    <div class="ov-title">Products</div>
-    <div class="ov-scroll"><table class="ov-table">
-      <thead><tr><th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Price</th><th>Tax</th><th>Line Total</th></tr></thead>
+    <div class="detail"><small>${o._isRequest ? 'Request ID' : 'Order ID'}</small><p>${o.order_id ?? ''}</p></div>
+    <div class="detail"><small>Company</small><p>${esc(customer.company_name ?? '-')}</p></div>
+    <div class="detail"><small>Address</small><p>${esc(customer.company_address ?? '-')}</p></div>
+    ${customer.gst_number ? `<div class="detail"><small>GST No.</small><p>${esc(customer.gst_number)}</p></div>` : ''}
+    <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
+      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Serial No.</th><th>Qty</th><th>Price</th><th>Line Total</th></tr></thead>
       <tbody>${itemsRows}</tbody>
-    </table></div>
-
-    ${sparePartsHtml}
-    ${returnedHtml}
-
-    <div class="ov-bottom">
-      <div class="ov-notes">${notes}</div>
-      <div class="ov-totals">
-        <div><span>Subtotal</span><span>${orderMoney(o.subtotal)}</span></div>
-        <div><span>Tax</span><span>${orderMoney(o.tax_total)}</span></div>
-        <div><span>Discount</span><span>- ${orderMoney(o.discount)}</span></div>
-        <div class="ov-grand"><span>Total Amount</span><span>${orderMoney(o.total_mrp)}</span></div>
-      </div>
-    </div>`;
+    </table>
+    <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
+    <div class="detail"><small>Status</small><p>${statusLabel(o.status, o)}</p></div>
+    ${o.status === 'request_rejected' ? `<div class="detail"><small>Rejection Reason</small><p>${esc(o.reason || '-')}</p></div>` : ''}
+    ${o.dispatch ? `<div class="detail"><small>Docket No.</small><p>${esc(o.dispatch.docket_no || '-')}</p></div>
+    <div class="detail"><small>Invoice No. / Date</small><p>${esc(o.dispatch.invoice_no || '-')} / ${esc(o.dispatch.invoice_date || '-')}</p></div>
+    <div class="detail"><small>Mode of Delivery</small><p>${esc(o.dispatch.mode_of_delivery || '-')}</p></div>` : ''}
+    ${o.converted_from_demo ? '<div class="detail"><small>Source</small><p>Converted from demo unit</p></div>' : ''}
+    ${(o.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${o.attachments.map((a, i) =>
+    `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(a.name)}</a>`).join('')}</p></div>` : ''}
+    ${o.ship_to_different && o.ship_to_address ? `<div class="detail"><small>Ship To</small><p>${esc([o.ship_to_address.company_name, o.ship_to_address.address].filter(Boolean).join(', '))}</p></div>` : ''}
+    <div class="detail"><small>Order Remarks</small><p>${esc(o.order_remarks || '-')}</p></div>
+    <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
+    <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
+    <div class="detail"><small>Total Amount</small><p>₹${o.total_mrp ?? 0}</p></div>`;
 
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
-  content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async ev => {
-    ev.preventDefault();
+  content.querySelectorAll('.attach-link').forEach(link => link.addEventListener('click', async e => {
+    e.preventDefault();
     const a = o.attachments[Number(link.dataset.i)];
     try {
       const res = await apiFetch(`/order_attachment/${a.request_id}/${a.stored_name}`);
@@ -763,8 +620,8 @@ function renderExistingCustomerStep() {
       if (!list.length) { resultsBox.innerHTML = '<small style="color:#94a3b8;">No customers found.</small>'; return; }
       resultsBox.innerHTML = list.map(c => `
         <div class="cust-row" data-id="${c.customer_id}" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;cursor:pointer;">
-          <strong>${esc(c.company_name ?? '')}</strong><br>
-          <small style="color:#64748b;">${esc(c.gst_number ?? '')} • ${esc(c.contractor_person ?? '')} • ${esc(c.contractor_number ?? '')}</small>
+          <strong>${c.company_name ?? ''}</strong><br>
+          <small style="color:#64748b;">${c.gst_number ?? ''} • ${c.contractor_person ?? ''} • ${c.contractor_number ?? ''}</small>
         </div>`).join('');
       resultsBox.querySelectorAll('.cust-row').forEach(row => row.addEventListener('click', () => {
         const c = list.find(x => x.customer_id === row.dataset.id);
@@ -847,9 +704,9 @@ function dedupeProducts(rawProducts) {
 
 function renderProductsStep() {
   const products = dedupeProducts(doState.products || []);
-  wizBody().innerHTML = wizHeader(`New Order — ${esc(orderWiz.customer?.company_name ?? 'Products')}`) + `
+  wizBody().innerHTML = wizHeader(`New Order — ${orderWiz.customer?.company_name ?? 'Products'}`) + `
     <div id="prodCatTabs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;"></div>
-    <input id="prodFilter" placeholder="Filter by name, ID or model..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+    <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th style="width:70px;">Qty</th><th style="width:100px;">Price</th></tr></thead>
@@ -899,15 +756,9 @@ function renderProductsStep() {
     const cartLine = orderWiz.cart[key];
     const qtyInCart = cartLine?.quantity ?? '';
     const priceInCart = cartLine?.price ?? '';
-    const isPart = p.product_type === 'spare_parts' || p.product_type === 'service_parts';
-    const sub = [
-      p.product_id ? 'ID: ' + esc(p.product_id) : '',
-      p.model_no ? 'Model: ' + esc(p.model_no) : '',
-      isPart ? 'Belongs to: ' + esc(p.parent_product_name || '—') : ''
-    ].filter(Boolean).join(' · ');
     return `
       <tr>
-        <td>${esc(p.product_name ?? '')}<br><small style="color:#94a3b8;">${sub}</small></td>
+        <td>${esc(p.product_name ?? '')}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + esc(p.parent_product_name || '—') : (p.model_no ? 'Model: ' + esc(p.model_no) : '')}</small></td>
         <td><input type="number" min="0" inputmode="numeric" value="${qtyInCart}"
               placeholder="0" data-row-key="${esc(key)}" class="qtyInput"
               style="width:60px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
@@ -1010,17 +861,18 @@ function renderPaymentStep() {
 
   wizBody().innerHTML = wizHeader('New Order — Payment') + `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
-      ${cartItems.map(i => `
-        <div style="padding:4px 0;">
-          <strong>${esc(i.product_name)}</strong> × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}
-          ${(i.product_id || i.model_no) ? `<div style="font-size:11px;color:#94a3b8;">${[i.product_id ? 'ID: ' + esc(i.product_id) : '', i.model_no ? 'Model: ' + esc(i.model_no) : ''].filter(Boolean).join(' · ')}</div>` : ''}
-        </div>`).join('')}
+      ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br>')}
       <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;">
       Subtotal: ₹${subtotal.toFixed(2)}
     </div>
     <select id="paymentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
       <option value="">Select Payment Mode</option>
       ${PAYMENT_MODES.map(m => `<option value="${m.value}">${m.label}</option>`).join('')}
+    </select>
+    <select id="gstType" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
+      <option value="">Select GST</option>
+      <option value="with_gst" ${orderWiz.gstType === 'with_gst' ? 'selected' : ''}>With GST</option>
+      <option value="without_gst" ${orderWiz.gstType === 'without_gst' ? 'selected' : ''}>Without GST</option>
     </select>
     <div id="paymentExtra"></div>
     <input id="discountInput" type="number" min="0" placeholder="Discount (₹)" value="0" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:10px 0;">
@@ -1044,8 +896,9 @@ function renderPaymentStep() {
   const modeSelect = document.getElementById('paymentMode');
   const extraBox = document.getElementById('paymentExtra');
   modeSelect.addEventListener('change', () => renderPaymentExtra(modeSelect.value, extraBox));
+  document.getElementById('gstType').addEventListener('change', e => { orderWiz.gstType = e.target.value; refreshPartialHint(); });
 
-  document.getElementById('discountInput').addEventListener('input', e => orderWiz.discount = Number(e.target.value) || 0);
+  document.getElementById('discountInput').addEventListener('input', e => { orderWiz.discount = Number(e.target.value) || 0; refreshPartialHint(); });
   document.getElementById('orderRemarks').addEventListener('input', e => orderWiz.remarks = e.target.value);
   document.getElementById('shipDiffCheck').addEventListener('change', e => {
     orderWiz.shipDiff = e.target.checked;
@@ -1057,8 +910,38 @@ function renderPaymentStep() {
   document.getElementById('sendRequestBtn').addEventListener('click', () => submitOrderRequest(modeSelect, extraBox));
 }
 
+function wizTotal() {
+  const items = Object.values(orderWiz.cart);
+  const sub = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const tax = orderWiz.gstType === 'with_gst' ? items.reduce((s, i) => s + i.price * i.quantity * ((Number(i.tax_rate) || 0) / 100), 0) : 0;
+  return Math.max(sub + tax - (orderWiz.discount || 0), 0);
+}
+
+function refreshPartialHint() {
+  const hint = document.getElementById('partialHint');
+  if (!hint) return;
+  const total = wizTotal();
+  const paid = Number(document.getElementById('partialPaid')?.value) || 0;
+  hint.textContent = `Order total: ₹${total.toFixed(2)} — paid now ₹${paid.toFixed(2)}, balance ₹${Math.max(total - paid, 0).toFixed(2)}.`;
+}
+
 function renderPaymentExtra(mode, extraBox) {
-  if (mode === 'Credit') {
+  if (mode === 'Partial') {
+    extraBox.innerHTML = `
+      <input id="partialPaid" type="number" min="0" step="any" placeholder="Amount paid now (₹)" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+      <select id="partialDaysSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
+        <option value="15">Balance in 15 days</option><option value="30">Balance in 30 days</option>
+        <option value="45">Balance in 45 days</option><option value="60">Balance in 60 days</option>
+        <option value="manual">Other (enter days)</option>
+      </select>
+      <input id="partialDaysManual" type="number" min="1" max="60" placeholder="Enter days (max 60)" style="display:none;width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+      <div id="partialHint" style="font-size:12px;color:#92400e;background:#fef3c7;border-radius:8px;padding:8px 10px;margin-top:6px;"></div>`;
+    const sel = document.getElementById('partialDaysSelect');
+    const manual = document.getElementById('partialDaysManual');
+    sel.addEventListener('change', () => manual.style.display = sel.value === 'manual' ? 'block' : 'none');
+    document.getElementById('partialPaid').addEventListener('input', refreshPartialHint);
+    refreshPartialHint();
+  } else if (mode === 'Credit') {
     extraBox.innerHTML = `
       <label style="font-size:13px;color:#64748b;">Credit Period</label>
       <select id="creditDaysSelect" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:6px 0;">
@@ -1095,6 +978,16 @@ function renderPaymentExtra(mode, extraBox) {
 }
 
 function buildPaymentDetails(mode) {
+  if (mode === 'Partial') {
+    const paid = Number(document.getElementById('partialPaid').value) || 0;
+    const sel = document.getElementById('partialDaysSelect');
+    const days = sel.value === 'manual' ? Number(document.getElementById('partialDaysManual').value) : Number(sel.value);
+    const total = wizTotal();
+    if (paid <= 0) throw new Error('Enter the amount paid now for a partial payment.');
+    if (total > 0 && paid >= total) throw new Error('Partial payment must be less than the order total — choose Paid instead.');
+    if (!days || days < 1 || days > 60) throw new Error('Days for the balance must be between 1 and 60.');
+    return { paid_amount: paid, credit_days: days };
+  }
   if (mode === 'Credit') {
     const sel = document.getElementById('creditDaysSelect');
     const manual = document.getElementById('creditDaysManual');
@@ -1139,6 +1032,7 @@ function buildPaymentDetails(mode) {
 async function submitOrderRequest(modeSelect, extraBox) {
   const mode = modeSelect.value;
   if (!mode) { alert('Please select a payment mode.'); return; }
+  if (!orderWiz.gstType) { alert('Please select With GST or Without GST.'); return; }
 
   let payment_details;
   try {
@@ -1158,8 +1052,9 @@ async function submitOrderRequest(modeSelect, extraBox) {
     customer: orderWiz.customer || {},
     items: Object.values(orderWiz.cart).map(i => ({
       product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '', product_type: i.product_type || '',
-      quantity: i.quantity, price: i.price, tax_rate: i.tax_rate
+      quantity: i.quantity, price: i.price, tax_rate: orderWiz.gstType === 'with_gst' ? i.tax_rate : 0
     })),
+    gst_type: orderWiz.gstType,
     payment_mode: mode,
     payment_details,
     discount: orderWiz.discount || 0,
@@ -1177,7 +1072,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'request failed');
 
-    let uploadWarning = '';
+     let uploadWarning = '';
     const chosen = Array.from(document.getElementById('orderFiles')?.files || []);
     if (chosen.length) {
       try {
