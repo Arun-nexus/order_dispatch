@@ -1079,7 +1079,7 @@ function allocDispatchFormDefaults(a, withSerials) {
     inv: d.invoice_no || '',
     ref: a.sales_person?.name || a.created_by || a.allocated_by || '',
     date: fmtDate(d.invoice_date || a.allotment_date),
-    party: a.company_name || '',
+    party: [a.company_name, a.sales_person?.name ? '(' + a.sales_person.name + ')' : ''].filter(Boolean).join(' '),
     address: a.address || '',
     details,
     hand: mode.includes('hand') ? 'Yes' : '',
