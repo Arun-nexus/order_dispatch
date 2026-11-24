@@ -1416,6 +1416,38 @@ def confirm_delivery(order_id: str, user: dict = Depends(require_role("admin", "
         raise HTTPException(status_code=500, detail="delivery confirmation failed")
 
 
+class OrderShipToRequest(BaseModel):
+    ship_to_different: bool = False
+    ship_to_address: Optional[dict] = None
+
+
+@app.post("/order/ship_to/{order_id}")
+def set_order_ship_to(order_id: str, request: OrderShipToRequest, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
+    """Ship To address typed in while printing the shipping label on the Orders page.
+    Stored on the order so the Dispatch page (confirm dispatch + label) picks it up automatically."""
+    try:
+        db = order_manager()
+        matches = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
+        if not matches:
+            raise HTTPException(status_code=404, detail="no order found with this order_id")
+        if matches[0].get("dispatch"):
+            raise HTTPException(status_code=400, detail="order is already dispatched - ship to address can no longer be changed")
+        ship_addr = None
+        if request.ship_to_different:
+            sa = request.ship_to_address or {}
+            ship_addr = {"company_name": str(sa.get("company_name") or "").strip(), "address": str(sa.get("address") or "").strip()}
+            if not ship_addr["company_name"] or not ship_addr["address"]:
+                raise HTTPException(status_code=400, detail="enter ship to company name and address")
+        db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id},
+                  update_values={"ship_to_different": bool(ship_addr), "ship_to_address": ship_addr})
+        return {"message": "ship to address saved", "order_id": order_id, "ship_to_address": ship_addr}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("order ship to address could not be saved")
+        raise HTTPException(status_code=500, detail="ship to address could not be saved")
+
+
 @app.post("/order/delete/{order_id}")
 def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
     try:

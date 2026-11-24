@@ -965,7 +965,6 @@ function openDispatchModal(row) {
   modal.style.display = 'flex';
 }
 
-// ===== Shipping Label (6 x 4 in, 2 per A4 page) : dispatch record se Bill To / Ship To / receiver mobile auto-fill =====
 const LABEL_CO = {
   name: 'Acer Biomedicals LLP',
   address: 'Industrial Unit No 80, Block - G, Sector - 63, Noida - 201301, Uttar Pradesh',
@@ -1007,7 +1006,6 @@ function labelData(row) {
     name = `Service #${(d.spare_part?.service_id || '').slice(0, 8)} (Spare Part)`;
   }
 
-  // ship-to: dispatch confirm hua to uska ship_to_address, nahi to distributor ki request, nahi to bill-to wahi
   const reqShip = row.kind === 'order' && !d.dispatch && d.ship_to_different && d.ship_to_address ? d.ship_to_address : null;
   const sh = disp.ship_to_different ? disp.ship_to_address : reqShip;
   const ship = sh && (sh.company_name || sh.address)

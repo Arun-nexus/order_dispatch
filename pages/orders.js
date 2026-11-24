@@ -180,6 +180,7 @@ function renderOrdersTable(orders) {
       <td>
         <button class="icon-btn view-btn"><i class="fa-solid fa-eye"></i></button>
         <button class="icon-btn dispatch-form-btn" title="Order Dispatch Form (A4)"><i class="fa-solid fa-print"></i></button>
+        <button class="icon-btn order-label-btn" title="Shipping Label (6x4 in)"><i class="fa-solid fa-tag"></i></button>
         ${canManage ? '<button class="icon-btn ellipsis-btn"><i class="fa-solid fa-ellipsis"></i></button>' : ''}
       </td>`;
     tbody.appendChild(tr);
@@ -187,6 +188,7 @@ function renderOrdersTable(orders) {
 
   tbody.querySelectorAll('.view-btn').forEach(btn => btn.addEventListener('click', e => openViewOrderModal(rowOrder(e))));
   tbody.querySelectorAll('.dispatch-form-btn').forEach(btn => btn.addEventListener('click', e => openDispatchForm(rowOrder(e))));
+  tbody.querySelectorAll('.order-label-btn').forEach(btn => btn.addEventListener('click', e => openOrderLabelDialog(rowOrder(e))));
   tbody.querySelectorAll('.creator-cell').forEach(btn => btn.addEventListener('click', e => openOrderHistoryModal(rowOrder(e))));
   tbody.querySelectorAll('.ellipsis-btn').forEach(btn => btn.addEventListener('click', e => openOrderActionMenu(rowOrder(e), e)));
 
@@ -2099,4 +2101,259 @@ async function rejectOrderRequest(requestId) {
   } catch (err) {
     if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
   }
+}
+
+const LABEL_CO = {
+  name: 'Acer Biomedicals LLP',
+  address: 'Industrial Unit No 80, Block - G, Sector - 63, Noida - 201301, Uttar Pradesh',
+  tel: '0120-4166921',
+  mob: '18008894232'
+};
+const LABEL_LOGO = 'data:image/png;base64,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';
+
+function labelKey(row) {
+  const d = row.data;
+  return row.kind + ':' + (row.kind === 'order' ? d.order_id : (d.allocation_id || d.service_id));
+}
+
+function labelPhone(raw) {
+  const first = String(raw ?? '').split(/[,;\/]/)[0];
+  const dg = first.replace(/\D/g, '');
+  if (dg.length < 10) return dg;
+  const t = dg.slice(-10);
+  return t.slice(0, 5) + ' ' + t.slice(5);
+}
+
+function labelData(row) {
+  const d = row.data, disp = d.dispatch || {}, c = d.customer || {};
+  let name = '', addr = '', phone = '';
+  if (row.kind === 'order') {
+    name = c.company_name || '';
+    addr = c.company_address || '';
+    phone = dvPick(c, ['contractor_number', 'phone_number', 'contact_number', 'contact', 'phone', 'mobile']);
+  } else if (row.kind === 'product_allocation') {
+    const sp = d.sales_person?.name;
+    name = [d.company_name, sp ? `(${sp})` : ''].filter(Boolean).join(' ') || sp || '';
+    addr = d.address || '';
+    phone = d.phone_number || d.sales_person?.contact_number || d.contact_number || '';
+  } else if (row.kind === 'service') {
+    name = d.company_name || `Service #${(d.service_id || '').slice(0, 8)}`;
+    addr = d.address || d.company_address || '';
+    phone = d.phone_number || d.contact_number || '';
+  } else {
+    name = `Service #${(d.spare_part?.service_id || '').slice(0, 8)} (Spare Part)`;
+  }
+
+  const reqShip = row.kind === 'order' && !d.dispatch && d.ship_to_different && d.ship_to_address ? d.ship_to_address : null;
+  const sh = disp.ship_to_different ? disp.ship_to_address : reqShip;
+  const ship = sh && (sh.company_name || sh.address)
+    ? { name: sh.company_name || name, addr: sh.address || '' }
+    : { name, addr };
+
+  const mode = String(disp.mode_of_delivery || '').replace(/_/g, ' ');
+  const via = [mode ? mode.charAt(0).toUpperCase() + mode.slice(1) : '', disp.dispatched_through || ''].filter(Boolean).join(' · ');
+  return {
+    bill: { name, addr },
+    ship,
+    phone: labelPhone(phone),
+    invoice: disp.invoice_no ? String(disp.invoice_no).toUpperCase() : '',
+    date: disp.invoice_date ? new Date(disp.invoice_date).toLocaleDateString('en-GB') : '',
+    via,
+    docket: disp.docket_no ? String(disp.docket_no).toUpperCase() : ''
+  };
+}
+
+function labelSizeClass(p) {
+  const n = (p.name + ' ' + p.addr).length;
+  return n > 230 ? ' xs' : n > 150 ? ' sm' : '';
+}
+
+function labelHtml(row) {
+  const L = labelData(row);
+  const meta = [['Invoice', L.invoice], ['Date', L.date], ['Via', L.via], ['Docket', L.docket]]
+    .filter(m => m[1]).map(m => `<span>${m[0]} <b>${dvEsc(m[1])}</b></span>`).join('');
+  const box = (title, p, cls) => `<div class="box ${cls}"><h4>${title}</h4><p class="n">${dvEsc(p.name)}</p><p class="a${labelSizeClass(p)}">${dvEsc(p.addr)}</p></div>`;
+  return `<div class="label">
+    <div class="top"><img src="${LABEL_LOGO}" alt=""><div class="co"><b>${dvEsc(LABEL_CO.name)}</b><span>${dvEsc(LABEL_CO.address)}</span></div></div>
+    ${meta ? `<div class="meta">${meta}</div>` : ''}
+    <div class="addr">${box('Bill To', L.bill, '')}${box('Ship To', L.ship, 'ship')}</div>
+    <div class="bottom">
+      <div class="from"><b>From: ${dvEsc(LABEL_CO.name)}</b>${dvEsc(LABEL_CO.address.replace(', Uttar Pradesh', ''))}<br>Tel ${dvEsc(LABEL_CO.tel)} · ${dvEsc(LABEL_CO.mob)}</div>
+      <div class="mob">${L.phone ? `<small>Receiver M.O.B.</small><strong>${dvEsc(L.phone)}</strong>` : ''}</div>
+    </div>
+    <div class="foot">${dvEsc(LABEL_CO.name)}</div>
+  </div>`;
+}
+
+const LABEL_CSS = `
+  :root{--brand:#005CA9;--navy:#0B2F5B;--ink:#16202e;--muted:#6b7a90;--line:#d9e1ec;--tint:#f4f8fc}
+  *{box-sizing:border-box;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  @page{size:A4 portrait;margin:0}
+  html,body{background:#fff;font-family:'Inter','Segoe UI',Arial,sans-serif;color:var(--ink)}
+  .sheet{width:210mm;height:297mm;padding:22mm 0 0;display:flex;flex-direction:column;align-items:center;gap:12mm;page-break-after:always;break-after:page;overflow:hidden}
+  .sheet:last-child{page-break-after:auto;break-after:auto}
+  .label{width:576px;height:384px;background:#fff;border:1px solid #c5d0de;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;flex:none}
+  .top{display:flex;align-items:center;gap:14px;padding:14px 18px 12px;border-bottom:2px solid var(--brand)}
+  .top img{height:38px}
+  .top .co{border-left:1px solid var(--line);padding-left:14px;line-height:1.3}
+  .top .co b{font-size:15px;color:var(--navy);letter-spacing:.2px}
+  .top .co span{display:block;font-size:10.5px;color:var(--muted)}
+  .meta{display:flex;flex-wrap:wrap;gap:4px 18px;padding:7px 18px;background:var(--tint);font-size:10px;color:var(--muted);border-bottom:1px solid var(--line)}
+  .meta b{color:var(--ink);font-weight:600}
+  .addr{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 18px 0;flex:1;min-height:0}
+  .box{border:1px solid var(--line);border-radius:8px;padding:9px 12px 8px;overflow:hidden}
+  .box h4{font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--brand);font-weight:700;margin-bottom:5px}
+  .box.ship{border-color:var(--brand);box-shadow:inset 3px 0 0 var(--brand)}
+  .box p{font-size:12px;line-height:1.38;font-weight:600;text-transform:uppercase;word-break:break-word}
+  .box p.n{font-size:13px;color:var(--navy);margin-bottom:2px}
+  .box p.a.sm{font-size:10.5px}.box p.a.xs{font-size:9.5px;line-height:1.3}
+  .bottom{display:flex;justify-content:space-between;align-items:center;padding:10px 18px 12px;gap:14px}
+  .from{font-size:10px;line-height:1.5;color:var(--muted)}
+  .from b{display:block;color:var(--ink);font-size:11px;font-weight:600}
+  .mob{text-align:right}
+  .mob small{display:block;font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+  .mob strong{font-size:19px;color:var(--navy);letter-spacing:.6px;font-weight:700;white-space:nowrap}
+  .foot{background:var(--navy);color:#cfe0f3;font-size:9px;letter-spacing:2.2px;text-align:center;padding:6px;text-transform:uppercase}
+`;
+
+function printLabels(rows) {
+  if (!rows || !rows.length) { alert('No label to print.'); return; }
+  let sheets = '';
+  for (let i = 0; i < rows.length; i += 2) {
+    sheets += `<div class="sheet">${labelHtml(rows[i])}${rows[i + 1] ? labelHtml(rows[i + 1]) : ''}</div>`;
+  }
+  const old = document.getElementById('labelPrintFrame');
+  if (old) old.remove();
+  const frame = document.createElement('iframe');
+  frame.id = 'labelPrintFrame';
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  document.body.appendChild(frame);
+  const doc = frame.contentWindow.document;
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>Dispatch Labels</title><style>${LABEL_CSS}</style></head><body>${sheets}</body></html>`);
+  doc.close();
+  setTimeout(() => {
+    if (!frame.isConnected || !frame.contentWindow) return;
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+    setTimeout(() => frame.remove(), 60000);
+  }, 400);
+}
+
+// ===== Shipping Label (6 x 4 in, 2 per A4) - same label as the Dispatch page; asks for Ship To here =====
+// (helpers the label code expects - orders.js has no dvEsc / dvPick)
+function dvEsc(s) { return escapeHtml(s); }
+function dvPick(obj, keys) {
+  for (const k of keys) {
+    const v = obj ? obj[k] : undefined;
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return '';
+}
+
+function orderShipTo(o) {
+  const disp = o.dispatch || {};
+  if (disp.ship_to_different && disp.ship_to_address) return disp.ship_to_address;
+  if (o.ship_to_different && o.ship_to_address) return o.ship_to_address;
+  return null;
+}
+
+function openOrderLabelDialog(o) {
+  if (!o) return;
+  const old = document.getElementById('labelDialog');
+  if (old) old.remove();
+  const dispatched = !!o.dispatch;
+  const cur = orderShipTo(o);
+  const billName = o.customer?.company_name || o.company_name || '';
+  const ov = document.createElement('div');
+  ov.id = 'labelDialog';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:2000;display:flex;align-items:center;justify-content:center;';
+  const inp = 'width:100%;padding:9px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13.5px;font-family:inherit;box-sizing:border-box;';
+  ov.innerHTML = `
+    <div style="background:var(--bg-white,#fff);border-radius:14px;padding:20px 22px;width:min(400px,94vw);max-height:92vh;overflow-y:auto;box-shadow:0 20px 50px rgba(15,23,42,.25);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <h3 style="margin:0;font-size:16px;">Print Shipping Label</h3>
+        <button type="button" id="lblX" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
+      </div>
+      <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">${escapeHtml(billName)}</div>
+
+      <label style="font-size:13px;color:#475569;display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="lblShipDiff" ${cur ? 'checked' : ''}> Ship to a different address
+      </label>
+      <div id="lblShipFields" style="display:${cur ? 'flex' : 'none'};flex-direction:column;gap:8px;margin-top:8px;">
+        <input id="lblShipName" placeholder="Ship To — Company / Person Name" value="${escapeHtml(cur?.company_name || '')}" style="${inp}">
+        <textarea id="lblShipAddr" rows="3" placeholder="Ship To — Full Address" style="${inp}resize:vertical;">${escapeHtml(cur?.address || '')}</textarea>
+        <small style="color:#64748b;">${dispatched
+          ? 'This order is already dispatched — a change here applies to this print only.'
+          : 'Saved on the order, so the Dispatch page picks it up automatically.'}</small>
+      </div>
+
+      <label style="font-size:12px;color:#64748b;display:block;margin-top:14px;">Number of labels</label>
+      <div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px;">
+        <button type="button" id="lblMinus" style="width:36px;height:36px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:18px;cursor:pointer;">&minus;</button>
+        <input id="lblQty" type="number" min="1" max="200" value="1" style="flex:1;min-width:0;text-align:center;padding:8px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;font-weight:600;">
+        <button type="button" id="lblPlus" style="width:36px;height:36px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:18px;cursor:pointer;">+</button>
+      </div>
+      <div id="lblPages" style="font-size:12px;color:#64748b;margin-bottom:16px;">1 A4 page (2 labels per page)</div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;">
+        <button type="button" id="lblCancel" style="padding:9px 16px;border:none;border-radius:8px;background:#eee;cursor:pointer;">Cancel</button>
+        <button type="button" id="lblGo" style="padding:9px 16px;border:none;border-radius:8px;background:var(--primary,#1665ff);color:#fff;cursor:pointer;font-weight:600;"><i class="fa-solid fa-print"></i> Print</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const $ = id => ov.querySelector(id);
+  const qty = $('#lblQty');
+  const val = () => Math.min(200, Math.max(1, parseInt(qty.value, 10) || 1));
+  const refresh = () => {
+    const pages = Math.ceil(val() / 2);
+    $('#lblPages').textContent = `${pages} A4 page${pages > 1 ? 's' : ''} (2 labels per page)`;
+  };
+  const close = () => ov.remove();
+  $('#lblShipDiff').addEventListener('change', e => { $('#lblShipFields').style.display = e.target.checked ? 'flex' : 'none'; });
+  qty.addEventListener('input', refresh);
+  $('#lblMinus').addEventListener('click', () => { qty.value = Math.max(1, val() - 1); refresh(); });
+  $('#lblPlus').addEventListener('click', () => { qty.value = Math.min(200, val() + 1); refresh(); });
+  $('#lblX').addEventListener('click', close);
+  $('#lblCancel').addEventListener('click', close);
+  ov.addEventListener('mousedown', e => { if (e.target === ov) close(); });
+
+  $('#lblGo').addEventListener('click', async () => {
+    const diff = $('#lblShipDiff').checked;
+    const sName = $('#lblShipName').value.trim();
+    const sAddr = $('#lblShipAddr').value.trim();
+    if (diff && (!sName || !sAddr)) { alert('Enter the Ship To name and full address.'); return; }
+
+    const changed = diff
+      ? (!cur || cur.company_name !== sName || cur.address !== sAddr)
+      : !!cur;
+    let printOrder = o;
+
+    if (dispatched) {
+      // already dispatched: keep the dispatch record untouched, override only for this print
+      if (changed) printOrder = { ...o, dispatch: { ...o.dispatch, ship_to_different: diff, ship_to_address: diff ? { company_name: sName, address: sAddr } : null } };
+    } else if (changed) {
+      const btn = $('#lblGo');
+      btn.disabled = true;
+      try {
+        const res = await apiFetch(`/order/ship_to/${o.order_id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ship_to_different: diff, ship_to_address: diff ? { company_name: sName, address: sAddr } : null })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'could not save the ship to address');
+        o.ship_to_different = diff;
+        o.ship_to_address = diff ? { company_name: sName, address: sAddr } : null;
+      } catch (err) {
+        btn.disabled = false;
+        if (err.message !== 'unauthorized' && err.message !== 'forbidden') alert(err.message);
+        return;
+      }
+    }
+    const n = val();
+    close();
+    printLabels(Array(n).fill({ kind: 'order', data: printOrder }));
+  });
+  qty.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
 }
