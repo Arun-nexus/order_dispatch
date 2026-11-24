@@ -164,7 +164,7 @@ function renderOrdersTable(orders) {
     const qtyLabel = items.length
       ? items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)
       : (o.quantity ?? '-');
-    const companyName = o.customer?.contractor_person ?? o.customer?.company_name ?? o.company_name ?? '';
+    const companyName = escapeHtml(o.customer?.company_name || o.company_name || '');
     const creatorLabel = orderCreatorLabel(o);
 
     tr.innerHTML = `
