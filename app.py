@@ -44,12 +44,7 @@ except ImportError:
 
 
 def compute_warranty_until(received_date: str, warranty_text: str):
-    """
-    Parses a free-text warranty duration like "12 months", "1 year", "30 days"
-    (as entered on the shipment product) and adds it to received_date
-    (YYYY-MM-DD) to get the warranty expiry date. Returns an ISO date string
-    (YYYY-MM-DD), or None if either input can't be parsed.
-    """
+    
     if not received_date or not warranty_text:
         return None
     match = re.search(r"(\d+)\s*(day|month|year)", warranty_text.strip().lower())
@@ -65,7 +60,7 @@ def compute_warranty_until(received_date: str, warranty_text: str):
         result = base + timedelta(days=amount)
     elif unit == "year":
         result = base.replace(year=base.year + amount)
-    else:  # month
+    else:  
         total_months = base.month - 1 + amount
         year = base.year + total_months // 12
         month = total_months % 12 + 1
@@ -331,8 +326,6 @@ class SparePartRequest(BaseModel):
 class ExtendWarrantyRequest(BaseModel):
     warranty_until: str
 
-
-# ---- technician service workflow ----
 class ServiceStartRequest(BaseModel):
     damage_image: str
     serial_no: str
@@ -532,6 +525,7 @@ class PartHologramsRequest(BaseModel):
 class AssemblySerialItem(BaseModel):
     serial_number: str
     lot_no: str = ""     
+    lot_date: str = ""          # YYYY-MM-DD
 
 class ApproveAssemblyRequest(BaseModel):
     serial_numbers: List[str]
@@ -558,6 +552,10 @@ class EditAssemblyRequest(BaseModel):
     product_id: Optional[str] = None
     model_number: Optional[str] = None
     parts_used: list[AssemblyPartUsed]
+    serials: Optional[list[AssemblySerialItem]] = None    # same order as stored; hologram numbers never change
+    supply_type: Optional[str] = None
+    mfg_date: Optional[str] = None
+    mrp: Optional[str] = None
 
 
 @app.get("/")
@@ -691,7 +689,6 @@ def list_distributors(user: dict = Depends(get_current_user)):
 
 @app.get("/account/users")
 def list_system_users(user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
-    """Safe (no password) list of every system user, used by the allocation wizard."""
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={})
@@ -797,7 +794,6 @@ def access_control_page():
 
 @app.get("/account/my_access")
 def my_access(user: dict = Depends(get_current_user)):
-    """Logged-in user's own custom page list (None = role default). Pages call this to stay in sync."""
     try:
         db = mongodbclient()
         dataset = db.get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": user.get("username")})
@@ -861,7 +857,6 @@ VALID_PAYMENT_MODES = {"Credit", "Partial", "NetBanking", "UPI", "Cheque", "Dema
 
 
 def _order_grand_total(items: list, discount: float = 0, warranty_charge: float = 0) -> float:
-    """price x qty + tax per line, minus discount, plus extended-warranty charge (same maths as order_manager.add)."""
     total = 0.0
     for it in items or []:
         line = float(it.get("price", 0) or 0) * float(it.get("quantity", 0) or 0)
@@ -870,9 +865,6 @@ def _order_grand_total(items: list, discount: float = 0, warranty_charge: float 
 
 
 def _validate_order_payment(payment_mode: str, payment_details: dict, grand_total: float = 0) -> dict:
-    """Checks the payment mode + its details (shared by order creation and demo-unit conversion)
-    and returns the details to store. "Partial" = part paid now, the rest (balance) due after
-    credit_days; paid_amount / credit_days come in, balance_amount / due_date are added here."""
     details = dict(payment_details or {})
 
     if not payment_mode:
@@ -1141,7 +1133,6 @@ def _auto_pick_units(inventory_db, product_id: str, quantity: int, model_no=None
 
 
 def _auto_pick_item(inventory_db, item: dict):
-    """_auto_pick_units for a request/order/allocation item dict."""
     name, model, ptype = _item_ident(item)
     return _auto_pick_units(inventory_db, item.get("product_id", ""), item["quantity"], model or None,
                             product_name=name or None, product_type=ptype or None)
@@ -1163,7 +1154,6 @@ def _part_lots(inventory_db, name, ptype, parent=None):
 
 
 def _part_stock(inventory_db, name, ptype, parent=None):
-    """(total quantity, [hologram numbers on file]) for a part across all its lots."""
     lots = _part_lots(inventory_db, name, ptype, parent)
     qty = sum(int(l.get("quantity") or 0) for l in lots)
     holos = [h for l in lots for h in (l.get("hologram_numbers") or [])]
@@ -1171,8 +1161,6 @@ def _part_stock(inventory_db, name, ptype, parent=None):
 
 
 def _restock_part_item(name, ptype, parent, qty, holograms):
-    """Puts a part (and its hologram numbers) back into inventory: merged into an existing lot of the
-    same part, else a new lot is created. Used for demo returns and for rolling back a failed allotment."""
     holograms = [h for h in (holograms or []) if h]
     qty = int(qty or 0) or len(holograms) or 1
     col = mongodbclient().database[INVENTORY_COLLECTION]
@@ -1193,9 +1181,6 @@ def _restock_part_item(name, ptype, parent, qty, holograms):
 
 
 def _rollback_stock(inventory_db, deducted):
-    """Puts back stock that was already deducted when a later step of the same approval failed,
-    so a failed approve doesn't leave the request pending with half its stock gone.
-    deducted = [(item_dict, serials_list), ...]"""
     for item, serials in reversed(deducted):
         try:
             if _is_part_item(item):
@@ -1216,13 +1201,10 @@ def _rollback_stock(inventory_db, deducted):
 
 
 def _has_customer_access(c: dict, username: str) -> bool:
-    """creator, or a distributor the company was shared with (same GST registered by someone else)"""
     return c.get("created_by") == username or username in (c.get("shared_with") or [])
 
 
 def _get_or_create_customer(customer_db, details: dict, creator_username: str = None):
-    """Order / demo-unit / convert flows. Same GST -> reuse the existing company (and give the
-    creator access to it); otherwise create a new one. Returns (customer_snapshot, created)."""
     details = details or {}
     gst = customer_manager.normalize_gst(details.get("gst_number"))
     existing = customer_db.find_by_gst(CUSTOMER_COLLECTION, gst) if gst else None
@@ -1256,9 +1238,6 @@ def _get_or_create_customer(customer_db, details: dict, creator_username: str = 
 
 
 def _fulfill_order(customer_id: str, customer: dict, items: list, payment_mode: str, payment_details: dict, discount: float, creator: dict = None, warranty_years: int = 1, warranty_charge: float = 0):
-    """Validates payment details, resolves/creates the customer, deducts stock + serials,
-    and creates the order record. Shared by the direct /order/create_order/ endpoint and by
-    /request/approve/{request_id} when a distributor's order request is approved."""
     if not items:
         raise HTTPException(status_code=400, detail="add at least one product to the order")
 
@@ -1423,8 +1402,6 @@ class OrderShipToRequest(BaseModel):
 
 @app.post("/order/ship_to/{order_id}")
 def set_order_ship_to(order_id: str, request: OrderShipToRequest, user: dict = Depends(require_role("admin", "accounts", "service_manager"))):
-    """Ship To address typed in while printing the shipping label on the Orders page.
-    Stored on the order so the Dispatch page (confirm dispatch + label) picks it up automatically."""
     try:
         db = order_manager()
         matches = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
@@ -1453,11 +1430,6 @@ def delete_order(order_id: str, user: dict = Depends(require_role("admin"))):
     try:
         db = order_manager()
         existing = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
-        # Deleting an order removes the record entirely, so — same reasoning as
-        # cancelling — the stock/serials it reserved at creation time must go
-        # back into inventory, or it's permanently lost from stock even though
-        # nothing physically shipped. Skip if it was already cancelled: that
-        # restock already happened via /order/update.
         if existing and existing[0].get("status") != "cancelled" and not existing[0].get("dispatch"):
             try:
                 for item in existing[0].get("items", []):
@@ -1492,17 +1464,13 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
         updated = dict(updated_value.updated_order_value)
 
         existing = db.get_data(collection_name=ORDERS_COLLECTION, query={"order_id": order_id})
+
         if not existing:
             raise HTTPException(status_code=404, detail="no order found with this order_id")
         order = existing[0]
 
-        # Any of these being present means this is a real edit made via the
-        # Edit Order modal (as opposed to a plain status change from the
-        # Update Status modal, which carries its own cancel_reason and none
-        # of these keys) — a remark is mandatory for those so the order
-        # history stays meaningful. Checked against the untouched `updated`
-        # dict, before any of the branches below start popping keys off it.
         item_field_keys_check = {"product_name", "serial_no", "quantity", "price", "tax_rate"}
+
         is_edit = bool(
             (item_field_keys_check & updated.keys())
             or "discount" in updated
@@ -1512,20 +1480,16 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
             or "gst_number" in updated
         )
         remark = (updated.pop("remark", "") or "").strip()
+
         if is_edit and not remark:
             raise HTTPException(status_code=400, detail="a remark is required when editing an order")
+
         if not is_edit and remark:
             updated["remark"] = remark
 
-        # Cancelling an order releases the stock/serials it reserved at creation
-        # time (_fulfill_order deducts inventory immediately, before delivery)
-        # back into inventory — otherwise every cancelled order's units are
-        # permanently lost from stock even though nothing physically shipped.
-        # Guarded on the order's CURRENT status so re-saving an already-cancelled
-        # order (e.g. editing the cancel reason) never restocks twice.
         if updated.get("status") == "cancelled" and order.get("status") != "cancelled":
+
             if order.get("dispatch"):
-                # already physically dispatched — nothing to give back to inventory
                 logging.info(f"order {order_id} cancelled after dispatch — inventory left untouched")
             else:
                 try:
@@ -1548,31 +1512,6 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 except Exception as restock_err:
                     logging.error(f"order {order_id} cancelled but restocking inventory failed: {restock_err}")
 
-        # Marking an order "returned" needs to know exactly which product(s)
-        # came back (an order can have multiple/coupled products) and, for
-        # each, whether it came back in working condition or faulty — sent
-        # by the caller as "returned_items": [{product_id, product_name,
-        # model_no, quantity, serial_numbers, condition: "ok"|"faulty"}].
-        # OK units go back into whatever category they were already stocked
-        # under (restock_returned_units — merges into the matching
-        # product_id+product_name+model_no lot, or creates one). Faulty
-        # units are instead pushed into the "damaged" inventory category
-        # (merges into an existing damaged entry for the same
-        # product_id+model_no, quantity bumped up, or creates a new one).
-        #
-        # IMPORTANT: this runs on EVERY submission where status=="returned",
-        # not just the first — once an order is already "returned", e.g. the
-        # Update Status modal is reopened to correct a mistake (an item that
-        # should've been "faulty" was first saved as "ok", or a second item
-        # is being returned later), the old code's "only if the order wasn't
-        # already returned" guard silently skipped ALL processing on every
-        # later submission with no error, so the correction never reached
-        # inventory even though the request looked successful. Each
-        # already-processed serial number (or, for unserialized lines,
-        # already-processed quantity per product_id+model_no) is tracked on
-        # the order itself so re-submitting doesn't restock/damage the same
-        # unit twice, while still letting genuinely NEW lines/serials in this
-        # submission go through.
         if updated.get("status") == "returned":
             return_reason = (updated.get("return_reason") or "").strip()
             returned_items = updated.get("returned_items") or []
@@ -1584,15 +1523,14 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
             already_serials = set(order.get("returned_serials_processed") or [])
             already_qty = dict(order.get("returned_qty_processed") or {})
             newly_processed_serials = []
-            processed_records = []  # what actually got processed this submission — for order history/view
-
+            processed_records = []  
             inv_db = inventory_manager()
             for ret_item in returned_items:
                 product_id = ret_item.get("product_id")
                 product_name = ret_item.get("product_name", "")
                 model_no = ret_item.get("model_no", "") or ""
                 serials = [s for s in (ret_item.get("serial_numbers") or []) if s]
-                condition = ret_item.get("condition")  # "ok" | "faulty"
+                condition = ret_item.get("condition") 
                 if not product_id:
                     continue
 
@@ -1600,33 +1538,29 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 if serials:
                     fresh_serials = [s for s in serials if s not in already_serials]
                     if not fresh_serials:
-                        continue  # every serial on this line was already processed in an earlier submission
+                        continue  
                     quantity = len(fresh_serials)
                 else:
                     already_done = int(already_qty.get(qty_key, 0) or 0)
                     requested_qty = int(ret_item.get("quantity", 0) or 0)
                     quantity = max(0, requested_qty - already_done)
                     fresh_serials = []
+                    
                     if quantity <= 0:
-                        continue  # this line's quantity was already fully processed earlier
-
+                        continue  
+               
                 try:
+                    
                     if condition == "faulty":
-                        # Deliberately NOT using add_or_merge() here — its
-                        # cross-category "serial found under a different
-                        # product_type elsewhere" migration logic is meant for
-                        # the manual "Add Existing Product" restock flow and
-                        # isn't needed for a fresh return (the serial isn't
-                        # anywhere else in inventory at this point, it was
-                        # already deducted when the order was created). A plain,
-                        # direct merge-by-product_id+model_no+product_type here
-                        # is simpler and avoids that logic misfiring.
+                       
                         existing_damaged = inv_db.get_data(
                             collection_name=INVENTORY_COLLECTION,
                             query={"product_id": product_id, "model_no": model_no, "product_type": "damaged"}
                         )
                         damage_reason = f"returned faulty from order {order_id}: {return_reason}"
+                       
                         if existing_damaged:
+                       
                             entry = existing_damaged[0]
                             merged_serials = (entry.get("serial_numbers") or []) + list(fresh_serials)
                             new_quantity = int(entry.get("quantity", 0) or 0) + quantity
@@ -1635,7 +1569,9 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                                 query={"_id": ObjectId(entry["_id"])},
                                 update_values={"serial_numbers": merged_serials, "quantity": new_quantity, "reason": damage_reason}
                             )
+                       
                         else:
+                       
                             inventory_manager(
                                 product_name=product_name,
                                 product_id=product_id,
@@ -1674,55 +1610,21 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
 
             updated["returned_serials_processed"] = list(already_serials) + newly_processed_serials
             updated["returned_qty_processed"] = already_qty
-            # Accumulate across submissions (instead of overwriting) so the
-            # order's full return history — every product, its serial(s) and
-            # condition — stays visible in View Order Details even if the
-            # return was corrected/added-to across more than one submission.
             updated["returned_items"] = list(order.get("returned_items") or []) + processed_records
             logging.info(f"order {order_id} marked returned — {len(returned_items)} item(s) submitted, {len(newly_processed_serials)} new serial(s) processed")
 
-        # These fields actually live inside order["items"][0], not at the
-        # top level of the order document — editing them has to go through
-        # the item, or they silently land as an unused stray field and the
-        # UI never reflects the change.
         item_field_keys = {"product_name", "serial_no", "quantity", "price", "tax_rate"}
         touched_item_fields = item_field_keys & updated.keys()
-        # discount lives at the top level already, but total_mrp depends on it too,
-        # so a discount-only edit still needs to fall into the recompute branch below
-        # instead of leaving a stale total_mrp.
         discount_touched = "discount" in updated
 
         if "items" in updated:
-            # Full multi-item replace from the Edit Order modal — every item
-            # in the order can now be edited (qty/price/tax/serials), not
-            # just items[0], and each item keeps its own price instead of
-            # sharing one combined price across the whole order.
+        
             new_items_raw = updated.pop("items")
             if not new_items_raw:
                 raise HTTPException(status_code=400, detail="order must contain at least one product")
 
-            # Reconcile inventory against whatever changed between the old and
-            # new item lists — this used to not happen at all: retyping the
-            # serial numbers field, or changing quantity, only ever rewrote the
-            # order document, so the old serials were never freed back to
-            # stock and the new ones were never actually deducted (or even
-            # checked for availability). Skipped once the order has already
-            # been dispatched — the physical units are gone, so editing the
-            # record afterwards shouldn't touch live stock (same guard the
-            # cancellation branch above uses).
             old_items = order.get("items", [])
 
-            # Pair each incoming item with the original line it came from,
-            # via "original_index" (sent by the Edit Order modal for every
-            # row that's still present after the person may have removed
-            # some). This replaces a fragile zip(old_items, new_items) that
-            # matched purely by POSITION — removing a middle product shifted
-            # every item after it by one slot, so the backend thought that
-            # product had "changed into" the next one, and the real last
-            # item (now past the end of the shorter list) never got its
-            # stock/serials restocked at all. Falls back to positional index
-            # if a client doesn't send it, so nothing breaks if an older
-            # frontend build is still deployed somewhere.
             new_items = []
             kept_indices = set()
             for i, raw in enumerate(new_items_raw):
@@ -1736,21 +1638,14 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
 
             edit_taken = {}
             if not order.get("dispatch"):
+        
                 inv_db = inventory_manager()
-                # process ALL restocks (freed-up serials/quantity) before ANY
-                # deductions, across every line — so a serial number moved
-                # from one line to another in the same edit is available
-                # again by the time we try to deduct it for its new line,
-                # instead of failing with "not available".
                 old_lot_map = {x.get("serial_number"): x.get("lot_no", "") for it in old_items for x in (it.get("serial_lots") or [])}
                 edit_taken = {}
                 restores = []   # (product_id, product_name, model_no, qty, serials)
                 deductions = [] # (product_id, product_name, model_no, qty, serials)
                 type_map = {}   # (product_id, product_name, model_no) -> product_type
 
-                # any old line whose index isn't among the surviving rows was
-                # removed entirely in this edit — its full quantity/serials
-                # go back to stock, same as a cancellation would do for it.
                 for idx, old_item in enumerate(old_items):
                     if idx in kept_indices:
                         continue
@@ -1785,11 +1680,6 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                     if added_serials:
                         deductions.append((product_id, product_name, model_no, len(added_serials), added_serials))
 
-                    # the portion of quantity NOT backed by a specific serial
-                    # (accessories/spare_parts can be stocked with fewer
-                    # serials on file than their quantity) — only this part
-                    # moves as a plain quantity adjustment; the serialed part
-                    # is already handled above via removed/added_serials.
                     old_unserialized = max(0, old_qty - len(old_serials))
                     new_unserialized = max(0, new_qty - len(new_serials))
                     unserialized_delta = new_unserialized - old_unserialized
@@ -1889,9 +1779,6 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
             items = [item] + items[1:]
             updated["items"] = items
 
-            # Recompute order-level totals from the items instead of trusting
-            # whatever total_mrp the client sent — the client can't see other
-            # items or the discount reliably, so it drifts out of sync.
             discount = updated.get("discount", order.get("discount", 0))
             subtotal = sum(i.get("line_amount", 0) for i in items)
             tax_total = sum(i.get("line_tax", 0) for i in items)
@@ -1899,8 +1786,6 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
             updated["tax_total"] = tax_total
             updated["total_mrp"] = subtotal + tax_total - discount
 
-        # company_name / gst_number live under order["customer"], not at the
-        # top level either.
         customer_field_keys = {"company_name", "gst_number"}
         touched_customer_fields = customer_field_keys & updated.keys()
         if touched_customer_fields:
@@ -1940,21 +1825,9 @@ def order(user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="order dataset cannot be fetched")
 
 
-# =========================================================
-# SHIPMENT
-# =========================================================
 
 def sync_shipment_parts_to_inventory(shipment: dict, received_date: str):
-    """
-    Push a received shipment's parts into inventory, bucketed by each part's
-    status: "assembly" parts -> inventory spare_parts, "purchase" and
-    "warranty" parts -> inventory service_parts (kept apart there via
-    part_category so the two never merge into one entry). Warranty parts
-    also get a warranty_until date computed from this product's warranty
-    duration + the shipment's received_date, so inventory can later show
-    them as "under warranty" / "over warranty".
-    Non-fatal: caller decides what to do if this raises / returns a failure.
-    """
+
     spare_parts_needed = {}      # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}
     purchase_parts_needed = {}   # (product_name, part_name) -> total qty
     warranty_parts_needed = {}   # (product_name, part_name) -> {"quantity": qty, "warranty_until": date|None}
@@ -2044,7 +1917,6 @@ def _validate_payment(mode, total, paid_amount, credit_days):
 
 
 def _purchase_record_payment(mode, amount_inr, paid_inr, credit_days, base_date, old_payments=None):
-    """Payment fields stored on a customer["purchases"] row (all INR)."""
     pay = compute_payment(mode, amount_inr, paid_inr, credit_days, base_date)
     return {
         "payment_mode": pay["payment_mode"],
@@ -2218,10 +2090,6 @@ def create_shipment(request: CreateShipmentRequest, user: dict = Depends(require
         logging.info("shipment created successfully")
 
         inventory_sync = "skipped"
-        # if the received date was already filled in at creation time (the
-        # wizard's optional step-1 field), sync parts to inventory right away —
-        # otherwise the shipment shows as "received" but never gets the chance
-        # to run through mark_shipment_received, and its parts never land in inventory.
         if request.received_date:
             try:
                 inventory_sync = sync_shipment_parts_to_inventory(shipment_dict, request.received_date)
@@ -2249,8 +2117,6 @@ def mark_shipment_received(shipment_id: str, request: ShipmentReceivedRequest, u
         shipment = existing[0]
         db.mark_received(collection_name=SHIPMENT_COLLECTION, shipment_id=shipment_id, received_date=request.received_date)
 
-        # Kept non-fatal: the shipment is already marked received above, so an
-        # inventory hiccup here is reported back but doesn't roll that back.
         try:
             inventory_sync = sync_shipment_parts_to_inventory(shipment, request.received_date)
         except Exception as inv_err:
@@ -2296,7 +2162,6 @@ def update_shipment(shipment_id: str, request: ShipmentUpdateRequest, user: dict
                               merged.get("dispatch_date"))
         updated.update({"payment_mode": pay["payment_mode"], "paid_amount": pay["paid_amount"],
                         "credit_days": pay["credit_days"], "due_date": pay["due_date"]})
-        # keep status in sync if the caller is editing received_date directly
         if "received_date" in updated:
             updated["status"] = "received" if updated["received_date"] else "pending"
 
@@ -2331,9 +2196,6 @@ def delete_shipment(shipment_id: str, user: dict = Depends(require_role("admin")
         raise HTTPException(status_code=500, detail="shipment deletion failed!")
 
 
-# =========================================================
-# ASSEMBLY
-# =========================================================
 
 @app.get("/assembly/")
 def assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
@@ -2359,12 +2221,7 @@ def _spare_part_parents() -> dict:
 
 
 def _fill_belongs_to(parts: list, strict: bool = True) -> list:
-    """
-    Inventory parts are identified by part_name + belongs_to. If belongs_to is missing
-    and the part is stocked under exactly one product, it is filled in. If it is stocked
-    under several products the caller must say which one (strict -> 400; otherwise skipped,
-    used for legacy records). Local parts keep whatever was typed.
-    """
+
     parents = _spare_part_parents()
     for p in parts:
         p["belongs_to"] = (p.get("belongs_to") or "").strip()
@@ -2383,18 +2240,7 @@ def _fill_belongs_to(parts: list, strict: bool = True) -> list:
 
 @app.get("/assembly/available_parts")
 def available_parts_for_assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
-    """
-    Spare parts currently sitting in inventory — the pool an assembly's parts
-    are pulled from. This stock is fed by shipments: a shipment part marked
-    "assembly" lands in inventory as product_type="spare_parts" as soon as
-    the shipment is marked received (see mark_shipment_received above).
 
-    Only parts that already carry hologram numbers are surfaced here — each
-    assembled unit needs one, so a part with none on file can't be used to
-    build one. "hologram_available" tells the UI how many units of this part
-    can actually be assembled (which may be less than raw quantity, if only
-    some units have had a hologram number added yet).
-    """
     try:
         inv_db = inventory_manager()
         dataset = inv_db.get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "spare_parts"})
@@ -2424,13 +2270,7 @@ def available_parts_for_assembly(user: dict = Depends(require_role("inventory_ma
 
 @app.get("/assembly/shipment_parts")
 def shipment_parts_for_assembly(user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
-    """
-    Received shipments and the parts in them that were marked "assembly" — the picker behind
-    "Add from Shipment" on the assembly wizard. A received shipment's assembly parts already sit in
-    inventory spare_parts (see sync_shipment_parts_to_inventory), keyed by (part_name, belongs_to =
-    the shipment product's name). So every row also carries what inventory holds for that part right
-    now (in_stock, hologram_on_file) — that pooled stock is what an assembly deducts from.
-    """
+
     try:
         stock: dict = {}
         for entry in inventory_manager().get_data(collection_name=INVENTORY_COLLECTION, query={"product_type": "spare_parts"}):
@@ -2476,12 +2316,7 @@ def shipment_parts_for_assembly(user: dict = Depends(require_role("inventory_man
 
 @app.post("/assembly/add_part_holograms")
 def add_part_holograms(request: PartHologramsRequest, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
-    """
-    Adds hologram numbers to an inventory spare part (used by "Add from Shipment" so they can be
-    uploaded right there). Same rules as the inventory edit form: a lot never holds more hologram
-    numbers than its quantity, so numbers beyond the untagged units are returned as `leftover`;
-    numbers already on file for this part are skipped.
-    """
+
     try:
         name = (request.part_name or "").strip()
         parent = (request.belongs_to or "").strip()
@@ -2546,6 +2381,19 @@ def track_assembly(assembly_id: str, user: dict = Depends(require_role("inventor
         raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
 
 
+def _parse_lot_date(value: str):
+    """'YYYY-MM-DD' -> date, or None if it is not a valid date in that format."""
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _today_ist():
+    # lot dates are Indian calendar dates; UTC would still be "yesterday" until 05:30 IST
+    return (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
+
+
 @app.post("/assembly/create")
 def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
     try:
@@ -2558,13 +2406,19 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             raise HTTPException(status_code=400, detail="every unit needs a serial number")
         if len(set(serial_values)) != len(serial_values):
             raise HTTPException(status_code=400, detail="serial numbers must be unique within this batch")
-        # lot number is compulsory for every unit — but no guard on its value: one assembly can
-        # have several different lot numbers and the same lot can repeat across units
         lot_values = [(s.lot_no or "").strip() for s in request.serials]
         if any(not l for l in lot_values):
             raise HTTPException(status_code=400, detail="every unit needs a lot number")
+        lot_dates = [(s.lot_date or "").strip() for s in request.serials]
+        if any(not d for d in lot_dates):
+            raise HTTPException(status_code=400, detail="every unit needs a lot date")
+        date_by_lot: dict = {}
+        for lot, lot_date in zip(lot_values, lot_dates):
+            if not _parse_lot_date(lot_date):
+                raise HTTPException(status_code=400, detail=f"invalid date '{lot_date}' for lot '{lot}' (use YYYY-MM-DD)")
+            if date_by_lot.setdefault(lot, lot_date) != lot_date:
+                raise HTTPException(status_code=400, detail=f"lot '{lot}' has more than one date; one lot can have only one date")
 
-        # sum up everything sourced from inventory, merging duplicate part names
         needed_from_inventory: dict[tuple, int] = {}   # (part_name, belongs_to) -> qty
         for p in parts_used:
             if p["source"] != "inventory" or p["quantity"] <= 0:
@@ -2577,12 +2431,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                 status_code=400,
                 detail="add at least one part from inventory — its hologram numbers supply the assembled units' hologram numbers",
             )
-
-        # at least one inventory part must have enough quantity at a 1:1 ratio
-        # with the assembly quantity — that's the hologram-bearing part, and its
-        # hologram numbers (one per unit) become each finished unit's hologram
-        # number. If more than one part qualifies, that's not an error — extra
-        # (zyada) is fine, we just pick one; only a shortage (kam) blocks.
         hologram_candidates = [name for name, qty in needed_from_inventory.items() if qty >= request.quantity]
         if not hologram_candidates:
             raise HTTPException(
@@ -2590,10 +2438,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                 detail="at least one part from inventory must have quantity at least equal to the assembly quantity — "
                        "that part supplies the hologram number for each assembled unit",
             )
-        # pick the first qualifying part (in the order it was entered) as the
-        # hologram-bearing part — but prefer one that actually has enough hologram
-        # numbers on file: parts added via "Add from Shipment" may have none yet
-        # (e.g. a screw whose quantity equals the assembly quantity)
         _inv_probe = inventory_manager()
         hologram_key = next(
             (k for k in hologram_candidates
@@ -2604,10 +2448,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
         )                                               # (part_name, belongs_to)
         hologram_part_name = hologram_key[0]
 
-        # how much of each inventory part actually gets consumed: the hologram
-        # part only gives up exactly `request.quantity` (one per unit) — any
-        # extra the user entered for it stays untouched in inventory. Every
-        # other part is consumed at the full quantity entered for it.
         consume_amounts = {
             key: (request.quantity if key == hologram_key else qty)
             for key, qty in needed_from_inventory.items()
@@ -2615,9 +2455,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
 
         inv_db = inventory_manager()
 
-        # validate stock (and, for the hologram part, hologram numbers on file) is
-        # sufficient for EVERY part before deducting any of them — otherwise a
-        # shortage on part #2 would leave part #1 already (irreversibly) deducted
         for (part_name, belongs), qty in consume_amounts.items():
             have = inv_db.get_available_quantity_by_name(
                 collection_name=INVENTORY_COLLECTION, product_name=part_name, product_type="spare_parts",
@@ -2638,8 +2475,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                         status_code=400,
                         detail=f"not enough hologram-tagged '{part_name}'{' (' + belongs + ')' if belongs else ''} in inventory (need {request.quantity}, have {hologram_have})",
                     )
-
-        # stock confirmed for every part — now actually deduct
         hologram_numbers: list[str] = []
         part_lots: dict = {}
         for (part_name, belongs), qty in consume_amounts.items():
@@ -2650,8 +2485,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
                     product_type="spare_parts", quantity=request.quantity,
                     parent_product_name=belongs or None, collect=part_lots[(part_name, belongs)],
                 )
-                # any quantity beyond one-per-unit is left untouched in
-                # inventory — we only take what's needed
             else:
                 inv_db.consume_quantity(
                     collection_name=INVENTORY_COLLECTION, product_name=part_name,
@@ -2663,7 +2496,8 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
             raise HTTPException(status_code=500, detail="could not allocate a hologram number for every assembled unit")
 
         serials = [
-            {"serial_number": s.serial_number.strip(), "hologram_number": hologram_numbers[i], "lot_no": lot_values[i]}
+            {"serial_number": s.serial_number.strip(), "hologram_number": hologram_numbers[i],
+             "lot_no": lot_values[i], "lot_date": lot_dates[i]}
             for i, s in enumerate(request.serials)
         ]
 
@@ -2703,7 +2537,6 @@ def create_assembly(request: CreateAssemblyRequest, user: dict = Depends(require
 
 @app.post("/assembly/mark_completed/{assembly_id}")
 def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role("inventory_manager", "assembly", "admin", "accounts"))):
-    """Assembly team submits the batch for approval. Nothing goes to inventory yet."""
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -2732,10 +2565,7 @@ def mark_assembly_completed(assembly_id: str, user: dict = Depends(require_role(
 
 @app.post("/assembly/approve/{assembly_id}")
 def approve_assembly(assembly_id: str, request: ApproveAssemblyRequest, user: dict = Depends(require_role("admin", "accounts"))):
-    """
-    Approver ticks the serial numbers that physically arrived. Only those units
-    are added to inventory. All serials approved -> "completed"; some -> "partially_approved".
-    """
+
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -2755,10 +2585,25 @@ def approve_assembly(assembly_id: str, request: ApproveAssemblyRequest, user: di
         if not new_serials:
             raise HTTPException(status_code=400, detail="select at least one serial number that is not approved yet")
 
-        # a unit's serial must never enter inventory twice
+        # a unit can be approved only on or after its lot date (older records have no lot date)
+        today = _today_ist()
+        requested_set = set(new_serials)
+        future = []
+        for s in assembly.get("serials", []):
+            if s.get("serial_number") not in requested_set or not s.get("lot_date"):
+                continue
+            made_on = _parse_lot_date(s["lot_date"])
+            if made_on is None or made_on > today:
+                future.append(f"{s['serial_number']} (lot {s.get('lot_no', '')}, date {s['lot_date']})")
+        if future:
+            more = f" and {len(future) - 5} more" if len(future) > 5 else ""
+            raise HTTPException(
+                status_code=400,
+                detail=f"cannot approve units whose lot date is after today ({today.isoformat()}): {', '.join(future[:5])}{more}",
+            )
+
         _assert_unique_product_serials(new_serials)
 
-        # inventory first - if this fails nothing is marked approved
         inv_db = inventory_manager()
         sync_result = inv_db.add_from_assembly(
             collection_name=INVENTORY_COLLECTION,
@@ -2768,7 +2613,6 @@ def approve_assembly(assembly_id: str, request: ApproveAssemblyRequest, user: di
             quantity=len(new_serials),
             serial_numbers=new_serials,
             purchase_date=datetime.now(timezone.utc).date().isoformat(),
-            # the same lot numbers entered in the assembly go into inventory with their units
             serial_lots=[{"serial_number": sv.get("serial_number"), "lot_no": sv.get("lot_no", "")}
                          for sv in assembly.get("serials", []) if sv.get("serial_number") in set(new_serials)],
         )
@@ -2809,6 +2653,10 @@ def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict
             raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
 
         updated = dict(request.updated_values)
+        # these change only through create / mark_completed / approve, else the lot date check can be bypassed
+        locked = sorted(k for k in updated if k.split(".")[0] in ("serials", "approved_serials", "approval_history", "status"))
+        if locked:
+            raise HTTPException(status_code=400, detail=f"these fields cannot be changed here: {', '.join(locked)}")
         db.update(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id}, update_values=updated)
         logging.info("assembly value was updated successfully.")
         return {"message": "assembly value was updated", "assembly_id": assembly_id, "updated_value": updated}
@@ -2820,8 +2668,41 @@ def update_assembly(assembly_id: str, request: AssemblyUpdateRequest, user: dict
         raise HTTPException(status_code=500, detail="assembly value cannot be updated")
 
 
+def _edited_serials(assembly: dict, items: list, lot_locked: bool) -> list:
+    """Validate edited unit rows and return the new serials list."""
+    old = assembly.get("serials") or []
+    if len(items) != len(old):
+        raise HTTPException(status_code=400, detail="number of units cannot be changed")
+    approved = set(assembly.get("approved_serials") or [])
+    all_approved = assembly.get("status") == "completed"
+    result, date_by_lot = [], {}
+    for before, item in zip(old, items):
+        serial, lot, lot_date = item.serial_number.strip(), item.lot_no.strip(), item.lot_date.strip()
+        old_serial, old_lot = before.get("serial_number", ""), before.get("lot_no", "")
+        old_date = before.get("lot_date", "")
+        if not serial:
+            raise HTTPException(status_code=400, detail="every unit needs a serial number")
+        if serial != old_serial and (all_approved or old_serial in approved):
+            raise HTTPException(status_code=400, detail=f"serial '{old_serial}' is already in inventory, so it cannot be changed")
+        if lot_locked and lot != old_lot:
+            raise HTTPException(status_code=400, detail="lot number cannot be changed after units have been approved")
+        # blank is tolerated only where an old record was already blank and is left as it is
+        if not lot and old_lot:
+            raise HTTPException(status_code=400, detail=f"unit '{serial}' needs a lot number")
+        if not lot_date and (old_date or lot != old_lot):
+            raise HTTPException(status_code=400, detail=f"unit '{serial}' needs a lot date")
+        if lot_date:
+            if not _parse_lot_date(lot_date):
+                raise HTTPException(status_code=400, detail=f"invalid date '{lot_date}' for lot '{lot}' (use YYYY-MM-DD)")
+            if date_by_lot.setdefault(lot, lot_date) != lot_date:
+                raise HTTPException(status_code=400, detail=f"lot '{lot}' has more than one date; one lot can have only one date")
+        result.append(dict(before, serial_number=serial, lot_no=lot, lot_date=lot_date))
+    if len({s["serial_number"] for s in result}) != len(result):
+        raise HTTPException(status_code=400, detail="serial numbers must be unique within this batch")
+    return assembly_manager._normalize_serials(result)
+
+
 def _inventory_needed(parts_used: list) -> dict:
-    """Sums the quantity of every inventory-sourced part by (part_name, belongs_to) — local parts never touch inventory."""
     needed: dict[tuple, int] = {}
     for p in parts_used or []:
         qty = int(p.get("quantity", 0) or 0)
@@ -2834,22 +2715,7 @@ def _inventory_needed(parts_used: list) -> dict:
 
 @app.post("/assembly/edit/{assembly_id}")
 def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = Depends(require_role("inventory_manager", "admin", "assembly"))):
-    """
-    Edit an assembly's parts in ANY status (pending, awaiting approval, partially or
-    fully approved) — parts can be added, removed or their quantity changed. Only admin
-    and assembly users may do this.
-    Product name / model number can only be changed while no unit has been approved
-    into inventory yet (approved units keep the name/model they were added with).
 
-    Inventory follows the change automatically:
-      - a part's inventory consumption went UP   -> the extra is deducted from spare_parts stock
-      - a part's inventory consumption went DOWN -> the difference is restocked into spare_parts
-      - a part removed / switched to local       -> its whole consumption is restocked
-      - a part added from inventory              -> deducted
-    The hologram-bearing part always consumes exactly `quantity` (one per unit),
-    so it must stay at or above `quantity` and its extra listed quantity never
-    moves stock. Serial / hologram numbers and the unit quantity are not editable here.
-    """
     try:
         db = assembly_manager()
         existing = db.get_data(collection_name=ASSEMBLY_COLLECTION, query={"assembly_id": assembly_id})
@@ -2857,9 +2723,7 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
             raise HTTPException(status_code=404, detail="no assembly found with this assembly_id")
         assembly = existing[0]
 
-        # once any unit is approved into inventory, product identity is frozen (those inventory
-        # records would not follow the change) — parts stay editable in every status
-        identity_locked = bool(assembly.get("approved_serials"))
+        identity_locked = bool(assembly.get("approved_serials")) or assembly.get("status") in ("partially_approved", "completed")
         if identity_locked:
             for field, value in (("product_name", request.product_name),
                                  ("product_id", request.product_id),
@@ -2870,6 +2734,33 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
                         detail="product name / model cannot be changed after units have been approved into inventory",
                     )
 
+        # validate unit / detail edits before any inventory movement
+        detail_values: dict = {}
+        unit_changes: list = []
+        if request.serials is not None:
+            detail_values["serials"] = _edited_serials(assembly, request.serials, identity_locked)
+            for before, after in zip(assembly.get("serials") or [], detail_values["serials"]):
+                for field in ("serial_number", "lot_no", "lot_date"):
+                    if (before.get(field) or "") != after[field]:
+                        unit_changes.append({"serial_number": after["serial_number"], "field": field,
+                                             "old": before.get(field) or "", "new": after[field]})
+        supply_type = assembly.get("supply_type") or "normal"
+        if request.supply_type is not None:
+            supply_type = "govt" if request.supply_type == "govt" else "normal"
+            detail_values["supply_type"] = supply_type
+        if request.mfg_date is not None:
+            detail_values["mfg_date"] = request.mfg_date.strip()
+        if request.mrp is not None or supply_type == "govt":
+            detail_values["mrp"] = "" if supply_type == "govt" else request.mrp.strip()
+        detail_changes = [{"field": k, "old": assembly.get(k) or "", "new": v}
+                          for k, v in detail_values.items()
+                          if k != "serials" and v != (assembly.get(k) or ("normal" if k == "supply_type" else ""))]
+        if assembly.get("sticker") and detail_changes:
+            sticker = dict(assembly["sticker"])
+            for change in detail_changes:
+                sticker[{"supply_type": "type", "mfg_date": "mfgDate", "mrp": "mrp"}[change["field"]]] = change["new"]
+            detail_values["sticker"] = sticker
+
         quantity = int(assembly.get("quantity", 0) or 0)
         new_parts = assembly_manager._normalize_parts_used(_fill_belongs_to([p.dict() for p in request.parts_used]))
         old_parts = _fill_belongs_to([dict(p) for p in assembly.get("parts_used", [])], strict=False)   # legacy records
@@ -2879,9 +2770,6 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
         old_needed = _inventory_needed(old_parts)
         new_needed = _inventory_needed(new_parts)
 
-        # the part that supplied the hologram numbers when the assembly was created
-        # (older records without the field: same rule create uses — first part in
-        # entered order whose quantity reached the assembly quantity)
         h_name = assembly.get("hologram_part")
         if h_name:
             h_belongs = assembly.get("hologram_part_belongs_to", "") or ""
@@ -2898,7 +2786,6 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
                 detail=f"'{hologram_part[0]}'{' (' + hologram_part[1] + ')' if hologram_part[1] else ''} supplies the hologram numbers, so its inventory quantity must stay at least {quantity}",
             )
 
-        # what each inventory part actually consumes (hologram part: exactly one per unit)
         old_consume = {n: (quantity if n == hologram_part else q) for n, q in old_needed.items()}
         new_consume = {n: (quantity if n == hologram_part else q) for n, q in new_needed.items()}
         deltas = {}
@@ -2909,7 +2796,6 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
 
         inv_db = inventory_manager()
 
-        # check stock for every increase BEFORE touching anything
         for name, diff in deltas.items():
             if diff > 0:
                 have = inv_db.get_available_quantity_by_name(
@@ -2970,7 +2856,10 @@ def edit_assembly(assembly_id: str, request: EditAssemblyRequest, user: dict = D
                     "edited_at": now,
                     "previous_parts_used": assembly.get("parts_used", []),
                     "inventory_changes": inventory_changes,
+                    "unit_changes": unit_changes,
+                    "detail_changes": detail_changes,
                 }],
+                **detail_values,
             }
             if extra_lots:
                 sources = [dict(s, lots=list(s.get("lots") or [])) for s in (assembly.get("part_sources") or [])]
@@ -3025,11 +2914,7 @@ class DamageReportRequest(BaseModel):
 
 
 def send_damage_report_email(allocation_id: str, product_label: str, issue: str, image_data_url: str, reported_by: str):
-    """
-    Emails the damage photo + issue description to GMAIL_NOTIFY_RECEIVER right
-    away, before the image gets purged from Mongo. Never raises - a failed
-    email should not block the damage report from being saved.
-    """
+
     if not GMAIL_SENDER_EMAIL or not GMAIL_SENDER_APP_PASSWORD or not GMAIL_NOTIFY_RECEIVER:
         logging.error("gmail credentials not configured - skipping damage report email")
         return False
@@ -3066,15 +2951,13 @@ def send_damage_report_email(allocation_id: str, product_label: str, issue: str,
         return False
 
 
-# ---------- performance helpers ----------
 _bg_lock = threading.Lock()
 _bg_last = {}
 _bg_running = set()
 
 
 def run_in_background(name: str, fn, min_interval: int = 1800):
-    """Runs housekeeping jobs (image purge / Drive migration) off the request path, at most once
-    per `min_interval` seconds and never two copies at once, so page loads no longer wait for them."""
+
     now = time.time()
     with _bg_lock:
         if name in _bg_running or now - _bg_last.get(name, 0) < min_interval:
@@ -3121,7 +3004,7 @@ def ensure_indexes():
 
 
 def _warm_up_db():
-    """Opens the first DB connection at startup so the first page load doesn't pay for it."""
+
     try:
         t = time.perf_counter()
         mongodbclient().client.admin.command("ping")
@@ -3134,12 +3017,7 @@ def _warm_up_db():
 
 
 def purge_stale_damage_images():
-    """
-    Finds damage reports whose image is still stored and is older than
-    DAMAGE_IMAGE_RETENTION_DAYS, then clears just the image field (issue text
-    and metadata are kept). Runs automatically whenever allocations are
-    loaded. Never raises - a hiccup here should not break the page.
-    """
+
     try:
         cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=DAMAGE_IMAGE_RETENTION_DAYS)).isoformat()
         stale_query = {
@@ -3166,15 +3044,7 @@ def purge_stale_damage_images():
 
 
 def migrate_stale_dispatch_media():
-    """
-    Same idea as service_detail.migrate_stale_media(), applied to the
-    "dispatch" sub-document embedded on orders and spare-part allocations:
-    finds dispatch records whose image is still a raw base64 blob and is
-    older than DISPATCH_MEDIA_STALE_DAYS (default 5 days), uploads it to
-    Google Drive, and replaces the field in Mongo with a placeholder +
-    the Drive link. Runs automatically on every dispatch queue load. Never
-    raises - a Drive/network hiccup should not break the page.
-    """
+
     try:
         cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=DISPATCH_MEDIA_STALE_DAYS)).isoformat()
         stale_query = {
@@ -3215,8 +3085,6 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
     try:
         run_in_background("migrate_dispatch_media", migrate_stale_dispatch_media, 600)
         odb = order_manager()
-        # dispatched orders must stay in this queue's dispatched list even after they are marked
-        # "delivered", so fetch all three statuses
         all_orders = odb.get_data(collection_name=ORDERS_COLLECTION, query={"status": {"$in": ["processing", "dispatched", "delivered"]}})
         pending_orders = [o for o in all_orders if o.get("status") == "processing" and not o.get("dispatch")]
 
@@ -3243,8 +3111,6 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
         dispatched_spare = [a for a in all_spare if a.get("dispatch")]
         dispatched_product_alloc = [a for a in all_product_alloc if a.get("dispatch")]
 
-        # Manufacturing date on the dispatch form = assembling date of each serial number.
-        # Serials that were never assembled in-house simply get no date.
         assembly_dates = {}
         try:
             serial_nos = {sn for rec in (all_orders + all_product_alloc)
@@ -3279,23 +3145,9 @@ def dispatch_queue(user: dict = Depends(require_role("service_manager", "admin",
         raise HTTPException(status_code=500, detail="dispatch queue could not be fetched")
 
 
-# =========================================================
-# Attendance — daily biometric upload, monthly report, and
-# automatic WhatsApp "you are late" reminders via Twilio.
-# Admin-only end to end (see require_role("admin") below and
-# common_auth.js's ROLE_ACCESS for the page itself).
-# =========================================================
 
 class _AttendanceTableParser(HTMLParser):
-    """
-    Minimal dependency-free <table> reader (stdlib html.parser only — no
-    lxml/html5lib needed, unlike pandas.read_html which requires one of
-    those and silently fails on servers that don't have them installed).
-    Reads every <tr>, and within it every <td>/<th> cell's text, into a
-    plain list of rows — exactly what the biometric machine's "Daily
-    Present List" export needs (it's an HTML table saved with a .xls
-    extension).
-    """
+
     def __init__(self):
         super().__init__()
         self.rows = []
@@ -3339,14 +3191,7 @@ def get_late_threshold() -> str:
 
 
 def find_employee_phone(db, employee_name: str) -> Optional[str]:
-    """
-    Looks up an employee's WhatsApp/mobile number from the single accounts
-    (user) collection instead of a separate contacts list. Matches the
-    biometric device's "Employee Name" against each account's "name" field
-    case-insensitively (device exports and account records don't always
-    agree on capitalization), so "Rahul Sharma", "RAHUL SHARMA" and
-    "rahul sharma" are all treated as the same person.
-    """
+
     name = (employee_name or "").strip()
     if not name:
         return None
@@ -3357,15 +3202,9 @@ def find_employee_phone(db, employee_name: str) -> Optional[str]:
     return match[0].get("phone") if match else None
 
 
+
 def send_whatsapp_late_reminder(phone_number: str, employee_name: str, in_time: str) -> bool:
-    """
-    Sends a "you are late today" WhatsApp message via Twilio.
-    Requires the `twilio` package (pip install twilio) and these env vars:
-      TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM
-      (TWILIO_WHATSAPP_FROM looks like "whatsapp:+14155238886")
-    Silently returns False (and logs why) if any of that isn't set up yet,
-    so a missing Twilio config never blocks the attendance upload itself.
-    """
+
     if TwilioClient is None:
         logging.error("twilio package not installed — run `pip install twilio` to enable late reminders")
         return False
@@ -3412,7 +3251,6 @@ def set_late_threshold_endpoint(request: LateThresholdRequest, user: dict = Depe
 
 @app.get("/attendance/")
 def get_attendance(date: str = Query(None), month: str = Query(None), user: dict = Depends(require_role("admin"))):
-    """date="YYYY-MM-DD" for one day's list, or month="YYYY-MM" for that month's records (monthly report)."""
     try:
         db = mongodbclient()
         query = {}
@@ -3429,21 +3267,7 @@ def get_attendance(date: str = Query(None), month: str = Query(None), user: dict
 
 @app.post("/attendance/upload")
 async def upload_attendance(file: UploadFile = File(...), user: dict = Depends(require_role("admin"))):
-    """
-    Takes the daily biometric export as-is (the "DailyPresentList_*.xls" file
-    — really an HTML table saved with an .xls extension) and:
-      1. reads the date from its "Date : DD-Mon-YYYY" header,
-      2. stores one attendance record per employee for that date
-         (re-uploading the same day's file updates those records instead of
-         duplicating them),
-      3. compares each employee's In-Time against the configured late
-         threshold and, for anyone late who hasn't already been messaged for
-         that date, sends a WhatsApp "you are late today" reminder via
-         Twilio (only for employees whose name matches an account in the
-         accounts/user collection with a phone number saved — matched
-         case-insensitively since device exports and account records don't
-         always agree on capitalization).
-    """
+
     try:
         raw_bytes = await file.read()
         raw = raw_bytes.decode("utf-8", errors="ignore")
@@ -3570,9 +3394,6 @@ def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user:
             "dispatched_at": datetime.now(timezone.utc).isoformat()
         }
         update_values = {"dispatch": dispatch_info}
-        # Once a docket number exists the order has physically left, so reflect
-        # that on the Orders page. Only move it forward from "processing" - never
-        # overwrite delivered / cancelled / returned.
         if request.docket_no and order.get("status") == "processing":
             update_values["status"] = "dispatched"
         db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values=update_values)

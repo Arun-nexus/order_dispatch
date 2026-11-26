@@ -18,6 +18,13 @@ function todayStr() {
 }
 
 
+// today's date in India (YYYY-MM-DD), same rule as the server's approval check
+function istToday() {
+  return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+}
+function fmtLotDate(d) { return d ? d.split('-').reverse().join('-') : '—'; }
+function isFutureLot(s) { return !!s.lotDate && s.lotDate > istToday(); }
+
 function fromServerShapeAssembly(a) {
   return {
     id: a.assembly_id,
@@ -26,7 +33,7 @@ function fromServerShapeAssembly(a) {
     modelNumber: a.model_number,
     quantity: a.quantity,
     partsUsed: (a.parts_used || []).map(p => ({ name: p.part_name, quantity: p.quantity, source: p.source, belongsTo: partBelongs(p), shipmentId: p.shipment_id || '' })),
-    serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number, lot: s.lot_no || '' })),
+    serials: (a.serials || []).map(s => ({ serial: s.serial_number, hologram: s.hologram_number, lot: s.lot_no || '', lotDate: s.lot_date || '' })),
     status: a.status,
     approvedSerials: a.approved_serials || [],
     createdAt: a.created_at,
@@ -50,7 +57,9 @@ function toServerShapeAssembly(a) {
       part_name: p.name, quantity: Number(p.quantity) || 0, source: p.source, belongs_to: p.belongsTo || '',
       shipment_id: p.shipmentId || '',
     })),
-    serials: (a.serials || []).map((s, i) => ({ serial_number: s, lot_no: String((a.lots || [])[i] || '').trim() })),
+    serials: (a.serials || []).map((s, i) => ({
+      serial_number: s, lot_no: String((a.lots || [])[i] || '').trim(), lot_date: (a.lotDates || [])[i] || '',
+    })),
     supply_type: a.supplyType || 'normal',
     mfg_date: a.mfgDate || '',
     mrp: a.mrp || '',
@@ -437,9 +446,9 @@ function openViewAssemblyModal(id) {
     <h4 style="margin-bottom:8px;">Serial / Hologram Numbers</h4>
     <div style="max-height:220px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;">
-        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th><th style="text-align:left;padding:8px;">Lot No.</th>${a.status !== 'pending' ? '<th style="text-align:left;padding:8px;">Approval</th>' : ''}</tr></thead>
+        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th><th style="text-align:left;padding:8px;">Lot No.</th><th style="text-align:left;padding:8px;">Lot Date</th>${a.status !== 'pending' ? '<th style="text-align:left;padding:8px;">Approval</th>' : ''}</tr></thead>
         <tbody>
-          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td><td style="padding:6px 8px;">${s.lot ? aesc(s.lot) : '—'}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:#16a34a;">✔ Received</span>' : '<span style="color:#d97706;">Not received</span>'}</td>` : ''}</tr>`).join('')}
+          ${(a.serials || []).map((s, i) => `<tr><td style="padding:6px 8px;">${i + 1}</td><td style="padding:6px 8px;">${s.serial}</td><td style="padding:6px 8px;">${s.hologram}</td><td style="padding:6px 8px;">${s.lot ? aesc(s.lot) : '—'}</td><td style="padding:6px 8px;white-space:nowrap;">${aesc(fmtLotDate(s.lotDate))}</td>${a.status !== 'pending' ? `<td style="padding:6px 8px;">${(a.approvedSerials || []).includes(s.serial) ? '<span style="color:#16a34a;">✔ Received</span>' : '<span style="color:#d97706;">Not received</span>'}</td>` : ''}</tr>`).join('')}
         </tbody>
       </table>
     </div>
@@ -475,7 +484,7 @@ function openApproveAssemblyModal(id) {
       <h3>Approve — ${a.productName}</h3>
       <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
     </div>
-    <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Tick the serial numbers that have arrived. Only ticked units are added to inventory.</p>
+    <p style="font-size:13px;color:#64748b;margin-bottom:10px;">Tick the serial numbers that have arrived. Only ticked units are added to inventory. Units whose lot date is after today (${fmtLotDate(istToday())}) cannot be approved yet.</p>
     <div style="max-height:320px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;">
         <thead><tr>
@@ -483,15 +492,19 @@ function openApproveAssemblyModal(id) {
           <th style="text-align:left;padding:8px;">Serial No.</th>
           <th style="text-align:left;padding:8px;">Hologram No.</th>
           <th style="text-align:left;padding:8px;">Lot No.</th>
+          <th style="text-align:left;padding:8px;">Lot Date</th>
           <th style="text-align:left;padding:8px;">Status</th>
         </tr></thead>
         <tbody>
           ${(a.serials || []).map(s => `<tr>
-            <td style="padding:6px 8px;"><input type="checkbox" class="apprChk" value="${s.serial}" ${done.has(s.serial) ? 'checked disabled' : ''}></td>
+            <td style="padding:6px 8px;"><input type="checkbox" class="apprChk" value="${s.serial}" ${done.has(s.serial) ? 'checked disabled' : isFutureLot(s) ? 'disabled' : ''}></td>
             <td style="padding:6px 8px;">${s.serial}</td>
             <td style="padding:6px 8px;">${s.hologram}</td>
             <td style="padding:6px 8px;">${s.lot ? aesc(s.lot) : '—'}</td>
-            <td style="padding:6px 8px;">${done.has(s.serial) ? '<span style="color:#16a34a;">✔ Approved</span>' : '<span style="color:#d97706;">Not received</span>'}</td>
+            <td style="padding:6px 8px;white-space:nowrap;">${aesc(fmtLotDate(s.lotDate))}</td>
+            <td style="padding:6px 8px;">${done.has(s.serial) ? '<span style="color:#16a34a;">✔ Approved</span>'
+              : isFutureLot(s) ? `<span style="color:#dc2626;">Can be approved from ${aesc(fmtLotDate(s.lotDate))}</span>`
+              : '<span style="color:#d97706;">Not received</span>'}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -503,7 +516,8 @@ function openApproveAssemblyModal(id) {
   const chks = () => [...box.querySelectorAll('.apprChk:not(:disabled)')];
   const sel = () => chks().filter(c => c.checked).map(c => c.value);
   const upd = () => {
-    box.querySelector('#apprCount').textContent = `${sel().length} selected · ${done.size}/${a.serials.length} already approved`;
+    const locked = a.serials.filter(s => !done.has(s.serial) && isFutureLot(s)).length;
+    box.querySelector('#apprCount').textContent = `${sel().length} selected · ${done.size}/${a.serials.length} already approved${locked ? ` · ${locked} locked (future lot date)` : ''}`;
     box.querySelector('#apprSubmit').disabled = !sel().length;
   };
   box.querySelector('#apprAll').addEventListener('change', e => { chks().forEach(c => c.checked = e.target.checked); upd(); });
@@ -578,7 +592,7 @@ function exportAssemblySerials(id) {
 }
 
 function exportSerialsToExcel(serials, productName) {
-  const rows = serials.map((s, i) => ({ 'Unit #': i + 1, 'Serial Number': s.serial, 'Hologram Number': s.hologram, 'Lot No.': s.lot || '' }));
+  const rows = serials.map((s, i) => ({ 'Unit #': i + 1, 'Serial Number': s.serial, 'Hologram Number': s.hologram, 'Lot No.': s.lot || '', 'Lot Date': s.lotDate ? fmtLotDate(s.lotDate) : '' }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Serials');
@@ -1194,6 +1208,9 @@ function renderAStep3() {
   if (!Array.isArray(assemblyDraft.lots) || assemblyDraft.lots.length !== assemblyDraft.quantity) {
     assemblyDraft.lots = Array.from({ length: assemblyDraft.quantity }, () => '');
   }
+  if (!Array.isArray(assemblyDraft.lotDates) || assemblyDraft.lotDates.length !== assemblyDraft.quantity) {
+    assemblyDraft.lotDates = Array.from({ length: assemblyDraft.quantity }, () => '');
+  }
 
   const hologramPart = (assemblyDraft.partsUsed || []).find(
     p => p.source === 'inventory' && Number(p.quantity) >= Number(assemblyDraft.quantity)
@@ -1208,7 +1225,8 @@ function renderAStep3() {
     ${stepDots(3)}
     <p style="font-size:13px;color:#64748b;margin-bottom:6px;">
       Enter (or adjust) Unit 1's serial number below, then generate the rest of the batch from it — or fill in / edit every unit by hand.
-      <strong>Lot No. is compulsory for every unit</strong> — one assembly can have more than one lot number.
+      <strong>Lot No. and Lot Date are compulsory for every unit</strong> — one assembly can have more than one lot, but each lot has only one date.
+      A unit can be approved only on or after its lot date.
     </p>
     <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
       <i class="fa-solid fa-circle-info"></i>
@@ -1217,7 +1235,7 @@ function renderAStep3() {
     </p>
     <div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <strong style="font-size:13px;">Lots (lot no. + quantity)</strong>
+        <strong style="font-size:13px;">Lots (lot no. + date + quantity)</strong>
         <span id="lotSummary" style="font-size:12px;"></span>
       </div>
       <div id="lotBlocks" style="display:flex;flex-direction:column;gap:6px;"></div>
@@ -1237,7 +1255,7 @@ function renderAStep3() {
     <div style="max-height:280px;overflow-y:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         <thead style="position:sticky;top:0;background:#f8fafc;">
-          <tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial Number</th><th style="text-align:left;padding:8px;">Lot No. <span style="color:#d62828;">*</span></th></tr>
+          <tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial Number</th><th style="text-align:left;padding:8px;">Lot No. <span style="color:#d62828;">*</span></th><th style="text-align:left;padding:8px;">Lot Date <span style="color:#d62828;">*</span></th></tr>
         </thead>
         <tbody id="serialRows"></tbody>
       </table>
@@ -1268,7 +1286,7 @@ function renderAStep3() {
   box.querySelector('#addLotBtn').addEventListener('click', () => {
     syncLotBlocksFromDom();
     const left = assemblyDraft.quantity - lotBlocksTotal();
-    assemblyDraft.lotBlocks.push({ lot: '', qty: left > 0 ? String(left) : '' });
+    assemblyDraft.lotBlocks.push({ lot: '', date: '', qty: left > 0 ? String(left) : '' });
     renderLotBlocks();
   });
   box.querySelector('#applyLotsBtn').addEventListener('click', () => {
@@ -1338,10 +1356,11 @@ function lotBlocksTotal() {
 function renderLotBlocks() {
   const wrap = document.getElementById('lotBlocks');
   if (!wrap) return;
-  if (!Array.isArray(assemblyDraft.lotBlocks) || !assemblyDraft.lotBlocks.length) assemblyDraft.lotBlocks = [{ lot: '', qty: String(assemblyDraft.quantity) }];
+  if (!Array.isArray(assemblyDraft.lotBlocks) || !assemblyDraft.lotBlocks.length) assemblyDraft.lotBlocks = [{ lot: '', date: '', qty: String(assemblyDraft.quantity) }];
   wrap.innerHTML = assemblyDraft.lotBlocks.map((b, i) => `
     <div data-lot-block="${i}" style="display:flex;gap:8px;align-items:center;">
-      <input type="text" class="lotBlockNo" placeholder="Lot No." value="${escAttr(b.lot)}" style="flex:2;">
+      <input type="text" class="lotBlockNo" placeholder="Lot No." value="${escAttr(b.lot)}" style="flex:2;min-width:0;">
+      <input type="date" class="lotBlockDate" title="Lot Date" value="${escAttr(b.date || '')}" style="flex:1.5;min-width:0;">
       <input type="number" min="1" class="lotBlockQty" placeholder="Qty" value="${escAttr(b.qty)}" style="flex:1;">
       <button type="button" class="lotBlockDel" data-i="${i}" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:34px;height:34px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
     </div>`).join('');
@@ -1357,7 +1376,7 @@ function renderLotBlocks() {
 function syncLotBlocksFromDom() {
   document.querySelectorAll('#lotBlocks [data-lot-block]').forEach(row => {
     const i = Number(row.dataset.lotBlock);
-    assemblyDraft.lotBlocks[i] = { lot: row.querySelector('.lotBlockNo').value.trim(), qty: row.querySelector('.lotBlockQty').value };
+    assemblyDraft.lotBlocks[i] = { lot: row.querySelector('.lotBlockNo').value.trim(), date: row.querySelector('.lotBlockDate').value, qty: row.querySelector('.lotBlockQty').value };
   });
 }
 
@@ -1376,12 +1395,15 @@ function applyLotBlocks(showErrors) {
   const blocks = assemblyDraft.lotBlocks || [];
   const fail = msg => { if (showErrors) showResponseModal('Check lots', msg, false); return false; };
   if (blocks.some(b => !b.lot)) return fail('Every lot needs a Lot No.');
+  if (blocks.some(b => !b.date)) return fail('Every lot needs a Lot Date.');
   if (blocks.some(b => !(parseInt(b.qty, 10) > 0))) return fail('Every lot needs a quantity greater than 0.');
   if (new Set(blocks.map(b => b.lot)).size !== blocks.length) return fail('Each Lot No. should appear only once here; increase its quantity instead.');
   if (lotBlocksTotal() !== assemblyDraft.quantity) return fail(`Lot quantities add up to ${lotBlocksTotal()}, but this assembly has ${assemblyDraft.quantity} units.`);
   const lots = [];
-  blocks.forEach(b => { for (let k = 0; k < parseInt(b.qty, 10); k++) lots.push(b.lot); });
+  const lotDates = [];
+  blocks.forEach(b => { for (let k = 0; k < parseInt(b.qty, 10); k++) { lots.push(b.lot); lotDates.push(b.date); } });
   assemblyDraft.lots = lots;
+  assemblyDraft.lotDates = lotDates;
   renderSerialRows();
   return true;
 }
@@ -1393,6 +1415,7 @@ function renderSerialRows() {
       <td style="padding:6px 8px;">${i + 1}${i === 0 ? ' <span style="color:#94a3b8;font-size:11px;">(seed)</span>' : ''}</td>
       <td style="padding:6px 8px;"><input type="text" class="serialInput" placeholder="Serial Number" value="${s}" style="width:100%;"></td>
       <td style="padding:6px 8px;"><input type="text" class="lotInput" placeholder="Lot No. (required)" value="${escAttr((assemblyDraft.lots || [])[i] || '')}" style="width:100%;"></td>
+      <td style="padding:6px 8px;"><input type="date" class="lotDateInput" value="${escAttr((assemblyDraft.lotDates || [])[i] || '')}" style="width:100%;"></td>
     </tr>
   `).join('');
 }
@@ -1405,12 +1428,14 @@ function syncSerialsFromDom() {
     assemblyDraft.serials[i] = row.querySelector('.serialInput').value.trim();
     if (!Array.isArray(assemblyDraft.lots)) assemblyDraft.lots = [];
     assemblyDraft.lots[i] = row.querySelector('.lotInput').value.trim();
+    if (!Array.isArray(assemblyDraft.lotDates)) assemblyDraft.lotDates = [];
+    assemblyDraft.lotDates[i] = row.querySelector('.lotDateInput').value;
   });
 }
 
 function validateSerialsStep() {
   syncSerialsFromDom();
-  if ((assemblyDraft.lots || []).some(l => !String(l || '').trim())) applyLotBlocks(false);
+  if ((assemblyDraft.lots || []).some(l => !String(l || '').trim()) || (assemblyDraft.lotDates || []).some(d => !d)) applyLotBlocks(false);
 
   if (assemblyDraft.serials.some(s => !s)) {
     showResponseModal('Missing values', 'Every unit needs a serial number.', false);
@@ -1420,6 +1445,20 @@ function validateSerialsStep() {
   if (lotMissing !== -1 || (assemblyDraft.lots || []).length !== assemblyDraft.serials.length) {
     showResponseModal('Lot No. required', `Every unit needs a Lot No.${lotMissing !== -1 ? ' Unit ' + (lotMissing + 1) + ' is missing one.' : ''}`, false);
     return false;
+  }
+  const dateMissing = assemblyDraft.serials.findIndex((_, i) => !(assemblyDraft.lotDates || [])[i]);
+  if (dateMissing !== -1) {
+    showResponseModal('Lot Date required', `Every unit needs a Lot Date. Unit ${dateMissing + 1} is missing one.`, false);
+    return false;
+  }
+  const dateByLot = new Map();
+  for (let i = 0; i < assemblyDraft.serials.length; i++) {
+    const lot = assemblyDraft.lots[i];
+    if (dateByLot.has(lot) && dateByLot.get(lot) !== assemblyDraft.lotDates[i]) {
+      showResponseModal('Check lot dates', `Lot ${lot} has two different dates (see unit ${i + 1}). One lot can have only one date.`, false);
+      return false;
+    }
+    dateByLot.set(lot, assemblyDraft.lotDates[i]);
   }
   const serialSet = new Set(assemblyDraft.serials);
   if (serialSet.size !== assemblyDraft.serials.length) {
@@ -1477,7 +1516,7 @@ async function openEditAssemblyModal(id) {
   }
   const a = assemblies.find(x => x.id === id);
   if (!a) return;
-  editingIdentityLocked = (a.approvedSerials || []).length > 0;
+  editingIdentityLocked = (a.approvedSerials || []).length > 0 || a.status === 'partially_approved' || a.status === 'completed';
 
   await loadAvailableParts();   
   editingAssemblyId = id;
@@ -1497,6 +1536,12 @@ async function openEditAssemblyModal(id) {
     quantity: a.quantity,
     partsUsed: (a.partsUsed || []).map(p => ({ name: p.name, quantity: p.quantity, belongsTo: p.belongsTo || '', source: p.source === 'local' ? 'local' : 'inventory', shipmentId: p.shipmentId || '' })),
     serials: [],
+    supplyType: a.supplyType || 'normal', mfgDate: a.mfgDate || '', mrp: a.mrp || '',
+    units: (a.serials || []).map(s => ({
+      serial: s.serial || '', hologram: s.hologram || '', lot: s.lot || '', origLot: s.lot || '', origDate: s.lotDate || '',
+      serialLocked: a.status === 'completed' || (a.approvedSerials || []).includes(s.serial),
+    })),
+    lotDateMap: new Map((a.serials || []).filter(s => s.lotDate).map(s => [s.lot || '', s.lotDate])),
   };
   renderEditAssemblyModal();
   openModal('assemblyModal');
@@ -1512,9 +1557,25 @@ function renderEditAssemblyModal() {
     <div style="display:flex;flex-direction:column;gap:10px;">
       <input id="eProductName" placeholder="Product Name" value="${escAttr(assemblyDraft.productName)}" ${editingIdentityLocked ? 'disabled' : ''}>
       <input id="eModelNumber" placeholder="Model Number" value="${escAttr(assemblyDraft.modelNumber)}" ${editingIdentityLocked ? 'disabled' : ''}>
-      ${editingIdentityLocked ? '<p style="font-size:12px;color:#b45309;background:#fff4e0;border-radius:8px;padding:8px 10px;margin:0;"><i class="fa-solid fa-lock"></i> Some units of this assembly are already in inventory, so product name and model can no longer be changed. Parts can still be edited.</p>' : ''}
+      ${editingIdentityLocked ? '<p style="font-size:12px;color:#b45309;background:#fff4e0;border-radius:8px;padding:8px 10px;margin:0;"><i class="fa-solid fa-lock"></i> Some units of this assembly are already approved, so product name, model, Lot No. and approved serial numbers are locked. Everything else can still be edited.</p>' : ''}
       <label style="font-size:13px;color:#64748b;">Quantity to Assemble (cannot be changed)</label>
       <input type="number" value="${assemblyDraft.quantity}" disabled>
+      <label style="font-size:13px;color:#64748b;">Supply Type</label>
+      <select id="eSupplyType">
+        <option value="normal" ${assemblyDraft.supplyType !== 'govt' ? 'selected' : ''}>Normal</option>
+        <option value="govt" ${assemblyDraft.supplyType === 'govt' ? 'selected' : ''}>Govt. Supply</option>
+      </select>
+      <input id="eMfgDate" placeholder="Mfg Date" value="${escAttr(assemblyDraft.mfgDate)}">
+      <input id="eMrp" placeholder="M.R.P" value="${escAttr(assemblyDraft.mrp)}" ${assemblyDraft.supplyType === 'govt' ? 'disabled' : ''}>
+    </div>
+    <h4 style="margin:18px 0 6px;">Lot Dates</h4>
+    <div id="eLotRows" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
+    <h4 style="margin:18px 0 6px;">Units</h4>
+    <div style="max-height:260px;overflow:auto;border:1px solid #eef1f6;border-radius:10px;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th><th style="text-align:left;padding:8px;">Lot No.</th></tr></thead>
+        <tbody id="eUnitRows"></tbody>
+      </table>
     </div>
     <h4 style="margin:18px 0 6px;">Parts Used</h4>
     <p style="font-size:12px;color:#005ca9;background:#eef3fb;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
@@ -1555,8 +1616,55 @@ function renderEditAssemblyModal() {
     renderPartsUsedRows();
   });
   box.querySelector('#eSaveBtn').addEventListener('click', saveAssemblyEdit);
+  box.querySelector('#eSupplyType').addEventListener('change', e => {
+    box.querySelector('#eMrp').disabled = e.target.value === 'govt';
+  });
 
   renderPartsUsedRows();
+  renderEditUnits();
+  renderEditLots();
+}
+
+function renderEditUnits() {
+  const tbody = document.getElementById('eUnitRows');
+  tbody.innerHTML = assemblyDraft.units.map((u, i) => `
+    <tr>
+      <td style="padding:6px 8px;">${i + 1}</td>
+      <td style="padding:6px 8px;"><input type="text" data-i="${i}" data-f="serial" value="${escAttr(u.serial)}" ${u.serialLocked ? 'disabled' : ''} style="width:100%;"></td>
+      <td style="padding:6px 8px;">${escAttr(u.hologram)}</td>
+      <td style="padding:6px 8px;"><input type="text" data-i="${i}" data-f="lot" value="${escAttr(u.lot)}" ${editingIdentityLocked ? 'disabled' : ''} style="width:100%;"></td>
+    </tr>`).join('');
+  tbody.onchange = e => {
+    const el = e.target;
+    assemblyDraft.units[Number(el.dataset.i)][el.dataset.f] = el.value.trim();
+    if (el.dataset.f === 'lot') renderEditLots();
+  };
+}
+
+// one row per lot, so a lot's date is changed once for all of its units
+function renderEditLots() {
+  const wrap = document.getElementById('eLotRows');
+  const counts = new Map();
+  assemblyDraft.units.forEach(u => counts.set(u.lot, (counts.get(u.lot) || 0) + 1));
+  const lots = [...counts.keys()];
+  wrap.innerHTML = lots.map((lot, i) => `
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" data-i="${i}" data-f="lot" placeholder="Lot No." value="${escAttr(lot)}" ${editingIdentityLocked ? 'disabled' : ''} style="flex:2;min-width:0;">
+      <input type="date" data-i="${i}" data-f="date" value="${escAttr(assemblyDraft.lotDateMap.get(lot) || '')}" style="flex:1.5;min-width:0;">
+      <span style="font-size:12px;color:#64748b;white-space:nowrap;">${counts.get(lot)} unit(s)</span>
+    </div>`).join('');
+  wrap.onchange = e => {
+    const el = e.target;
+    const lot = lots[Number(el.dataset.i)];
+    const map = assemblyDraft.lotDateMap;
+    if (el.dataset.f === 'date') { map.set(lot, el.value); return; }
+    const renamed = el.value.trim();
+    if (!renamed) { el.value = lot; return; }
+    if (!counts.has(renamed)) map.set(renamed, map.get(lot) || '');
+    assemblyDraft.units.forEach(u => { if (u.lot === lot) u.lot = renamed; });
+    renderEditUnits();
+    renderEditLots();
+  };
 }
 
 async function saveAssemblyEdit() {
@@ -1586,6 +1694,14 @@ async function saveAssemblyEdit() {
     return;
   }
 
+  const units = assemblyDraft.units.map(u => ({ ...u, lotDate: assemblyDraft.lotDateMap.get(u.lot) || '' }));
+  const fail = msg => showResponseModal('Check units', msg, false);
+  if (units.some(u => !u.serial)) return fail('Every unit needs a serial number.');
+  if (new Set(units.map(u => u.serial)).size !== units.length) return fail('Serial numbers must be unique within this batch.');
+  if (units.some(u => !u.lot && u.origLot)) return fail('Every unit needs a Lot No.');
+  const noDate = units.find(u => !u.lotDate && (u.origDate || u.lot !== u.origLot));
+  if (noDate) return fail(`Lot ${noDate.lot} needs a Lot Date.`);
+
   try {
     const res = await apiFetch(`/assembly/edit/${editingAssemblyId}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1596,6 +1712,10 @@ async function saveAssemblyEdit() {
           model_number: document.getElementById('eModelNumber').value.trim(),
         }),
         parts_used: parts.map(p => ({ part_name: p.name, quantity: Number(p.quantity), source: p.source, belongs_to: p.belongsTo || '', shipment_id: p.shipmentId || '' })),
+        serials: units.map(u => ({ serial_number: u.serial, lot_no: u.lot, lot_date: u.lotDate })),
+        supply_type: document.getElementById('eSupplyType').value,
+        mfg_date: document.getElementById('eMfgDate').value.trim(),
+        mrp: document.getElementById('eMrp').value.trim(),
       }),
     });
     const data = await res.json();
