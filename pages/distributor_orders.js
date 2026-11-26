@@ -491,10 +491,11 @@ function openViewOrderModal(o) {
         <td>${esc(it.product_name)}</td>
         <td>${esc((it.serial_numbers || []).join(', ')) || '-'}</td>
         <td>${it.quantity ?? 0}</td>
+        <td>${it.total_boxes ?? '-'}</td>
         <td>₹${it.price ?? 0}</td>
         <td>₹${(it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed ? (it.line_total ?? ((it.price || 0) * (it.quantity || 0))).toFixed(2) : it.line_total}</td>
       </tr>`).join('')
-    : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
+    : `<tr><td colspan="6" style="text-align:center;color:#94a3b8;">No items</td></tr>`;
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -506,7 +507,7 @@ function openViewOrderModal(o) {
     <div class="detail"><small>Address</small><p>${esc(customer.company_address ?? '-')}</p></div>
     ${customer.gst_number ? `<div class="detail"><small>GST No.</small><p>${esc(customer.gst_number)}</p></div>` : ''}
     <table style="width:100%;font-size:13px;margin:10px 0;border-collapse:collapse;">
-      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Serial No.</th><th>Qty</th><th>Price</th><th>Line Total</th></tr></thead>
+      <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th>Serial No.</th><th>Qty</th><th>Boxes</th><th>Price</th><th>Line Total</th></tr></thead>
       <tbody>${itemsRows}</tbody>
     </table>
     <div class="detail"><small>Payment</small><p>${paymentDetailsLabel(o)}</p></div>
@@ -712,7 +713,7 @@ function renderProductsStep() {
     <input id="prodFilter" placeholder="Filter products..." style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
     <div style="max-height:300px;overflow-y:auto;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
-        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th style="width:70px;">Qty</th><th style="width:100px;">Price</th></tr></thead>
+        <thead><tr style="text-align:left;color:#fff;"><th>Product</th><th style="width:70px;">Qty</th><th style="width:100px;">Price</th><th style="width:110px;">Boxes / Pc</th></tr></thead>
         <tbody id="prodRows"></tbody>
       </table>
     </div>
@@ -759,6 +760,8 @@ function renderProductsStep() {
     const cartLine = orderWiz.cart[key];
     const qtyInCart = cartLine?.quantity ?? '';
     const priceInCart = cartLine?.price ?? '';
+    const boxInCart = cartLine?.boxes_per_piece ?? '';
+    const totalBoxes = cartLine ? Number((cartLine.boxes_per_piece * cartLine.quantity).toFixed(2)) : 0;
     return `
       <tr>
         <td>${esc(p.product_name ?? '')}<br><small style="color:#94a3b8;">${(p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? 'Belongs to: ' + esc(p.parent_product_name || '—') : (p.model_no ? 'Model: ' + esc(p.model_no) : '')}</small></td>
@@ -768,6 +771,10 @@ function renderProductsStep() {
         <td><input type="number" min="0" inputmode="decimal" value="${priceInCart}"
               placeholder="₹0" data-row-key="${esc(key)}" class="priceInput"
               style="width:85px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;"></td>
+        <td><input type="number" min="0" step="any" inputmode="decimal" value="${boxInCart}"
+              placeholder="Boxes" data-row-key="${esc(key)}" class="boxInput"
+              style="width:85px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+              <br><small class="boxTotal" data-row-key="${esc(key)}" style="color:#94a3b8;">${totalBoxes ? 'Total: ' + totalBoxes : ''}</small></td>
       </tr>`;
   }
 
@@ -799,6 +806,7 @@ function renderProductsStep() {
     if (qty === null || qty <= 0) { delete orderWiz.cart[key]; return; }
 
     const price = computeTypedPrice(priceInp) ?? 0;
+    const boxesPerPiece = computeTypedPrice(findRowInput('boxInput', key)) ?? 0;
     orderWiz.cart[key] = {
       product_id: p.product_id,
       product_name: p.product_name,
@@ -806,17 +814,25 @@ function renderProductsStep() {
       product_type: p.product_type || 'product',
       price,
       tax_rate: Number(p.tax_rate) || 0,
+      boxes_per_piece: boxesPerPiece,
       quantity: qty
     };
   }
 
+  function paintBoxTotal(key) {
+    const line = orderWiz.cart[key];
+    const el = [...rowsBox.querySelectorAll('.boxTotal')].find(i => i.dataset.rowKey === key);
+    if (el) el.textContent = line && line.boxes_per_piece ? 'Total: ' + Number((line.boxes_per_piece * line.quantity).toFixed(2)) : '';
+  }
+
   rowsBox.addEventListener('input', (e) => {
-    const inp = e.target.closest('.qtyInput, .priceInput');
+    const inp = e.target.closest('.qtyInput, .priceInput, .boxInput');
     if (!inp) return;
     const key = inp.dataset.rowKey;
     const p = products.find(x => rowKeyFor(x) === key);
     if (!p) return;
     syncRowToCart(key, p);
+    paintBoxTotal(key);
   });
 
   function currentCategoryProducts() {
@@ -834,7 +850,7 @@ function renderProductsStep() {
 
   applyFilters();
   if (!products.length) {
-    rowsBox.innerHTML = `<tr><td colspan="3" style="text-align:center;padding:16px;color:#94a3b8;">
+    rowsBox.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:16px;color:#94a3b8;">
       No products loaded. <button type="button" id="retryInvBtn" style="border:none;background:#eef2ff;color:#2563eb;padding:4px 10px;border-radius:6px;cursor:pointer;">Retry</button>
     </td></tr>`;
     document.getElementById('retryInvBtn')?.addEventListener('click', async () => {
@@ -854,6 +870,8 @@ function renderProductsStep() {
     const cartItems = Object.values(orderWiz.cart);
     if (!cartItems.length) { alert('Add quantity for at least one product.'); return; }
     if (cartItems.some(i => !i.price || i.price <= 0)) { alert('Enter a price for every product you added.'); return; }
+    const noBox = cartItems.find(i => !i.boxes_per_piece || i.boxes_per_piece <= 0);
+    if (noBox) { alert('Enter boxes per piece for ' + noBox.product_name + '.'); return; }
     renderPaymentStep();
   });
 }
@@ -864,9 +882,9 @@ function renderPaymentStep() {
 
   wizBody().innerHTML = wizHeader('New Order — Payment') + `
     <div style="background:#f8fafc;border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;">
-      ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('<br>')}
+      ${cartItems.map(i => `${i.product_name} × ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)} (${Number((i.boxes_per_piece * i.quantity).toFixed(2))} boxes)`).join('<br>')}
       <hr style="border:none;border-top:1px solid #e2e8f0;margin:6px 0;">
-      Subtotal: ₹${subtotal.toFixed(2)}
+      Subtotal: ₹${subtotal.toFixed(2)}<br>Total Boxes: ${Number(cartItems.reduce((s, i) => s + i.boxes_per_piece * i.quantity, 0).toFixed(2))}
     </div>
     <select id="paymentMode" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px;">
       <option value="">Select Payment Mode</option>
@@ -1057,7 +1075,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     customer: orderWiz.customer || {},
     items: Object.values(orderWiz.cart).map(i => ({
       product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '', product_type: i.product_type || '',
-      quantity: i.quantity, price: i.price, tax_rate: orderWiz.gstType === 'with_gst' ? i.tax_rate : 0
+      quantity: i.quantity, price: i.price, boxes_per_piece: i.boxes_per_piece, tax_rate: orderWiz.gstType === 'with_gst' ? i.tax_rate : 0
     })),
     gst_type: orderWiz.gstType,
     payment_mode: mode,

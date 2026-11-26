@@ -190,6 +190,8 @@ class OrderItem(BaseModel):
     quantity: int
     price: float
     tax_rate: float = 0
+    boxes_per_piece: float = 0
+    total_boxes: float = 0
     serial_numbers: list[str] = []
 
 
@@ -6917,6 +6919,10 @@ def raise_order_request(request: OrderRequestModel, user: dict = Depends(require
             raise HTTPException(status_code=400, detail="customer details are required")
         if request.payment_mode not in VALID_PAYMENT_MODES:
             raise HTTPException(status_code=400, detail="invalid payment mode")
+        for it in request.items:
+            if not it.boxes_per_piece or it.boxes_per_piece <= 0:
+                raise HTTPException(status_code=400, detail=f"enter boxes per piece for {it.product_name}")
+            it.total_boxes = round(it.boxes_per_piece * it.quantity, 2)
         ship_addr = None
         if request.ship_to_different:
             sa = request.ship_to_address or {}

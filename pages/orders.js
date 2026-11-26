@@ -1171,16 +1171,16 @@ function wireDetailModals() {
 }
 
 const wiz = {
-  customerId: '',      // set when existing customer picked
-  customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
-  cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
+  customerId: '',      
+  customer: null,      
+  cart: {},            
   paymentMode: '',
   paymentDetails: {},
   reference: '',
   discount: 0,
   warrantyYears: 1,
   warrantyCharge: 0,
-  serialChoices: {}     // rowKey (product_id||product_name||model_no) -> [serial1, serial2, ...] one per unit, in order
+  serialChoices: {}    
 };
 
 const PAYMENT_MODES = [
@@ -1834,7 +1834,6 @@ async function renderSerialReviewStep() {
     if (!wiz.serialChoices[rowKey]) wiz.serialChoices[rowKey] = [];
     wiz.serialChoices[rowKey][slot] = inp.value;
     inp.addEventListener('change', () => {
-      // a chosen serial can't be reused for a different unit of the same item
       const siblings = [...body.querySelectorAll(`.serialPickInput[data-row-key="${rowKey}"]`)];
       const dup = siblings.find(s => s !== inp && s.value === inp.value && inp.value.trim() !== '');
       if (dup) {
@@ -2241,8 +2240,6 @@ function printLabels(rows) {
   }, 400);
 }
 
-// ===== Shipping Label (6 x 4 in, 2 per A4) - same label as the Dispatch page; asks for Ship To here =====
-// (helpers the label code expects - orders.js has no dvEsc / dvPick)
 function dvEsc(s) { return escapeHtml(s); }
 function dvPick(obj, keys) {
   for (const k of keys) {
@@ -2331,7 +2328,6 @@ function openOrderLabelDialog(o) {
     let printOrder = o;
 
     if (dispatched) {
-      // already dispatched: keep the dispatch record untouched, override only for this print
       if (changed) printOrder = { ...o, dispatch: { ...o.dispatch, ship_to_different: diff, ship_to_address: diff ? { company_name: sName, address: sAddr } : null } };
     } else if (changed) {
       const btn = $('#lblGo');
