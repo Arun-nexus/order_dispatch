@@ -70,6 +70,7 @@ async function loadOrders() {
               payment_details: isOrderReq ? (r.details?.payment_details || {}) : {},
               gst_type: isOrderReq ? (r.details?.gst_type || 'with_gst') : '',
               order_remarks: isOrderReq ? (r.details?.remarks || '') : '',
+              pi_number: isOrderReq ? (r.details?.pi_number || '') : '',
               ship_to_different: isOrderReq ? !!r.details?.ship_to_different : false,
               ship_to_address: isOrderReq ? (r.details?.ship_to_address || null) : null,
               subtotal: Number(subtotal.toFixed(2)), tax_total: Number(tax.toFixed(2)), discount,
@@ -518,6 +519,7 @@ function openViewOrderModal(o) {
     ${(o.attachments || []).length ? `<div class="detail"><small>Attachments</small><p>${o.attachments.map((a, i) =>
     `<a href="#" class="attach-link" data-i="${i}" style="display:block;color:#1665ff;">${esc(a.name)}</a>`).join('')}</p></div>` : ''}
     ${o.ship_to_different && o.ship_to_address ? `<div class="detail"><small>Ship To</small><p>${esc([o.ship_to_address.company_name, o.ship_to_address.address].filter(Boolean).join(', '))}</p></div>` : ''}
+    <div class="detail"><small>PI Number</small><p>${esc(o.pi_number || '-')}</p></div>
     <div class="detail"><small>Order Remarks</small><p>${esc(o.order_remarks || '-')}</p></div>
     <div class="detail"><small>Remark</small><p>${o.status === 'placed' ? (o.remark || '-') : '-'}</p></div>
     <div class="detail"><small>Subtotal / Tax / Discount</small><p>₹${o.subtotal ?? 0} / ₹${(o.tax_total ?? 0).toFixed ? o.tax_total.toFixed(2) : o.tax_total} / ₹${o.discount ?? 0}</p></div>
@@ -546,7 +548,7 @@ function wireViewModalClose() {
   if (modal) modal.addEventListener('mousedown', e => { if (e.target === modal) modal.style.display = 'none'; });
 }
 
-const orderWiz = { customerId: '', customer: null, cart: {}, discount: 0, remarks: '', shipDiff: false, shipCompany: '', shipAddress: '' };
+const orderWiz = { customerId: '', customer: null, cart: {}, discount: 0, remarks: '', piNumber: '', shipDiff: false, shipCompany: '', shipAddress: '' };
 
 function resetOrderWiz() {
   orderWiz.customerId = '';
@@ -554,6 +556,7 @@ function resetOrderWiz() {
   orderWiz.cart = {};
   orderWiz.discount = 0;
   orderWiz.remarks = '';
+  orderWiz.piNumber = '';
   orderWiz.shipDiff = false; orderWiz.shipCompany = ''; orderWiz.shipAddress = '';
 }
 
@@ -883,6 +886,7 @@ function renderPaymentStep() {
       <input id="shipCompany" placeholder="Ship To — Company Name" value="${esc(orderWiz.shipCompany || '')}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">
       <textarea id="shipAddress" rows="2" placeholder="Ship To — Address" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;box-sizing:border-box;">${esc(orderWiz.shipAddress || '')}</textarea>
     </div>
+    <input id="orderPiNumber" maxlength="100" placeholder="PI Number (optional)" value="${esc(orderWiz.piNumber || '')}" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:0 0 10px;box-sizing:border-box;">
     <textarea id="orderRemarks" rows="3" maxlength="1000" placeholder="Remarks (optional) — anything related to this order" style="width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:8px;margin:0 0 10px;box-sizing:border-box;resize:vertical;">${esc(orderWiz.remarks || '')}</textarea>
     <label style="font-size:13px;color:#64748b;">Attach P.O. / documents (optional — PDF, image, Excel, Word · max 5 files, 10 MB each)</label>
     <input id="orderFiles" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv,.doc,.docx" style="width:100%;padding:8px;border:1px dashed #cbd5e1;border-radius:8px;margin:6px 0 10px;">
@@ -900,6 +904,7 @@ function renderPaymentStep() {
 
   document.getElementById('discountInput').addEventListener('input', e => { orderWiz.discount = Number(e.target.value) || 0; refreshPartialHint(); });
   document.getElementById('orderRemarks').addEventListener('input', e => orderWiz.remarks = e.target.value);
+  document.getElementById('orderPiNumber').addEventListener('input', e => orderWiz.piNumber = e.target.value);
   document.getElementById('shipDiffCheck').addEventListener('change', e => {
     orderWiz.shipDiff = e.target.checked;
     document.getElementById('shipDiffFields').style.display = e.target.checked ? 'flex' : 'none';
@@ -1059,6 +1064,7 @@ async function submitOrderRequest(modeSelect, extraBox) {
     payment_details,
     discount: orderWiz.discount || 0,
     remarks: (orderWiz.remarks || '').trim(),
+    pi_number: (orderWiz.piNumber || '').trim(),
     ship_to_different: !!orderWiz.shipDiff,
     ship_to_address: orderWiz.shipDiff ? { company_name: orderWiz.shipCompany.trim(), address: orderWiz.shipAddress.trim() } : null
   };

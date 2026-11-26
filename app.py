@@ -6575,6 +6575,7 @@ class OrderRequestModel(BaseModel):
     payment_details: dict = {}
     discount: float = 0
     remarks: str = ""
+    pi_number: str = ""
     ship_to_different: bool = False
     ship_to_address: Optional[dict] = None
 
@@ -6934,6 +6935,7 @@ def raise_order_request(request: OrderRequestModel, user: dict = Depends(require
                 "payment_details": request.payment_details,
                 "discount": request.discount,
                 "remarks": (request.remarks or "").strip()[:1000],
+                "pi_number": (request.pi_number or "").strip()[:100],
                 "ship_to_different": bool(ship_addr),
                 "ship_to_address": ship_addr
             }
@@ -7128,6 +7130,8 @@ def _approve_request_locked(request_id: str, body, user: dict):
             extra_vals = {}
             if details.get("remarks"):
                 extra_vals["order_remarks"] = details["remarks"]
+            if details.get("pi_number"):
+                extra_vals["pi_number"] = details["pi_number"]
             if details.get("ship_to_different") and details.get("ship_to_address"):
                 extra_vals["ship_to_different"] = True
                 extra_vals["ship_to_address"] = details["ship_to_address"]
