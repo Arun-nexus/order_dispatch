@@ -1541,8 +1541,19 @@ async function openEditAssemblyModal(id) {
       serial: s.serial || '', hologram: s.hologram || '', lot: s.lot || '', origLot: s.lot || '', origDate: s.lotDate || '',
       serialLocked: a.status === 'completed' || (a.approvedSerials || []).includes(s.serial),
     })),
-    lotDateMap: new Map((a.serials || []).filter(s => s.lotDate).map(s => [s.lot || '', s.lotDate])),
   };
+  // one row per lot: { id, lot, date, qty }; units point to a row by lotId
+  assemblyDraft.lots = [];
+  (a.serials || []).forEach((s, i) => {
+    let row = assemblyDraft.lots.find(l => l.lot === (s.lot || ''));
+    if (!row) {
+      row = { id: assemblyDraft.lots.length + 1, lot: s.lot || '', date: s.lotDate || '', qty: 0 };
+      assemblyDraft.lots.push(row);
+    }
+    row.date = row.date || s.lotDate || '';
+    row.qty += 1;
+    assemblyDraft.units[i].lotId = row.id;
+  });
   renderEditAssemblyModal();
   openModal('assemblyModal');
 }
@@ -1568,9 +1579,19 @@ function renderEditAssemblyModal() {
       <input id="eMfgDate" placeholder="Mfg Date" value="${escAttr(assemblyDraft.mfgDate)}">
       <input id="eMrp" placeholder="M.R.P" value="${escAttr(assemblyDraft.mrp)}" ${assemblyDraft.supplyType === 'govt' ? 'disabled' : ''}>
     </div>
-    <h4 style="margin:18px 0 6px;">Lot Dates</h4>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 6px;">
+      <h4 style="margin:0;">Lots (lot no. + date + quantity)</h4>
+      <span id="eLotSummary" style="font-size:12px;"></span>
+    </div>
     <div id="eLotRows" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
-    <h4 style="margin:18px 0 6px;">Units</h4>
+    ${editingIdentityLocked ? '' : `<div style="display:flex;gap:8px;margin-top:8px;">
+      <button type="button" id="eAddLotBtn" style="padding:6px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;cursor:pointer;font-size:12px;"><i class="fa-solid fa-plus"></i> Add Lot</button>
+      <button type="button" id="eApplyLotsBtn" style="padding:6px 12px;border:none;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;font-size:12px;"><i class="fa-solid fa-tag"></i> Apply Lots to Units</button>
+    </div>`}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:18px 0 6px;">
+      <h4 style="margin:0;">Units</h4>
+      ${editingIdentityLocked ? '' : '<button type="button" id="eGenSerialsBtn" style="padding:6px 12px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;font-size:12px;"><i class="fa-solid fa-arrow-down-9-1"></i> Generate Remaining From Unit 1</button>'}
+    </div>
     <div style="max-height:260px;overflow:auto;border:1px solid #eef1f6;border-radius:10px;">
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         <thead><tr><th style="text-align:left;padding:8px;">#</th><th style="text-align:left;padding:8px;">Serial No.</th><th style="text-align:left;padding:8px;">Hologram No.</th><th style="text-align:left;padding:8px;">Lot No.</th></tr></thead>
@@ -1620,51 +1641,111 @@ function renderEditAssemblyModal() {
     box.querySelector('#eMrp').disabled = e.target.value === 'govt';
   });
 
+  box.querySelector('#eAddLotBtn')?.addEventListener('click', () => {
+    const used = assemblyDraft.lots.reduce((t, l) => t + (parseInt(l.qty, 10) || 0), 0);
+    const left = assemblyDraft.units.length - used;
+    const id = Math.max(0, ...assemblyDraft.lots.map(l => l.id)) + 1;
+    assemblyDraft.lots.push({ id, lot: '', date: '', qty: left > 0 ? left : '' });
+    renderEditLots();
+    renderEditUnits();
+  });
+  box.querySelector('#eApplyLotsBtn')?.addEventListener('click', () => {
+    if (applyEditLots(true)) renderEditUnits();
+  });
+  box.querySelector('#eGenSerialsBtn')?.addEventListener('click', () => {
+    const seed = assemblyDraft.units[0]?.serial;
+    if (!seed) {
+      showResponseModal('Fill Unit 1 first', 'Enter Unit 1\'s serial number, then generate the rest.', false);
+      return;
+    }
+    assemblyDraft.units.forEach((u, i) => { if (i) u.serial = incrementSeed(seed, i); });
+    renderEditUnits();
+  });
+
   renderPartsUsedRows();
   renderEditUnits();
   renderEditLots();
 }
 
+function editLotCount(id) { return assemblyDraft.units.filter(u => u.lotId === id).length; }
+
 function renderEditUnits() {
   const tbody = document.getElementById('eUnitRows');
+  const options = u => (assemblyDraft.lots.some(l => l.id === u.lotId) ? '' : '<option value="" selected>— select lot —</option>')
+    + assemblyDraft.lots.map((l, n) => `<option value="${l.id}" ${l.id === u.lotId ? 'selected' : ''}>${escAttr(l.lot || 'Lot ' + (n + 1) + ' (no number)')}</option>`).join('');
   tbody.innerHTML = assemblyDraft.units.map((u, i) => `
     <tr>
       <td style="padding:6px 8px;">${i + 1}</td>
-      <td style="padding:6px 8px;"><input type="text" data-i="${i}" data-f="serial" value="${escAttr(u.serial)}" ${u.serialLocked ? 'disabled' : ''} style="width:100%;"></td>
+      <td style="padding:6px 8px;"><input type="text" class="eSerial" data-i="${i}" value="${escAttr(u.serial)}" ${u.serialLocked ? 'disabled' : ''} style="width:100%;"></td>
       <td style="padding:6px 8px;">${escAttr(u.hologram)}</td>
-      <td style="padding:6px 8px;"><input type="text" data-i="${i}" data-f="lot" value="${escAttr(u.lot)}" ${editingIdentityLocked ? 'disabled' : ''} style="width:100%;"></td>
+      <td style="padding:6px 8px;"><select class="eUnitLot" data-i="${i}" ${editingIdentityLocked ? 'disabled' : ''} style="width:100%;">${options(u)}</select></td>
     </tr>`).join('');
+  tbody.oninput = e => {
+    if (e.target.classList.contains('eSerial')) assemblyDraft.units[Number(e.target.dataset.i)].serial = e.target.value.trim();
+  };
   tbody.onchange = e => {
-    const el = e.target;
-    assemblyDraft.units[Number(el.dataset.i)][el.dataset.f] = el.value.trim();
-    if (el.dataset.f === 'lot') renderEditLots();
+    if (!e.target.classList.contains('eUnitLot') || !e.target.value) return;
+    assemblyDraft.units[Number(e.target.dataset.i)].lotId = Number(e.target.value);
+    assemblyDraft.lots.forEach(l => { l.qty = editLotCount(l.id); });
+    renderEditLots();
   };
 }
 
-// one row per lot, so a lot's date is changed once for all of its units
 function renderEditLots() {
   const wrap = document.getElementById('eLotRows');
-  const counts = new Map();
-  assemblyDraft.units.forEach(u => counts.set(u.lot, (counts.get(u.lot) || 0) + 1));
-  const lots = [...counts.keys()];
-  wrap.innerHTML = lots.map((lot, i) => `
-    <div style="display:flex;gap:8px;align-items:center;">
-      <input type="text" data-i="${i}" data-f="lot" placeholder="Lot No." value="${escAttr(lot)}" ${editingIdentityLocked ? 'disabled' : ''} style="flex:2;min-width:0;">
-      <input type="date" data-i="${i}" data-f="date" value="${escAttr(assemblyDraft.lotDateMap.get(lot) || '')}" style="flex:1.5;min-width:0;">
-      <span style="font-size:12px;color:#64748b;white-space:nowrap;">${counts.get(lot)} unit(s)</span>
+  const lock = editingIdentityLocked ? 'disabled' : '';
+  wrap.innerHTML = assemblyDraft.lots.map(l => `
+    <div data-id="${l.id}" style="display:flex;gap:8px;align-items:center;">
+      <input type="text" data-f="lot" placeholder="Lot No." value="${escAttr(l.lot)}" ${lock} style="flex:2;min-width:0;">
+      <input type="date" data-f="date" title="Lot Date" value="${escAttr(l.date)}" style="flex:1.5;min-width:0;">
+      <input type="number" min="1" data-f="qty" title="Quantity" value="${escAttr(l.qty)}" ${lock} style="flex:1;min-width:0;">
+      ${editingIdentityLocked || assemblyDraft.lots.length < 2 ? '' : '<button type="button" class="eLotDel" title="Remove Lot" style="border:none;background:#fee2e2;color:#dc2626;border-radius:8px;width:34px;height:34px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>'}
     </div>`).join('');
-  wrap.onchange = e => {
-    const el = e.target;
-    const lot = lots[Number(el.dataset.i)];
-    const map = assemblyDraft.lotDateMap;
-    if (el.dataset.f === 'date') { map.set(lot, el.value); return; }
-    const renamed = el.value.trim();
-    if (!renamed) { el.value = lot; return; }
-    if (!counts.has(renamed)) map.set(renamed, map.get(lot) || '');
-    assemblyDraft.units.forEach(u => { if (u.lot === lot) u.lot = renamed; });
-    renderEditUnits();
-    renderEditLots();
+  const find = el => assemblyDraft.lots.find(l => l.id === Number(el.closest('[data-id]').dataset.id));
+  wrap.oninput = e => {
+    const f = e.target.dataset.f;
+    if (!f) return;
+    find(e.target)[f] = e.target.value.trim();
+    updateEditLotSummary();
   };
+  wrap.onchange = e => { if (e.target.dataset.f === 'lot') renderEditUnits(); };
+  wrap.querySelectorAll('.eLotDel').forEach(btn => btn.addEventListener('click', () => {
+    const gone = find(btn);
+    assemblyDraft.lots = assemblyDraft.lots.filter(l => l !== gone);
+    // with one lot left there is only one place for the freed units to go
+    if (assemblyDraft.lots.length === 1) {
+      assemblyDraft.lots[0].qty = assemblyDraft.units.length;
+      applyEditLots(false);
+    }
+    renderEditLots();
+    renderEditUnits();
+  }));
+  updateEditLotSummary();
+}
+
+function updateEditLotSummary() {
+  const el = document.getElementById('eLotSummary');
+  const total = assemblyDraft.lots.reduce((t, l) => t + (parseInt(l.qty, 10) || 0), 0);
+  el.style.color = total === assemblyDraft.units.length ? '#16a34a' : '#d97706';
+  el.textContent = `${total} / ${assemblyDraft.units.length} units assigned`;
+}
+
+// make the unit -> lot mapping match the lot quantities, moving as few units as possible
+function applyEditLots(showErrors) {
+  const lots = assemblyDraft.lots;
+  const units = assemblyDraft.units;
+  const fail = msg => { if (showErrors) showResponseModal('Check lots', msg, false); return false; };
+  if (lots.some(l => !(Number(l.qty) > 0 && Number.isInteger(Number(l.qty))))) return fail('Every lot needs a quantity greater than 0. Remove the lot if it is not needed.');
+  const total = lots.reduce((t, l) => t + Number(l.qty), 0);
+  if (total !== units.length) return fail(`Lot quantities add up to ${total}, but this assembly has ${units.length} units.`);
+  const room = new Map(lots.map(l => [l.id, Number(l.qty)]));
+  const spare = units.filter(u => {
+    if (!(room.get(u.lotId) > 0)) return true;
+    room.set(u.lotId, room.get(u.lotId) - 1);
+    return false;
+  });
+  lots.forEach(l => { for (let k = room.get(l.id); k > 0; k--) spare.shift().lotId = l.id; });
+  return true;
 }
 
 async function saveAssemblyEdit() {
@@ -1694,7 +1775,19 @@ async function saveAssemblyEdit() {
     return;
   }
 
-  const units = assemblyDraft.units.map(u => ({ ...u, lotDate: assemblyDraft.lotDateMap.get(u.lot) || '' }));
+  if (!editingIdentityLocked) {
+    if (!applyEditLots(true)) return;
+    renderEditUnits();
+    const names = assemblyDraft.lots.map(l => l.lot);
+    if (new Set(names).size !== names.length) {
+      showResponseModal('Check lots', 'Each Lot No. should appear only once; increase its quantity instead.', false);
+      return;
+    }
+  }
+  const units = assemblyDraft.units.map(u => {
+    const row = assemblyDraft.lots.find(l => l.id === u.lotId) || {};
+    return { ...u, lot: row.lot || '', lotDate: row.date || '' };
+  });
   const fail = msg => showResponseModal('Check units', msg, false);
   if (units.some(u => !u.serial)) return fail('Every unit needs a serial number.');
   if (new Set(units.map(u => u.serial)).size !== units.length) return fail('Serial numbers must be unique within this batch.');
