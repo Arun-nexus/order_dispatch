@@ -6592,6 +6592,7 @@ class RequestApproveModel(BaseModel):
     invoice_date: str = ""
     payment_mode: str = ""          # same modes as a normal order (Credit / Partial / UPI ...)
     payment_details: dict = {}
+    boxes_per_piece: list[float] = []   # order requests: one value per item, in item order
 
 
 class ReturnRequestModel(BaseModel):
@@ -6919,10 +6920,6 @@ def raise_order_request(request: OrderRequestModel, user: dict = Depends(require
             raise HTTPException(status_code=400, detail="customer details are required")
         if request.payment_mode not in VALID_PAYMENT_MODES:
             raise HTTPException(status_code=400, detail="invalid payment mode")
-        for it in request.items:
-            if not it.boxes_per_piece or it.boxes_per_piece <= 0:
-                raise HTTPException(status_code=400, detail=f"enter boxes per piece for {it.product_name}")
-            it.total_boxes = round(it.boxes_per_piece * it.quantity, 2)
         ship_addr = None
         if request.ship_to_different:
             sa = request.ship_to_address or {}
@@ -7124,6 +7121,13 @@ def _approve_request_locked(request_id: str, body, user: dict):
 
         if req["request_type"] == "order":
             details = req["details"]
+            order_items = details.get("items", [])
+            boxes = (body.boxes_per_piece if body else []) or []
+            if len(boxes) != len(order_items) or any(b <= 0 for b in boxes):
+                raise HTTPException(status_code=400, detail="enter boxes per piece for every product")
+            for it, b in zip(order_items, boxes):
+                it["boxes_per_piece"] = b
+                it["total_boxes"] = round(b * it.get("quantity", 0), 2)
             order_id = _fulfill_order(
                 customer_id=details.get("customer_id", ""),
                 customer=details.get("customer", {}),

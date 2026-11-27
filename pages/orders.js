@@ -1014,12 +1014,13 @@ function openViewOrderModal(o) {
           <td>${productCellHtml(it)}</td>
           <td>${serials || '<span class="ov-sub">—</span>'}</td>
           <td>${it.quantity ?? 0}</td>
+          <td>${it.total_boxes ?? '—'}</td>
           <td>${orderMoney(it.price)}</td>
           <td>${it.tax_rate ?? 0}%</td>
           <td><strong>${orderMoney(lineTotal)}</strong></td>
         </tr>`;
     }).join('')
-    : `<tr><td colspan="6" style="text-align:center;color:var(--text-light);">No items</td></tr>`;
+    : `<tr><td colspan="7" style="text-align:center;color:var(--text-light);">No items</td></tr>`;
 
   const returnedHtml = (o.returned_items || []).length ? `
     <div class="ov-title">Returned Product(s)</div>
@@ -1076,7 +1077,7 @@ function openViewOrderModal(o) {
 
     <div class="ov-title">Products</div>
     <div class="ov-scroll"><table class="ov-table">
-      <thead><tr><th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Price</th><th>Tax</th><th>Line Total</th></tr></thead>
+      <thead><tr><th>Product</th><th>Serial No(s)</th><th>Qty</th><th>Boxes</th><th>Price</th><th>Tax</th><th>Line Total</th></tr></thead>
       <tbody>${itemsRows}</tbody>
     </table></div>
 
@@ -1171,16 +1172,16 @@ function wireDetailModals() {
 }
 
 const wiz = {
-  customerId: '',      
-  customer: null,      
-  cart: {},            
+  customerId: '',      // set when existing customer picked
+  customer: null,      // {company_name, company_address, gst_number, contractor_person, contractor_number, contractor_email}
+  cart: {},             // product_id -> {product_id, product_name, price, tax_rate, quantity}
   paymentMode: '',
   paymentDetails: {},
   reference: '',
   discount: 0,
   warrantyYears: 1,
   warrantyCharge: 0,
-  serialChoices: {}    
+  serialChoices: {}     // rowKey (product_id||product_name||model_no) -> [serial1, serial2, ...] one per unit, in order
 };
 
 const PAYMENT_MODES = [
@@ -1834,6 +1835,7 @@ async function renderSerialReviewStep() {
     if (!wiz.serialChoices[rowKey]) wiz.serialChoices[rowKey] = [];
     wiz.serialChoices[rowKey][slot] = inp.value;
     inp.addEventListener('change', () => {
+      // a chosen serial can't be reused for a different unit of the same item
       const siblings = [...body.querySelectorAll(`.serialPickInput[data-row-key="${rowKey}"]`)];
       const dup = siblings.find(s => s !== inp && s.value === inp.value && inp.value.trim() !== '');
       if (dup) {
@@ -2037,6 +2039,7 @@ async function loadOrderRequests() {
     if (!res.ok) throw new Error('failed to fetch requests');
     const data = await res.json();
     const pending = (data.dataset || []).filter(r => r.request_type === 'order' && r.status === 'pending');
+    pendingOrderRequests = pending;
     const section = document.getElementById('orderRequestsSection');
     if (section) section.style.display = pending.length ? '' : 'none';
     renderOrderRequests(pending);
@@ -2044,6 +2047,8 @@ async function loadOrderRequests() {
     console.error(err);
   }
 }
+
+let pendingOrderRequests = [];
 
 function renderOrderRequests(requests) {
   const box = document.getElementById('orderRequestsList');
@@ -2073,10 +2078,49 @@ function renderOrderRequests(requests) {
   box.querySelectorAll('.oreq-reject').forEach(btn => btn.addEventListener('click', () => rejectOrderRequest(btn.dataset.id)));
 }
 
+function askBoxesPerPiece(items) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:3000;';
+    wrap.innerHTML = `<div style="background:#fff;border-radius:14px;padding:22px;width:min(520px,94vw);max-height:90vh;overflow:auto;">
+      <h3 style="margin:0 0 6px;">Boxes per piece</h3>
+      <p style="margin:0 0 12px;color:#64748b;font-size:13px;">Enter how many boxes each piece of a product takes.</p>
+      ${items.map((it, i) => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div style="flex:1;"><b>${escapeHtml(it.product_name ?? '')}</b><br><small style="color:#64748b;">Qty: ${it.quantity ?? 0}</small></div>
+        <input type="number" min="0" step="any" class="bpp" data-i="${i}" placeholder="Boxes / pc" style="width:110px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+        <small class="bppTot" data-i="${i}" style="width:70px;color:#64748b;"></small></div>`).join('')}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button type="button" class="bppCancel" style="padding:8px 14px;border:none;border-radius:8px;background:#eef1f6;cursor:pointer;">Cancel</button>
+        <button type="button" class="bppOk" style="padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Approve</button>
+      </div></div>`;
+    document.body.appendChild(wrap);
+    const done = v => { wrap.remove(); resolve(v); };
+    wrap.addEventListener('input', e => {
+      const inp = e.target.closest('.bpp');
+      if (!inp) return;
+      const t = wrap.querySelector(`.bppTot[data-i="${inp.dataset.i}"]`);
+      const v = Number(inp.value) * (Number(items[inp.dataset.i].quantity) || 0);
+      t.textContent = v > 0 ? 'Total: ' + Number(v.toFixed(2)) : '';
+    });
+    wrap.querySelector('.bppCancel').onclick = () => done(null);
+    wrap.querySelector('.bppOk').onclick = () => {
+      const vals = [...wrap.querySelectorAll('.bpp')].map(i => Number(i.value));
+      if (vals.some(v => !(v > 0))) { alert('Enter boxes per piece for every product.'); return; }
+      done(vals);
+    };
+  });
+}
+
 async function approveOrderRequest(requestId) {
-  if (!confirm('Approve this request and create the order? Stock will be deducted.')) return;
+  const req = pendingOrderRequests.find(r => r.request_id === requestId);
+  const boxes = await askBoxesPerPiece(req?.details?.items || []);
+  if (!boxes) return;
   try {
-    const res = await apiFetch(`/request/approve/${requestId}`, { method: 'POST' });
+    const res = await apiFetch(`/request/approve/${requestId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ boxes_per_piece: boxes })
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'approval failed');
     await loadOrders();
@@ -2240,6 +2284,8 @@ function printLabels(rows) {
   }, 400);
 }
 
+// ===== Shipping Label (6 x 4 in, 2 per A4) - same label as the Dispatch page; asks for Ship To here =====
+// (helpers the label code expects - orders.js has no dvEsc / dvPick)
 function dvEsc(s) { return escapeHtml(s); }
 function dvPick(obj, keys) {
   for (const k of keys) {
@@ -2328,6 +2374,7 @@ function openOrderLabelDialog(o) {
     let printOrder = o;
 
     if (dispatched) {
+      // already dispatched: keep the dispatch record untouched, override only for this print
       if (changed) printOrder = { ...o, dispatch: { ...o.dispatch, ship_to_different: diff, ship_to_address: diff ? { company_name: sName, address: sAddr } : null } };
     } else if (changed) {
       const btn = $('#lblGo');
