@@ -1333,6 +1333,10 @@ def create_order(request: CreateOrderRequest, user: dict = Depends(require_role(
     reference = (request.reference or "").strip()
     if not reference:
         raise HTTPException(status_code=400, detail="reference is required, please select a reference user")
+    for it in request.items:
+        if not it.boxes_per_piece or it.boxes_per_piece <= 0:
+            raise HTTPException(status_code=400, detail=f"enter boxes per piece for {it.product_name}")
+        it.total_boxes = round(it.boxes_per_piece * it.quantity, 2)
     try:
         if not mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": reference}):
             raise HTTPException(status_code=400, detail="selected reference user does not exist")

@@ -1621,6 +1621,10 @@ function renderPaymentStep() {
             <label style="flex:1;font-size:11px;color:var(--text-muted);">Tax % / pc
               <input type="number" min="0" step="any" class="wizTax" data-idx="${idx}" value="${i.tax_rate}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
             </label>
+            <label style="flex:1;font-size:11px;color:var(--text-muted);">Boxes / pc *
+              <input type="number" min="0" step="any" class="wizBox" data-idx="${idx}" value="${i.boxes_per_piece ?? ''}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+              <span class="wizBoxTot" data-idx="${idx}">${i.boxes_per_piece ? 'Total: ' + Number((i.boxes_per_piece * i.quantity).toFixed(2)) : ''}</span>
+            </label>
             <div style="flex:1;font-size:11px;color:var(--text-muted);">Line (excl. tax)
               <div class="wizLine" data-idx="${idx}" style="padding:6px 0;font-size:13px;color:var(--text-primary);">₹${(i.price * i.quantity).toFixed(2)}</div>
             </div>
@@ -1698,6 +1702,12 @@ function renderPaymentStep() {
   document.querySelectorAll('.wizTax').forEach(inp => inp.addEventListener('input', () => {
     cartItems[Number(inp.dataset.idx)].tax_rate = Math.max(0, Number(inp.value) || 0);
   }));
+  document.querySelectorAll('.wizBox').forEach(inp => inp.addEventListener('input', () => {
+    const it = cartItems[Number(inp.dataset.idx)];
+    it.boxes_per_piece = Math.max(0, Number(inp.value) || 0);
+    const t = document.querySelector(`.wizBoxTot[data-idx="${inp.dataset.idx}"]`);
+    if (t) t.textContent = it.boxes_per_piece ? 'Total: ' + Number((it.boxes_per_piece * it.quantity).toFixed(2)) : '';
+  }));
 
   discountInput.addEventListener('input', e => { wiz.discount = Number(e.target.value) || 0; refreshGrandTotal(); });
 
@@ -1730,6 +1740,9 @@ async function loadReferenceUsers() {
 }
 
 function proceedToSerialReview(modeSelect, extraBox) {
+  const noBox = Object.values(wiz.cart).find(i => !i.boxes_per_piece || i.boxes_per_piece <= 0);
+  if (noBox) { alert('Enter boxes per piece for ' + noBox.product_name + '.'); return; }
+
   const mode = modeSelect.value;
   if (!mode) { alert('Please select a payment mode.'); return; }
 
@@ -1871,7 +1884,7 @@ async function finalizeSubmitOrder() {
       const chosen = (wiz.serialChoices[rowKey] || []).filter(Boolean);
       return {
         product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
-        quantity: i.quantity, price: i.price, tax_rate: i.tax_rate,
+        quantity: i.quantity, price: i.price, tax_rate: i.tax_rate, boxes_per_piece: i.boxes_per_piece,
         serial_numbers: chosen.length === i.quantity ? chosen : []
       };
     }),
