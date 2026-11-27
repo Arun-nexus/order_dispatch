@@ -1154,6 +1154,52 @@ function exportFileName(base) {
   return exportCategory === 'all' ? `${base}.csv` : `${base}_${exportCategory}.csv`;
 }
 
+const exportPartType = p => p.part_category ? (p.part_category === 'warranty' ? 'Warranty' : 'Purchase') : '';
+
+// Summary / Specific Product export ke columns, selected category ke hisaab se
+function exportIdentityColumns(rows) {
+  const name = label => [label, p => p.product_name || ''];
+  const productId = ['Product ID', p => (p.product_id || '').trim()];
+  const modelNo = ['Model No', p => p.model_no || ''];
+  const belongsTo = ['Belongs To', p => p.parent_product_name || ''];
+  const partType = ['Type', exportPartType];
+
+  switch (exportCategory) {
+    case 'spare_parts':
+      return [name('Part Name'), belongsTo];
+    case 'service_parts':
+      return [name('Part Name'), belongsTo, partType];
+    case 'damaged':
+      return [name('Product Name'), productId, modelNo,
+        ...(rows.some(p => p.parent_product_name) ? [belongsTo] : []),
+        ['Reason of Damage', p => p.reason_of_damage ?? p.reason ?? '']];
+    case 'all':
+      return [['Category', p => productTypeLabel(p.product_type)], name('Name'), productId, modelNo, belongsTo,
+        ...(rows.some(p => p.product_type === 'service_parts') ? [partType] : [])];
+    default: // product, accessories
+      return [name('Product Name'), productId, modelNo];
+  }
+}
+
+// All: category wise, parts: Belongs To wise, phir naam se
+function sortForExport(rows) {
+  const key = p => [exportCategory === 'all' ? productTypeLabel(p.product_type) : '', p.parent_product_name || '', p.product_name || ''];
+  return [...rows].sort((a, b) => {
+    const x = key(a), y = key(b);
+    return x[0].localeCompare(y[0]) || x[1].localeCompare(y[1]) || x[2].localeCompare(y[2]);
+  });
+}
+
+// Detailed export mein har column ka heading
+function exportColumnHeading(p) {
+  const prefix = exportCategory === 'all' ? `[${productTypeLabel(p.product_type)}] ` : '';
+  const id = (p.product_id || '').trim();
+  const base = `${p.product_name || ''}${id ? ` (${id})` : ''}${p.model_no ? ` - ${p.model_no}` : ''}`;
+  const belongs = p.parent_product_name ? ` | Belongs To: ${p.parent_product_name}` : (ivIsPart(p) ? ' | Belongs To: -' : '');
+  const type = p.product_type === 'service_parts' && exportPartType(p) ? ` | ${exportPartType(p)}` : '';
+  return `${prefix}${base}${belongs}${type}`;
+}
+
 function openExportCategoryMenu(anchorBtn) {
   document.getElementById('exportTypeMenu')?.remove();
   document.getElementById('exportCategoryMenu')?.remove();
@@ -1244,8 +1290,8 @@ function exportInventoryCSV() {
     dateLabel: 'Purchase Date',
     getRows: exportRowsForCategory,
     onConfirm: async (rows) => {
-      const fullRows = await Promise.all(rows.map(fetchProductDetail));
-      const header = fullRows.map(p => `${p.product_name} (${p.product_id}) - ${p.model_no || ''}`);
+      const fullRows = await Promise.all(sortForExport(rows).map(fetchProductDetail));
+      const header = fullRows.map(exportColumnHeading);
       const columns = fullRows.map(p => (p.serial_numbers && p.serial_numbers.length)
         ? p.serial_numbers
         : ((p.product_type === 'spare_parts' || p.product_type === 'service_parts') ? hologramNumbersOf(p) : []));
@@ -1267,11 +1313,9 @@ function exportInventorySummaryCSV() {
     dateLabel: 'Purchase Date',
     getRows: exportRowsForCategory,
     onConfirm: (rows) => {
-      const header = ['Product', 'Quantity'];
-      const csvRows = rows.map(p => {
-        const label = `${p.product_name || ''} (${p.product_id || ''})${p.model_no ? ' - ' + p.model_no : ''}`;
-        return [label, Number(p.quantity) || 0];
-      });
+      const columns = exportIdentityColumns(rows);
+      const header = [...columns.map(([label]) => label), 'Quantity'];
+      const csvRows = sortForExport(rows).map(p => [...columns.map(([, value]) => value(p)), ivQty(p)]);
       downloadCSV(header, csvRows, exportFileName('inventory_summary'));
     }
   });
@@ -1289,7 +1333,7 @@ function openSpecificProductPicker() {
         <h3>Export Specific Product</h3>
         <button class="close" style="border:none;background:none;font-size:20px;cursor:pointer;">&times;</button>
       </div>
-      <input id="singleProductSearch" placeholder="Search by product name, ID or model no." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;">
+      <input id="singleProductSearch" placeholder="Search by name, ID, model no. or belongs to" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;box-sizing:border-box;">
       <div id="singleProductList" style="margin-top:10px;max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
     </div>`;
   document.body.appendChild(modal);
@@ -1305,7 +1349,8 @@ function openSpecificProductPicker() {
     const rows = exportRowsForCategory().filter(p => !q ||
       (p.product_name || '').toLowerCase().includes(q) ||
       (p.product_id || '').toLowerCase().includes(q) ||
-      (p.model_no || '').toLowerCase().includes(q));
+      (p.model_no || '').toLowerCase().includes(q) ||
+      (p.parent_product_name || '').toLowerCase().includes(q));
 
     if (!rows.length) {
       listBox.innerHTML = '<p style="color:var(--text-light);font-size:13px;text-align:center;padding:10px;">No matching product.</p>';
@@ -1315,7 +1360,9 @@ function openSpecificProductPicker() {
     listBox.innerHTML = rows.map((p, i) => `
       <button type="button" class="single-product-opt" data-idx="${i}" style="display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:var(--bg-light);cursor:pointer;border-radius:8px;font-size:13px;color:var(--text-primary);">
         <strong>${escapeHtmlInv(p.product_name || '')}</strong><br>
-        <small style="color:var(--text-muted);">ID: ${escapeHtmlInv((p.product_id || '').trim() || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}</small>
+        <small style="color:var(--text-muted);">${ivIsPart(p)
+          ? `Belongs to: ${escapeHtmlInv(p.parent_product_name || '-')}`
+          : `ID: ${escapeHtmlInv((p.product_id || '').trim() || '-')} &nbsp;·&nbsp; Model: ${escapeHtmlInv(p.model_no || '-')}`}</small>
       </button>`).join('');
 
     listBox.querySelectorAll('.single-product-opt').forEach(btn => {
@@ -1340,11 +1387,11 @@ async function exportSingleProductCSV(product) {
   const unitLabel = isPart ? 'Hologram Number' : 'Serial Number';
   const units = isPart ? hologramNumbersOf(p) : (p.serial_numbers || []);
 
-  const header = ['Product Name', 'Product ID', 'Model Number', unitLabel, 'Quantity'];
-  const qty = Number(p.quantity) || 0;
-  const csvRows = units.length
-    ? units.map(u => [p.product_name || '', p.product_id || '', p.model_no || '', u, qty])
-    : [[p.product_name || '', p.product_id || '', p.model_no || '', '', qty]];
+  const columns = exportIdentityColumns([p]);
+  const header = [...columns.map(([label]) => label), unitLabel, 'Quantity'];
+  const identity = columns.map(([, value]) => value(p));
+  const qty = ivQty(p);
+  const csvRows = (units.length ? units : ['']).map(u => [...identity, u, qty]);
 
   const safeName = (p.product_name || 'product').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
   downloadCSV(header, csvRows, `product_${safeName}.csv`);
