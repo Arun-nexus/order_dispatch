@@ -611,14 +611,15 @@ function dvProductsTable(items, withPrice) {
       <td style="${td}"><strong>${dvEsc(it.product_name ?? '')}</strong><br><small style="color:#94a3b8;">${dvEsc([it.product_id && 'ID: ' + it.product_id, it.model_no && 'Model: ' + it.model_no].filter(Boolean).join(' \u00b7 '))}</small></td>
       <td style="${td}">${dvChips(it.serial_numbers) || '-'}</td>
       <td style="${td}">${qty}</td>
-      ${withPrice ? `<td style="${td}">${it.price !== undefined && it.price !== '' ? '\u20b9' + Number(it.price).toLocaleString('en-IN') : '-'}</td>
+      ${withPrice ? `<td style="${td}">${it.total_boxes || '-'}</td>
+      <td style="${td}">${it.price !== undefined && it.price !== '' ? '\u20b9' + Number(it.price).toLocaleString('en-IN') : '-'}</td>
       <td style="${td}">${it.tax_rate !== undefined && it.tax_rate !== '' ? it.tax_rate + '%' : '-'}</td>
       <td style="${td}"><strong>${line === null ? '-' : '\u20b9' + line.toLocaleString('en-IN')}</strong></td>` : ''}
     </tr>`;
   }).join('');
   return `<div style="border:1px solid #e2e8f0;border-radius:12px;overflow-x:auto;">
     <table style="width:100%;min-width:480px;border-collapse:collapse;font-size:13.5px;">
-      <thead><tr style="background:#eaf2ff;"><th style="${th}">Product</th><th style="${th}">Serial No(s)</th><th style="${th}">Qty</th>${withPrice ? `<th style="${th}">Price</th><th style="${th}">Tax</th><th style="${th}">Line Total</th>` : ''}</tr></thead>
+      <thead><tr style="background:#eaf2ff;"><th style="${th}">Product</th><th style="${th}">Serial No(s)</th><th style="${th}">Qty</th>${withPrice ? `<th style="${th}">Boxes</th><th style="${th}">Price</th><th style="${th}">Tax</th><th style="${th}">Line Total</th>` : ''}</tr></thead>
       <tbody>${rows}</tbody></table></div>`;
 }
 function dvTotalsBox(d) {
@@ -874,6 +875,17 @@ function openDispatchModal(row) {
         <input name="ship_address" placeholder="Ship To — Address" value="${String(shipVal.address ?? '').replace(/"/g, '&quot;')}">
       </div>
 
+      ${row.kind === 'order' && (row.data.items || []).length ? `
+      <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;max-height:220px;overflow-y:auto;">
+        <label style="font-size:12px;color:#64748b;">Boxes per piece *</label>
+        ${row.data.items.map((it, i) => `
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <div style="flex:1;min-width:0;font-size:13px;"><b>${dvEsc(it.product_name ?? '')}</b><br><small style="color:#64748b;">Qty: ${it.quantity ?? 0}</small></div>
+          <input type="number" min="0" step="any" class="dispBox" data-i="${i}" placeholder="Boxes / pc" value="${it.boxes_per_piece || ''}" required style="width:100px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+          <small class="dispBoxTot" data-i="${i}" style="width:64px;color:#64748b;">${it.total_boxes ? 'Total: ' + it.total_boxes : ''}</small>
+        </div>`).join('')}
+      </div>` : ''}
+
       <select name="mode_of_delivery" required>
         <option value="" disabled ${!existing?.mode_of_delivery ? 'selected' : ''}>Mode of Delivery</option>
         <option value="road" ${existing?.mode_of_delivery === 'road' ? 'selected' : ''}>Road</option>
@@ -902,6 +914,13 @@ function openDispatchModal(row) {
   content.querySelector('.close').addEventListener('click', () => modal.style.display = 'none');
   content.querySelector('.cancel-btn').addEventListener('click', () => modal.style.display = 'none');
 
+  const boxInputs = [...content.querySelectorAll('.dispBox')];
+  boxInputs.forEach(inp => inp.addEventListener('input', () => {
+    const qty = Number(row.data.items[inp.dataset.i].quantity) || 0;
+    const total = Number(inp.value) * qty;
+    content.querySelector(`.dispBoxTot[data-i="${inp.dataset.i}"]`).textContent = total > 0 ? 'Total: ' + Number(total.toFixed(2)) : '';
+  }));
+
   const shipCheck = content.querySelector('#shipDifferentCheck');
   const shipFields = content.querySelector('#shipToFields');
   shipCheck.addEventListener('change', () => {
@@ -912,6 +931,11 @@ function openDispatchModal(row) {
     e.preventDefault();
     const fd = new FormData(e.target);
     const shipDifferent = shipCheck.checked;
+
+    if (boxInputs.some(inp => !(Number(inp.value) > 0))) {
+      alert('Enter boxes per piece for every product.');
+      return;
+    }
 
     const imageFile = e.target.image.files[0];
     if (imageFile) {
@@ -930,7 +954,8 @@ function openDispatchModal(row) {
       dispatched_through: fd.get('dispatched_through').trim(),
       ship_to_different: shipDifferent,
       ship_to_address: shipDifferent ? { company_name: fd.get('ship_company_name') || '', address: fd.get('ship_address') || '' } : null,
-      image: imageDataUrl || null
+      image: imageDataUrl || null,
+      boxes_per_piece: boxInputs.map(inp => Number(inp.value))
     });
 
     const endpoint = row.kind === 'order'

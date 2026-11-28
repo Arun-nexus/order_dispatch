@@ -1014,7 +1014,7 @@ function openViewOrderModal(o) {
           <td>${productCellHtml(it)}</td>
           <td>${serials || '<span class="ov-sub">—</span>'}</td>
           <td>${it.quantity ?? 0}</td>
-          <td>${it.total_boxes ?? '—'}</td>
+          <td>${it.total_boxes || '—'}</td>
           <td>${orderMoney(it.price)}</td>
           <td>${it.tax_rate ?? 0}%</td>
           <td><strong>${orderMoney(lineTotal)}</strong></td>
@@ -1621,10 +1621,6 @@ function renderPaymentStep() {
             <label style="flex:1;font-size:11px;color:var(--text-muted);">Tax % / pc
               <input type="number" min="0" step="any" class="wizTax" data-idx="${idx}" value="${i.tax_rate}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
             </label>
-            <label style="flex:1;font-size:11px;color:var(--text-muted);">Boxes / pc *
-              <input type="number" min="0" step="any" class="wizBox" data-idx="${idx}" value="${i.boxes_per_piece ?? ''}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
-              <span class="wizBoxTot" data-idx="${idx}">${i.boxes_per_piece ? 'Total: ' + Number((i.boxes_per_piece * i.quantity).toFixed(2)) : ''}</span>
-            </label>
             <div style="flex:1;font-size:11px;color:var(--text-muted);">Line (excl. tax)
               <div class="wizLine" data-idx="${idx}" style="padding:6px 0;font-size:13px;color:var(--text-primary);">₹${(i.price * i.quantity).toFixed(2)}</div>
             </div>
@@ -1702,13 +1698,6 @@ function renderPaymentStep() {
   document.querySelectorAll('.wizTax').forEach(inp => inp.addEventListener('input', () => {
     cartItems[Number(inp.dataset.idx)].tax_rate = Math.max(0, Number(inp.value) || 0);
   }));
-  document.querySelectorAll('.wizBox').forEach(inp => inp.addEventListener('input', () => {
-    const it = cartItems[Number(inp.dataset.idx)];
-    it.boxes_per_piece = Math.max(0, Number(inp.value) || 0);
-    const t = document.querySelector(`.wizBoxTot[data-idx="${inp.dataset.idx}"]`);
-    if (t) t.textContent = it.boxes_per_piece ? 'Total: ' + Number((it.boxes_per_piece * it.quantity).toFixed(2)) : '';
-  }));
-
   discountInput.addEventListener('input', e => { wiz.discount = Number(e.target.value) || 0; refreshGrandTotal(); });
 
   document.querySelectorAll('[name="warrantyChoice"]').forEach(r => r.addEventListener('change', () => {
@@ -1740,9 +1729,6 @@ async function loadReferenceUsers() {
 }
 
 function proceedToSerialReview(modeSelect, extraBox) {
-  const noBox = Object.values(wiz.cart).find(i => !i.boxes_per_piece || i.boxes_per_piece <= 0);
-  if (noBox) { alert('Enter boxes per piece for ' + noBox.product_name + '.'); return; }
-
   const mode = modeSelect.value;
   if (!mode) { alert('Please select a payment mode.'); return; }
 
@@ -1884,7 +1870,7 @@ async function finalizeSubmitOrder() {
       const chosen = (wiz.serialChoices[rowKey] || []).filter(Boolean);
       return {
         product_id: i.product_id, product_name: i.product_name, model_no: i.model_no || '',
-        quantity: i.quantity, price: i.price, tax_rate: i.tax_rate, boxes_per_piece: i.boxes_per_piece,
+        quantity: i.quantity, price: i.price, tax_rate: i.tax_rate,
         serial_numbers: chosen.length === i.quantity ? chosen : []
       };
     }),
@@ -2091,49 +2077,10 @@ function renderOrderRequests(requests) {
   box.querySelectorAll('.oreq-reject').forEach(btn => btn.addEventListener('click', () => rejectOrderRequest(btn.dataset.id)));
 }
 
-function askBoxesPerPiece(items) {
-  return new Promise(resolve => {
-    const wrap = document.createElement('div');
-    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:3000;';
-    wrap.innerHTML = `<div style="background:#fff;border-radius:14px;padding:22px;width:min(520px,94vw);max-height:90vh;overflow:auto;">
-      <h3 style="margin:0 0 6px;">Boxes per piece</h3>
-      <p style="margin:0 0 12px;color:#64748b;font-size:13px;">Enter how many boxes each piece of a product takes.</p>
-      ${items.map((it, i) => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-        <div style="flex:1;"><b>${escapeHtml(it.product_name ?? '')}</b><br><small style="color:#64748b;">Qty: ${it.quantity ?? 0}</small></div>
-        <input type="number" min="0" step="any" class="bpp" data-i="${i}" placeholder="Boxes / pc" style="width:110px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
-        <small class="bppTot" data-i="${i}" style="width:70px;color:#64748b;"></small></div>`).join('')}
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-        <button type="button" class="bppCancel" style="padding:8px 14px;border:none;border-radius:8px;background:#eef1f6;cursor:pointer;">Cancel</button>
-        <button type="button" class="bppOk" style="padding:8px 14px;border:none;border-radius:8px;background:#1665ff;color:#fff;cursor:pointer;">Approve</button>
-      </div></div>`;
-    document.body.appendChild(wrap);
-    const done = v => { wrap.remove(); resolve(v); };
-    wrap.addEventListener('input', e => {
-      const inp = e.target.closest('.bpp');
-      if (!inp) return;
-      const t = wrap.querySelector(`.bppTot[data-i="${inp.dataset.i}"]`);
-      const v = Number(inp.value) * (Number(items[inp.dataset.i].quantity) || 0);
-      t.textContent = v > 0 ? 'Total: ' + Number(v.toFixed(2)) : '';
-    });
-    wrap.querySelector('.bppCancel').onclick = () => done(null);
-    wrap.querySelector('.bppOk').onclick = () => {
-      const vals = [...wrap.querySelectorAll('.bpp')].map(i => Number(i.value));
-      if (vals.some(v => !(v > 0))) { alert('Enter boxes per piece for every product.'); return; }
-      done(vals);
-    };
-  });
-}
-
 async function approveOrderRequest(requestId) {
-  const req = pendingOrderRequests.find(r => r.request_id === requestId);
-  const boxes = await askBoxesPerPiece(req?.details?.items || []);
-  if (!boxes) return;
+  if (!confirm('Approve this order request?')) return;
   try {
-    const res = await apiFetch(`/request/approve/${requestId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ boxes_per_piece: boxes })
-    });
+    const res = await apiFetch(`/request/approve/${requestId}`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || 'approval failed');
     await loadOrders();

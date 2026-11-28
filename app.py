@@ -291,6 +291,7 @@ class DispatchConfirmRequest(BaseModel):
     ship_to_different: bool = False
     ship_to_address: Optional[dict]= None   
     image: Optional[str] = None   
+    boxes_per_piece: list[float] = []   # order dispatch: one value per item, in item order
 
 
 class ServicePartUsed(BaseModel):
@@ -1333,10 +1334,6 @@ def create_order(request: CreateOrderRequest, user: dict = Depends(require_role(
     reference = (request.reference or "").strip()
     if not reference:
         raise HTTPException(status_code=400, detail="reference is required, please select a reference user")
-    for it in request.items:
-        if not it.boxes_per_piece or it.boxes_per_piece <= 0:
-            raise HTTPException(status_code=400, detail=f"enter boxes per piece for {it.product_name}")
-        it.total_boxes = round(it.boxes_per_piece * it.quantity, 2)
     try:
         if not mongodbclient().get_data(collection_name=ACCOUNTS_COLLECTION, query={"username": reference}):
             raise HTTPException(status_code=400, detail="selected reference user does not exist")
@@ -1640,6 +1637,11 @@ def update_order(order_id: str, updated_value: OrderUpdatedValue, user: dict = D
                 except (TypeError, ValueError):
                     orig_idx = i
                 kept_indices.add(orig_idx)
+                # the edit form does not send box counts - keep the ones saved at dispatch
+                per_piece = old_items[orig_idx].get("boxes_per_piece", 0) if 0 <= orig_idx < len(old_items) else 0
+                if per_piece:
+                    item["boxes_per_piece"] = per_piece
+                    item["total_boxes"] = round(per_piece * float(item.get("quantity", 0) or 0), 2)
                 new_items.append((orig_idx, item))
 
             edit_taken = {}
@@ -3385,6 +3387,13 @@ def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user:
         if not matches:
             raise HTTPException(status_code=404, detail="order not found")
         order = matches[0]
+        order_items = order.get("items", [])
+        boxes = request.boxes_per_piece
+        if len(boxes) != len(order_items) or any(b <= 0 for b in boxes):
+            raise HTTPException(status_code=400, detail="enter boxes per piece for every product")
+        for it, b in zip(order_items, boxes):
+            it["boxes_per_piece"] = b
+            it["total_boxes"] = round(b * it.get("quantity", 0), 2)
         customer = order.get("customer", {})
         dispatch_info = {
             "docket_no": request.docket_no,
@@ -3399,7 +3408,7 @@ def confirm_order_dispatch(order_id: str, request: DispatchConfirmRequest, user:
             "dispatched_by": user["username"],
             "dispatched_at": datetime.now(timezone.utc).isoformat()
         }
-        update_values = {"dispatch": dispatch_info}
+        update_values = {"dispatch": dispatch_info, "items": order_items}
         if request.docket_no and order.get("status") == "processing":
             update_values["status"] = "dispatched"
         db.update(collection_name=ORDERS_COLLECTION, query={"order_id": order_id}, update_values=update_values)
@@ -6596,7 +6605,6 @@ class RequestApproveModel(BaseModel):
     invoice_date: str = ""
     payment_mode: str = ""          # same modes as a normal order (Credit / Partial / UPI ...)
     payment_details: dict = {}
-    boxes_per_piece: list[float] = []   # order requests: one value per item, in item order
 
 
 class ReturnRequestModel(BaseModel):
@@ -7125,13 +7133,6 @@ def _approve_request_locked(request_id: str, body, user: dict):
 
         if req["request_type"] == "order":
             details = req["details"]
-            order_items = details.get("items", [])
-            boxes = (body.boxes_per_piece if body else []) or []
-            if len(boxes) != len(order_items) or any(b <= 0 for b in boxes):
-                raise HTTPException(status_code=400, detail="enter boxes per piece for every product")
-            for it, b in zip(order_items, boxes):
-                it["boxes_per_piece"] = b
-                it["total_boxes"] = round(b * it.get("quantity", 0), 2)
             order_id = _fulfill_order(
                 customer_id=details.get("customer_id", ""),
                 customer=details.get("customer", {}),
